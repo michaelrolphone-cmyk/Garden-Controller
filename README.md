@@ -125,12 +125,13 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 - `POST /api/weather/refresh` - force refresh external weather datasets.
 - `POST /api/microcontroller/relays/state` - microcontroller publishes current relay on/off states.
 - `POST /api/microcontroller/schedules` - microcontroller publishes current relay schedules.
-- `POST /api/schedules` - operator/API publishes schedule updates and queues them for the microcontroller.
+- `POST /api/schedules` - operator/API publishes a full daily schedule list replacement and queues one `schedule_update` for the microcontroller (max 64 entries, channels 1-5, repeated channels allowed).
   - body:
     ```json
     {
       "schedules": [
-        { "channel": 4, "zone": "Greenhouse", "startTime": "07:00", "durationSeconds": 300 }
+        { "id": 0, "channel": 1, "zone": "Zone 1", "enabled": true, "startTime": "06:00", "durationSeconds": 600 },
+        { "id": 1, "channel": 1, "zone": "Zone 1", "enabled": true, "startTime": "15:30", "durationSeconds": 420 }
       ],
       "requestedBy": "operator"
     }
@@ -180,3 +181,22 @@ Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are e
 npm start   # start web server
 npm test    # run unit tests
 ```
+
+
+## Multiple daily schedules
+
+Schedules are no longer one-per-zone.
+
+The `schedules` array is a full daily schedule list. The same zone/channel may appear multiple times per day.
+
+```json
+{
+  "schedules": [
+    { "channel": 1, "zone": "Zone 1", "enabled": true, "startTime": "06:00", "durationSeconds": 600 },
+    { "channel": 1, "zone": "Zone 1", "enabled": true, "startTime": "15:30", "durationSeconds": 420 },
+    { "channel": 2, "zone": "Zone 2", "enabled": true, "startTime": "06:15", "durationSeconds": 600 }
+  ]
+}
+```
+
+`POST /api/schedules` replaces the firmware’s active daily schedule list.
