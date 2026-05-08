@@ -1,0 +1,102 @@
+openapi: 3.0.3
+info:
+  title: Garden Controller API
+  version: 1.0.0
+servers:
+  - url: /
+components:
+  securitySchemes:
+    ApiToken:
+      type: apiKey
+      in: header
+      name: x-api-token
+    basicAuth:
+      type: http
+      scheme: basic
+  schemas:
+    Relay:
+      type: object
+      properties:
+        channel:
+          type: integer
+          minimum: 1
+          maximum: 6
+        state:
+          type: string
+          enum: [on, off]
+      required: [channel, state]
+    CommandCreate:
+      type: object
+      properties:
+        channel:
+          type: integer
+          minimum: 1
+          maximum: 6
+        action:
+          type: string
+          enum: [on, off, toggle]
+        requestedBy:
+          type: string
+      required: [channel, action]
+paths:
+  /health:
+    get:
+      responses:
+        '200':
+          description: OK
+  /api/relays:
+    get:
+      security:
+        - ApiToken: []
+      responses:
+        '200':
+          description: Current relay states
+  /api/commands:
+    post:
+      security:
+        - ApiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandCreate'
+      responses:
+        '201':
+          description: Command queued
+        '400':
+          description: Invalid payload
+  /api/queue/next:
+    get:
+      security:
+        - ApiToken: []
+      responses:
+        '200':
+          description: Next command for microcontroller
+        '204':
+          description: No pending command
+  /api/news:
+    get:
+      security:
+        - ApiToken: []
+      responses:
+        '200':
+          description: News list
+    post:
+      security:
+        - ApiToken: []
+      responses:
+        '201':
+          description: News created
+  /gui:
+    get:
+      security:
+        - basicAuth: []
+      responses:
+        '200':
+          description: Management GUI
+  /openapi.json:
+    get:
+      responses:
+        '200':
+          description: OpenAPI document as JSON
