@@ -428,7 +428,6 @@ function createApp(config = {}) {
     }
     const validSchedulesPayload =
       Array.isArray(schedules) &&
-      schedules.length > 0 &&
       schedules.every(
         (schedule) =>
           schedule &&
@@ -471,6 +470,38 @@ function createApp(config = {}) {
     state.queue.push(command);
     wakePendingPolls();
     return res.status(201).json({ schedules: state.schedules, command });
+  });
+
+
+
+  app.delete('/api/schedules/:id', requireApiToken, (req, res) => {
+    const scheduleId = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(scheduleId)) {
+      return res.status(400).json({ error: 'Invalid schedule id' });
+    }
+
+    const remainingSchedules = state.schedules.filter((schedule, index) => {
+      const currentId = Number.isInteger(schedule?.id) ? schedule.id : index;
+      return currentId !== scheduleId;
+    });
+
+    if (remainingSchedules.length === state.schedules.length) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    state.schedules = remainingSchedules;
+    const command = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'schedule_update',
+      schedules: remainingSchedules,
+      requestedBy: req.body.requestedBy || 'api',
+      createdAt: new Date().toISOString(),
+      status: 'queued'
+    };
+    state.queue.push(command);
+    wakePendingPolls();
+
+    return res.json({ schedules: state.schedules, command });
   });
 
   app.post('/api/commands', requireApiToken, (req, res) => {
@@ -789,7 +820,7 @@ function createApp(config = {}) {
           .join('')}</div>`
       : '<p>No schedules configured.</p>';
     const schedulesMarkup = state.schedules.length ? `<ul>${state.schedules.map((schedule) => `<li>${formatScheduleLabel(schedule)}</li>`).join('')}</ul>` : '';
-    const defaultSchedules = parsedSchedules.length ? parsedSchedules : [{ id: 0, channel: 1, zone: 'Zone 1', enabled: true, startTime: '06:00', durationSeconds: 600 }];
+    const defaultSchedules = parsedSchedules;
     const sensorDataMarkup = renderSensorDataMarkup(state.latestSensorData, state.deviceTelemetry);
     const telemetryMarkup = renderTelemetryMarkup(state.deviceTelemetry);
 
@@ -1090,7 +1121,7 @@ function createApp(config = {}) {
     }
 
     const scheduleRows = Object.keys(rowsByIndex).sort((a,b)=>Number(a)-Number(b)).map((key) => rowsByIndex[key]);
-    if (!scheduleRows.length || scheduleRows.length > MAX_DAILY_SCHEDULES) return res.status(400).send('Invalid schedule payload');
+    if (scheduleRows.length > MAX_DAILY_SCHEDULES) return res.status(400).send('Invalid schedule payload');
 
     const schedules = scheduleRows.map((row, index) => ({
       id: Number.isInteger(Number.parseInt(row.id, 10)) ? Number.parseInt(row.id, 10) : index,
