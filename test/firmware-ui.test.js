@@ -19,6 +19,10 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain('Garden Zone Map');
     expect(ino).toContain('Schedule Timeline');
     expect(ino).toContain("setInterval(()=>refresh(false),1000)");
+    expect(ino).toContain("<b>Spigots</b>");
+    expect(ino).toContain("const spigotsActive=!!(s.spigotRun&&s.spigotRun.active);");
+    expect(ino).toContain("id=\"m-spigots\"");
+    expect(ino).toContain("cmd('/api/spigots-run?minutes='+encodeURIComponent(document.getElementById('m-spigots').value))");
   });
 
   test('admin ui maps zone activity, color-codes map zones, and provides schedule CRUD inputs', () => {
@@ -83,6 +87,8 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain("document.getElementById('remoteDeviceId').value=s.remoteDeviceId||''");
     expect(ino).toContain("document.getElementById('remoteApiKey').value=s.remoteApiKey||''");
     expect(ino).toContain("cmd('/api/manual-run?zone=${z.zone}&minutes='+encodeURIComponent(document.getElementById('m${z.zone}').value))");
+    expect(ino).toContain("rg.innerHTML=spigotCard+zoneCards");
+    expect(ino).toContain('<div class="actions header-actions"><button onclick="syncTime()">Sync Phone Time</button><button onclick="cmd(\'/api/alloff\')">Turn Off All Relays</button></div>');
     expect(ino).toContain('doc["staSsid"] = staSsid;');
     expect(ino).toContain('doc["remoteApiBase"] = remoteApiBase;');
   });
