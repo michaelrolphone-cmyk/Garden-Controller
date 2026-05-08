@@ -878,7 +878,7 @@ function createApp(config = {}) {
         <div id="schedule-timeline">${scheduleTimelineMarkup}</div><details class="raw-schedules"><summary>Raw schedule list</summary><div id="raw-schedules">${schedulesMarkup}</div></details>
         <h3>Update schedules</h3>
         <form method="post" action="/gui/schedules">
-          <table class="schedule-table"><thead><tr><th>Enabled</th><th>Zone</th><th>Channel</th><th>Start Time</th><th>Duration Minutes</th></tr></thead><tbody>${defaultSchedules.map((schedule, index) => `<tr><td><input name="schedule[${index}][enabled]" type="checkbox" ${schedule.enabled === false ? '' : 'checked'} /></td><td><input name="schedule[${index}][zone]" value="${schedule.zone || `Zone ${schedule.channel}`}" required /></td><td><input name="schedule[${index}][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="${schedule.channel || 1}" required /></td><td><input name="schedule[${index}][startTime]" type="time" value="${schedule.startTime || '06:00'}" required /></td><td><input name="schedule[${index}][durationMinutes]" type="number" min="1" max="240" value="${Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60))}" required /></td></tr>`).join('')}</tbody></table>
+          <table class="schedule-table"><thead><tr><th>Enabled</th><th>Zone</th><th>Channel</th><th>Start Time</th><th>Duration Minutes</th></tr></thead><tbody>${defaultSchedules.map((schedule, index) => `<tr><td><input name="schedule[${index}][id]" type="hidden" value="${Number.isInteger(schedule.id) ? schedule.id : index}" /><input name="schedule[${index}][enabled]" type="checkbox" ${schedule.enabled === false ? '' : 'checked'} /></td><td><input name="schedule[${index}][zone]" value="${schedule.zone || `Zone ${schedule.channel}`}" required /></td><td><input name="schedule[${index}][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="${schedule.channel || 1}" required /></td><td><input name="schedule[${index}][startTime]" type="time" value="${schedule.startTime || '06:00'}" required /></td><td><input name="schedule[${index}][durationMinutes]" type="number" min="1" max="240" value="${Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60))}" required /></td></tr>`).join('')}</tbody></table>
           <button type="submit">Save schedules</button>
         </form>
       </section>
@@ -1061,7 +1061,7 @@ function createApp(config = {}) {
     if (!scheduleRows.length || scheduleRows.length > MAX_DAILY_SCHEDULES) return res.status(400).send('Invalid schedule payload');
 
     const schedules = scheduleRows.map((row, index) => ({
-      id: index,
+      id: Number.isInteger(Number.parseInt(row.id, 10)) ? Number.parseInt(row.id, 10) : index,
       channel: Number.parseInt(row.channel, 10),
       zone: typeof row.zone === 'string' ? row.zone.trim() : '',
       enabled: row.enabled !== undefined,

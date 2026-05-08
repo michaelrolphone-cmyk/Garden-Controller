@@ -414,6 +414,39 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('Duration Minutes');
   });
 
+  test('gui schedule form preserves schedule ids when editing existing entries', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/microcontroller/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [{ id: 11, channel: 2, zone: 'Herbs', enabled: true, startTime: '07:30', durationSeconds: 720 }] });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('name="schedule[0][id]" type="hidden" value="11"');
+
+    const postRes = await request(app)
+      .post('/gui/schedules')
+      .set('authorization', auth)
+      .send({
+        'schedule[0][id]': '11',
+        'schedule[0][enabled]': 'on',
+        'schedule[0][channel]': '2',
+        'schedule[0][zone]': 'Herbs',
+        'schedule[0][startTime]': '08:00',
+        'schedule[0][durationMinutes]': '10'
+      });
+    expect(postRes.status).toBe(303);
+
+    const stateRes = await request(app).get('/api/state').set('x-api-token', token);
+    expect(stateRes.body.schedules[0].id).toBe(11);
+    expect(stateRes.body.schedules[0].startTime).toBe('08:00');
+
+    const queuedRes = await request(app).get('/api/queue/next').set('x-api-token', token);
+    expect(queuedRes.status).toBe(200);
+    expect(queuedRes.body.command.schedules[0].id).toBe(11);
+  });
+
   test('gui map marks active zones from reported relay state', async () => {
     const app = build();
 
