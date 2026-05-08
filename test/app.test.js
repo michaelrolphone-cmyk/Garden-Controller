@@ -235,9 +235,12 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain("setInterval(refreshState, 1000);");
     expect(guiRes.text).toContain('Castle Hills Garden Manager');
     expect(guiRes.text).toContain('grid-template-columns: 1fr 2fr');
-    expect(guiRes.text).not.toContain('id="zone-6"');
+    expect(guiRes.text).toContain('id="zone-2"');
     expect(guiRes.text).toContain('zone-theme-1');
-    expect(guiRes.text).not.toContain('Zone 6</span>');
+    expect(guiRes.text).toContain('id="zone-4a"');
+    expect(guiRes.text).toContain('id="zone-4b"');
+    expect(guiRes.text).toContain("{1:'zone-1',2:'zone-2',3:'zone-3',4:'zone-4a zone-4b',5:'zone-5'}");
+    expect(guiRes.text).not.toContain('Zone 6');
     expect(guiRes.text).toContain('.linework { stroke: rgba(29, 78, 216, 0.35); fill: none;');
     expect(guiRes.text).toContain('data-active="false"');
     expect(guiRes.text).toContain('/gui/relays/1/on');
@@ -342,13 +345,13 @@ describe('garden controller api', () => {
 
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
-    expect(guiRes.text).toContain('id="zone-2" class="zone zone-theme-4 zone-active" data-active="true"');
-    expect(guiRes.text).toContain('id="zone-3" class="zone zone-theme-1 " data-active="false"');
+    expect(guiRes.text).toContain('id="zone-2" class="zone zone-theme-2 zone-active" data-active="true"');
+    expect(guiRes.text).toContain('id="zone-1" class="zone zone-theme-1 " data-active="false"');
     expect(guiRes.text).toContain('filter: saturate(1.4) brightness(1.15) drop-shadow(0 0 18px rgba(var(--zone-color-rgb, 62, 184, 255), 0.72));');
   });
 
 
-  test('gui map maps reported channel 4 to visual zones 1 and 2', async () => {
+  test('gui map maps reported channel 4 to both zone 4 polygons', async () => {
     const app = build();
 
     await request(app)
@@ -358,8 +361,8 @@ describe('garden controller api', () => {
 
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
-    expect(guiRes.text).toContain('id="zone-1" class="zone zone-theme-4 zone-active" data-active="true"');
-    expect(guiRes.text).toContain('id="zone-2" class="zone zone-theme-4 zone-active" data-active="true"');
+    expect(guiRes.text).toContain('id="zone-4a" class="zone zone-theme-4 zone-active" data-active="true"');
+    expect(guiRes.text).toContain('id="zone-4b" class="zone zone-theme-4 zone-active" data-active="true"');
     expect(guiRes.text).toContain("flatMap((relay) => zoneShapeIdsForChannel(relay.channel))");
   });
 

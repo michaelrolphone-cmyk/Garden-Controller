@@ -135,11 +135,11 @@ function createRelayCommand({ channel, action, requestedBy }) {
 
 function zoneShapeIdForChannel(channel) {
   const mapping = {
-    1: 'zone-3',
+    1: 'zone-1',
     2: 'zone-2',
-    3: 'zone-5',
-    4: 'zone-1 zone-2',
-    5: 'zone-4'
+    3: 'zone-3',
+    4: 'zone-4a zone-4b',
+    5: 'zone-5'
   };
   return mapping[channel] || `zone-${channel}`;
 }
@@ -808,11 +808,12 @@ function createApp(config = {}) {
           <h2>Garden Zone Map</h2>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 295.743 295.482" role="img" aria-label="Garden watering zones">
             <g class="linework"><polyline points="10,266.311 251.526,274.667"/><line x1="285.743" y1="285.482" x2="282.082" y2="191.277"/><polyline points="282.082,191.277 276.705,168.862 277.246,95.213 277.7,15.387"/><polyline points="13.295,258.387 35.211,10 37.872,11.914 276.96,14.582"/></g>
-            <polygon id="zone-1" class="zone zone-theme-4 ${activeZoneIds.includes('zone-1') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-1')}" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/>
-            <polygon id="zone-2" class="zone zone-theme-4 ${activeZoneIds.includes('zone-2') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-2')}" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/>
-            <polygon id="zone-3" class="zone zone-theme-1 ${activeZoneIds.includes('zone-3') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-3')}" points="205.581,96.842 264.287,97.694 263.108,173.173 198.935,169.661 205.581,96.842"/>
-            <polygon id="zone-4" class="zone zone-theme-5 ${activeZoneIds.includes('zone-4') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-4')}" points="32,46.388 46.493,52.635 95.676,139.247 128.342,140.128 127.534,159.189 22.68,152.017 32,46.388"/>
-            <polygon id="zone-5" class="zone zone-theme-3 ${activeZoneIds.includes('zone-5') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-5')}" points="152.903,89.893 152.691,13.195 50.949,12.06 136.836,89.869 152.903,89.893"/>
+            <polygon id="zone-4b" class="zone zone-theme-4 ${activeZoneIds.includes('zone-4b') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-4b')}" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/>
+            <polygon id="zone-4a" class="zone zone-theme-4 ${activeZoneIds.includes('zone-4a') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-4a')}" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/>
+            <polygon id="zone-1" class="zone zone-theme-1 ${activeZoneIds.includes('zone-1') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-1')}" points="205.581,96.842 264.287,97.694 263.108,173.173 198.935,169.661 205.581,96.842"/>
+            <polygon id="zone-5" class="zone zone-theme-5 ${activeZoneIds.includes('zone-5') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-5')}" points="32,46.388 46.493,52.635 95.676,139.247 128.342,140.128 127.534,159.189 22.68,152.017 32,46.388"/>
+            <polygon id="zone-3" class="zone zone-theme-3 ${activeZoneIds.includes('zone-3') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-3')}" points="152.903,89.893 152.691,13.195 50.949,12.06 136.836,89.869 152.903,89.893"/>
+            <polygon id="zone-2" class="zone zone-theme-2 ${activeZoneIds.includes('zone-2') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-2')}" points="249.304,90.041 249.095,14.271 152.691,13.195 152.903,89.893 249.304,90.041"/>
           </svg>
         </section>
         <section class="panel relay-section">
@@ -874,7 +875,7 @@ function createApp(config = {}) {
     </div>
     <script>
       const relayChannelCount = ${RELAY_CHANNELS};
-      const zoneShapeIdForChannel = (channel) => ({1:'zone-3',2:'zone-2',3:'zone-5',4:'zone-1 zone-2',5:'zone-4'}[channel] || ('zone-' + channel));
+      const zoneShapeIdForChannel = (channel) => ({1:'zone-1',2:'zone-2',3:'zone-3',4:'zone-4a zone-4b',5:'zone-5'}[channel] || ('zone-' + channel));
       const zoneShapeIdsForChannel = (channel) => String(zoneShapeIdForChannel(channel)).split(' ');
       const formatScheduleLabel = (schedule) => typeof schedule === 'string'
         ? schedule
