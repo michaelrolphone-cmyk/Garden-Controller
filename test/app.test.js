@@ -5,11 +5,10 @@ const yaml = require('js-yaml');
 const { createApp } = require('../src/app');
 
 describe('garden controller api', () => {
-  const token = 'test-token';
   const auth = `Basic ${Buffer.from('admin:password').toString('base64')}`;
 
   function build() {
-    return createApp({ apiToken: token, guiUsername: 'admin', guiPassword: 'password' }).app;
+    return createApp({ guiUsername: 'admin', guiPassword: 'password' }).app;
   }
 
   test('health check', async () => {
@@ -18,14 +17,13 @@ describe('garden controller api', () => {
     expect(res.body.ok).toBe(true);
   });
 
-  test('rejects unauthorized api calls', async () => {
+  test('allows api calls without api token header', async () => {
     const res = await request(build()).get('/api/relays');
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
   });
 
   test('publishes full controller state', async () => {
     const app = createApp({
-      apiToken: token,
       guiUsername: 'admin',
       guiPassword: 'password',
       state: {
@@ -39,7 +37,7 @@ describe('garden controller api', () => {
       }
     }).app;
 
-    const res = await request(app).get('/api/state').set('x-api-token', token);
+    const res = await request(app).get('/api/state');
     expect(res.status).toBe(200);
     expect(res.body.relays).toEqual([{ channel: 1, state: 'on' }, { channel: 2, state: 'off' }]);
     expect(res.body.queueDepth).toBe(1);
@@ -54,20 +52,19 @@ describe('garden controller api', () => {
     const app = build();
     const queueRes = await request(app)
       .post('/api/commands')
-      .set('x-api-token', token)
-      .send({ channel: 1, action: 'on' });
+            .send({ channel: 1, action: 'on' });
     expect(queueRes.status).toBe(201);
 
     const nextRes = await request(app)
       .get('/api/queue/next')
-      .set('x-api-token', token);
+      ;
     expect(nextRes.status).toBe(200);
     expect(nextRes.body.command.channel).toBe(1);
     expect(nextRes.body.relay.state).toBe('on');
 
     const empty = await request(app)
       .get('/api/queue/next')
-      .set('x-api-token', token);
+      ;
     expect(empty.status).toBe(204);
   });
 
@@ -76,8 +73,7 @@ describe('garden controller api', () => {
 
     const publishRes = await request(app)
       .post('/api/microcontroller/relays/state')
-      .set('x-api-token', token)
-      .send({
+            .send({
         relays: [
           { channel: 1, state: 'on' },
           { channel: 3, state: 'on' },
@@ -101,8 +97,7 @@ describe('garden controller api', () => {
 
     const publishRes = await request(app)
       .post('/api/microcontroller/relays/state')
-      .set('x-api-token', token)
-      .send({ relays: [{ channel: 0, state: 'on' }] });
+            .send({ relays: [{ channel: 0, state: 'on' }] });
 
     expect(publishRes.status).toBe(400);
   });
@@ -112,8 +107,7 @@ describe('garden controller api', () => {
 
     const publishRes = await request(app)
       .post('/api/microcontroller/schedules')
-      .set('x-api-token', token)
-      .send({
+            .send({
         schedules: [
           { channel: 1, zone: 'Herbs', startTime: '06:00', durationSeconds: 900 },
           { channel: 2, zone: 'Tomatoes', startTime: '06:20', durationSeconds: 600 }
@@ -126,7 +120,7 @@ describe('garden controller api', () => {
       { channel: 2, zone: 'Tomatoes', startTime: '06:20', durationSeconds: 600 }
     ]);
 
-    const stateRes = await request(app).get('/api/state').set('x-api-token', token);
+    const stateRes = await request(app).get('/api/state');
     expect(stateRes.status).toBe(200);
     expect(stateRes.body.schedules).toEqual([
       { channel: 1, zone: 'Herbs', startTime: '06:00', durationSeconds: 900 },
@@ -139,8 +133,7 @@ describe('garden controller api', () => {
 
     const publishRes = await request(app)
       .post('/api/microcontroller/schedules')
-      .set('x-api-token', token)
-      .send({ schedules: [{ channel: 2, startTime: '', durationSeconds: 0 }] });
+            .send({ schedules: [{ channel: 2, startTime: '', durationSeconds: 0 }] });
 
     expect(publishRes.status).toBe(400);
   });
@@ -149,8 +142,7 @@ describe('garden controller api', () => {
     const app = build();
     const res = await request(app)
       .post('/api/schedules')
-      .set('x-api-token', token)
-      .send({
+            .send({
         schedules: [{ channel: 4, zone: 'Greenhouse', startTime: '07:00', durationSeconds: 300 }],
         requestedBy: 'operator'
       });
@@ -159,7 +151,7 @@ describe('garden controller api', () => {
       { channel: 4, zone: 'Greenhouse', startTime: '07:00', durationSeconds: 300 }
     ]);
 
-    const nextRes = await request(app).get('/api/queue/next').set('x-api-token', token);
+    const nextRes = await request(app).get('/api/queue/next');
     expect(nextRes.status).toBe(200);
     expect(nextRes.body.command.type).toBe('schedule_update');
     expect(nextRes.body.command.schedules).toEqual([
@@ -170,8 +162,7 @@ describe('garden controller api', () => {
   test('validates command payload', async () => {
     const res = await request(build())
       .post('/api/commands')
-      .set('x-api-token', token)
-      .send({ channel: 9, action: 'on' });
+            .send({ channel: 9, action: 'on' });
     expect(res.status).toBe(400);
   });
 
@@ -179,13 +170,12 @@ describe('garden controller api', () => {
     const app = build();
     const createRes = await request(app)
       .post('/api/news')
-      .set('x-api-token', token)
-      .send({ title: 'Test', body: 'Body' });
+            .send({ title: 'Test', body: 'Body' });
     expect(createRes.status).toBe(201);
 
     const list = await request(app)
       .get('/api/news')
-      .set('x-api-token', token);
+      ;
     expect(list.status).toBe(200);
     expect(list.body.news).toHaveLength(1);
   });
@@ -204,7 +194,7 @@ describe('garden controller api', () => {
   });
 
   test('gui toggle control queues a command', async () => {
-    const app = createApp({ apiToken: token, guiUsername: 'admin', guiPassword: 'password' });
+    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' });
 
     const res = await request(app.app)
       .post('/gui/relays/1/toggle')
@@ -217,7 +207,7 @@ describe('garden controller api', () => {
   });
 
   test('gui can save schedule and queue schedule update', async () => {
-    const app = createApp({ apiToken: token, guiUsername: 'admin', guiPassword: 'password' });
+    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' });
 
     const res = await request(app.app)
       .post('/gui/schedules')
@@ -232,7 +222,7 @@ describe('garden controller api', () => {
   });
 
   test('gui auth supports colons in password from env-style credentials', async () => {
-    const app = createApp({ apiToken: token, guiUsername: 'admin', guiPassword: 'pa:ss:word' }).app;
+    const app = createApp({ guiUsername: 'admin', guiPassword: 'pa:ss:word' }).app;
     const colonPasswordAuth = `Basic ${Buffer.from('admin:pa:ss:word').toString('base64')}`;
 
     const authorized = await request(app).get('/gui').set('authorization', colonPasswordAuth);
@@ -243,7 +233,7 @@ describe('garden controller api', () => {
     process.env.GUI_USERNAME = 'test';
     process.env.GUI_PASSWORD = 'test';
 
-    const app = createApp({ apiToken: token }).app;
+    const app = createApp({}).app;
     const envAuth = `Basic ${Buffer.from('test:test').toString('base64')}`;
     const authorized = await request(app).get('/gui').set('authorization', envAuth);
 
@@ -258,7 +248,7 @@ describe('garden controller api', () => {
     process.env.GUI_USERNAME = '"quoted-user"';
     process.env.GUI_PASSWORD = "'quoted-pass'";
 
-    const app = createApp({ apiToken: token }).app;
+    const app = createApp({}).app;
     const envAuth = `Basic ${Buffer.from('quoted-user:quoted-pass').toString('base64')}`;
     const authorized = await request(app).get('/gui').set('authorization', envAuth);
 
@@ -268,28 +258,6 @@ describe('garden controller api', () => {
     delete process.env.GUI_PASSWORD;
   });
 
-
-  test('reads quoted API token from process.env', async () => {
-    process.env.API_TOKEN = '"quoted-token"';
-
-    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' }).app;
-    const authorized = await request(app).get('/api/state').set('x-api-token', 'quoted-token');
-
-    expect(authorized.status).toBe(200);
-
-    delete process.env.API_TOKEN;
-  });
-
-  test('reads API token with surrounding whitespace from process.env', async () => {
-    process.env.API_TOKEN = '  spaced-token  ';
-
-    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' }).app;
-    const authorized = await request(app).get('/api/state').set('x-api-token', 'spaced-token');
-
-    expect(authorized.status).toBe(200);
-
-    delete process.env.API_TOKEN;
-  });
 
   test('accepts lowercase basic auth scheme', async () => {
     const app = build();

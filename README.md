@@ -6,7 +6,6 @@ API and authenticated GUI for managing an **ESP32-S3-Relay-6CH** controller.
 
 1. Create a Heroku app and set stack/buildpack for Node.js.
 2. Set config vars:
-   - `API_TOKEN`
    - `GUI_USERNAME`
    - `GUI_PASSWORD`
 3. Deploy this repo.
@@ -21,12 +20,12 @@ web: node src/server.js
 
 ```bash
 npm install
-API_TOKEN=change-me GUI_USERNAME=admin GUI_PASSWORD=change-me npm start
+GUI_USERNAME=admin GUI_PASSWORD=change-me npm start
 ```
 
 ## API endpoints
 
-All `/api/*` endpoints require header: `x-api-token: <API_TOKEN>`.
+All `/api/*` endpoints are currently open and do not require an API key header.
 
 - `GET /health` - health check.
 - `GET /api/relays` - current relay channel states.
