@@ -40,6 +40,7 @@ static const uint8_t RGB_LED_PWM_BITS = 8;
 // Passive buzzer volume reduction by duty cycle.
 // Prior chirp used ~50% duty. 5% duty is roughly 1/10 of that drive time.
 static const uint8_t BUZZER_DUTY_PERCENT = 5;
+static const uint8_t RGB_LED_PINS[3] = {RGB_LED_PIN_R, RGB_LED_PIN_G, RGB_LED_PIN_B};
 
 WebServer server(80);
 DNSServer dns;
@@ -170,6 +171,28 @@ bool parseStartTimeToZone(const char* startTime, uint8_t& hourOut, uint8_t& minu
 bool ackRemoteCommand(const char* commandId, const char* status);
 void remoteTask(void* param);
 
+static inline uint8_t rgbChannelToPin(uint8_t channel) {
+  return RGB_LED_PINS[channel];
+}
+
+static inline void configureRgbPwmChannel(uint8_t pin, uint8_t channel) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  (void)channel;
+  ledcAttach(pin, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
+#else
+  ledcSetup(channel, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
+  ledcAttachPin(pin, channel);
+#endif
+}
+
+static inline void writeRgbPwmDuty(uint8_t channel, uint8_t duty) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcWrite(rgbChannelToPin(channel), duty);
+#else
+  ledcWrite(channel, duty);
+#endif
+}
+
 String two(int v) {
   return v < 10 ? "0" + String(v) : String(v);
 }
@@ -284,9 +307,9 @@ const ZoneColor ZONE_COLORS[ZONE_COUNT] = {
 };
 
 void setRgbLed(uint8_t r, uint8_t g, uint8_t b) {
-  ledcWrite(RGB_LED_CHANNEL_R, r);
-  ledcWrite(RGB_LED_CHANNEL_G, g);
-  ledcWrite(RGB_LED_CHANNEL_B, b);
+  writeRgbPwmDuty(RGB_LED_CHANNEL_R, r);
+  writeRgbPwmDuty(RGB_LED_CHANNEL_G, g);
+  writeRgbPwmDuty(RGB_LED_CHANNEL_B, b);
 }
 
 void updateZoneRgbLed() {
@@ -1824,12 +1847,9 @@ void setup() {
   pinMode(RGB_LED_PIN_R, OUTPUT);
   pinMode(RGB_LED_PIN_G, OUTPUT);
   pinMode(RGB_LED_PIN_B, OUTPUT);
-  ledcSetup(RGB_LED_CHANNEL_R, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
-  ledcSetup(RGB_LED_CHANNEL_G, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
-  ledcSetup(RGB_LED_CHANNEL_B, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
-  ledcAttachPin(RGB_LED_PIN_R, RGB_LED_CHANNEL_R);
-  ledcAttachPin(RGB_LED_PIN_G, RGB_LED_CHANNEL_G);
-  ledcAttachPin(RGB_LED_PIN_B, RGB_LED_CHANNEL_B);
+  configureRgbPwmChannel(RGB_LED_PIN_R, RGB_LED_CHANNEL_R);
+  configureRgbPwmChannel(RGB_LED_PIN_G, RGB_LED_CHANNEL_G);
+  configureRgbPwmChannel(RGB_LED_PIN_B, RGB_LED_CHANNEL_B);
   setRgbLed(0, 0, 0);
 
   for (uint8_t i = 0; i < RELAY_COUNT; i++) {
