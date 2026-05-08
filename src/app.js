@@ -299,14 +299,23 @@ function createApp(config = {}) {
 
   app.get('/gui', requireGuiAuth, (_req, res) => {
     const relayMarkup = state.desiredRelayState
-      .map(
-        (relay) => `<li>
-            Channel ${relay.channel}: <strong>${relay.state.toUpperCase()}</strong>
-            <form method="post" action="/gui/relays/${relay.channel}/toggle" style="display:inline; margin-left:8px;">
-              <button type="submit">Toggle</button>
+      .map((desiredRelay) => {
+        const reportedRelay = state.reportedRelayState[desiredRelay.channel - 1] || { state: 'unknown' };
+        const hasMismatch = desiredRelay.state !== reportedRelay.state;
+
+        return `<li>
+            Channel ${desiredRelay.channel}:
+            desired <strong>${desiredRelay.state.toUpperCase()}</strong> /
+            reported <strong>${reportedRelay.state.toUpperCase()}</strong>
+            ${hasMismatch ? '<span style="color:#b00020; font-weight:bold; margin-left:8px;">MISMATCH</span>' : ''}
+            <form method="post" action="/gui/relays/${desiredRelay.channel}/on" style="display:inline; margin-left:8px;">
+              <button type="submit" ${reportedRelay.state === 'on' ? 'disabled' : ''}>Turn ON</button>
             </form>
-          </li>`
-      )
+            <form method="post" action="/gui/relays/${desiredRelay.channel}/off" style="display:inline; margin-left:4px;">
+              <button type="submit" ${reportedRelay.state === 'off' ? 'disabled' : ''}>Turn OFF</button>
+            </form>
+          </li>`;
+      })
       .join('');
 
     const schedulesMarkup = state.schedules.length
@@ -321,7 +330,7 @@ function createApp(config = {}) {
   <body>
     <h1>ESP32-S3-Relay-6CH Controller</h1>
     <p>Current server time (UTC): <strong>${new Date().toISOString()}</strong></p>
-    <h2>Relay state</h2>
+    <h2>Relay states (desired vs reported)</h2>
     <ul>${relayMarkup}</ul>
     <h2>Schedules</h2>
     ${schedulesMarkup}
@@ -337,15 +346,21 @@ function createApp(config = {}) {
 </html>`);
   });
 
-  app.post('/gui/relays/:channel/toggle', requireGuiAuth, (req, res) => {
+  app.post('/gui/relays/:channel/:action', requireGuiAuth, (req, res) => {
     const channel = Number.parseInt(req.params.channel, 10);
+    const action = req.params.action;
+
     if (!Number.isInteger(channel) || channel < 1 || channel > RELAY_CHANNELS) {
       return res.status(400).send('Invalid relay channel');
     }
 
-    const command = createCommand({ channel, action: 'toggle', requestedBy: 'gui-web' });
+    if (action !== 'on' && action !== 'off') {
+      return res.status(400).send('Invalid relay action');
+    }
+
+    const command = createCommand({ channel, action, requestedBy: 'gui-web' });
     const desiredRelay = state.desiredRelayState[channel - 1];
-    desiredRelay.state = desiredRelay.state === 'on' ? 'off' : 'on';
+    desiredRelay.state = action;
     state.queue.push(command);
     return res.redirect(303, '/gui');
   });

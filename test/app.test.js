@@ -83,6 +83,39 @@ describe('garden controller api', () => {
     expect((await request(app).get('/gui').set('authorization', auth)).status).toBe(200);
   });
 
+
+  test('gui relay controls use explicit on/off and show desired/reported mismatch', async () => {
+    const app = build();
+
+    await request(app)
+      .post('/api/commands')
+      .set('x-api-token', token)
+      .send({ channel: 1, action: 'on' });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('Relay states (desired vs reported)');
+    expect(guiRes.text).toContain('desired <strong>ON</strong> /');
+    expect(guiRes.text).toContain('reported <strong>OFF</strong>');
+    expect(guiRes.text).toContain('MISMATCH');
+    expect(guiRes.text).toContain('/gui/relays/1/on');
+    expect(guiRes.text).toContain('/gui/relays/1/off');
+    expect(guiRes.text).not.toContain('/gui/relays/1/toggle');
+  });
+
+  test('gui relay action endpoint only allows explicit on/off actions', async () => {
+    const app = build();
+
+    const onRes = await request(app).post('/gui/relays/2/on').set('authorization', auth);
+    expect(onRes.status).toBe(303);
+
+    const relaysRes = await request(app).get('/api/relays').set('x-api-token', token);
+    expect(relaysRes.body.desiredRelays[1].state).toBe('on');
+    expect(relaysRes.body.reportedRelays[1].state).toBe('off');
+
+    const invalidRes = await request(app).post('/gui/relays/2/toggle').set('authorization', auth);
+    expect(invalidRes.status).toBe(400);
+  });
   test('openapi spec includes new endpoints', () => {
     const specPath = path.join(__dirname, '..', 'openapi.yaml');
     const spec = yaml.load(fs.readFileSync(specPath, 'utf8'));
