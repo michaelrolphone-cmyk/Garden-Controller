@@ -6,10 +6,6 @@ servers:
   - url: /
 components:
   securitySchemes:
-    ApiToken:
-      type: apiKey
-      in: header
-      name: x-api-token
     basicAuth:
       type: http
       scheme: basic
@@ -149,15 +145,11 @@ paths:
           description: OK
   /api/relays:
     get:
-      security:
-        - ApiToken: []
       responses:
         '200':
           description: Current relay states
   /api/state:
     get:
-      security:
-        - ApiToken: []
       responses:
         '200':
           description: Full controller state
@@ -167,8 +159,6 @@ paths:
                 $ref: '#/components/schemas/ControllerState'
   /api/commands:
     post:
-      security:
-        - ApiToken: []
       requestBody:
         required: true
         content:
@@ -182,8 +172,6 @@ paths:
           description: Invalid payload
   /api/microcontroller/relays/state:
     post:
-      security:
-        - ApiToken: []
       requestBody:
         required: true
         content:
@@ -197,8 +185,6 @@ paths:
           description: Invalid payload
   /api/microcontroller/schedules:
     post:
-      security:
-        - ApiToken: []
       requestBody:
         required: true
         content:
@@ -212,8 +198,6 @@ paths:
           description: Invalid payload
   /api/schedules:
     post:
-      security:
-        - ApiToken: []
       requestBody:
         required: true
         content:
@@ -227,8 +211,6 @@ paths:
           description: Invalid payload
   /api/queue/next:
     get:
-      security:
-        - ApiToken: []
       responses:
         '200':
           description: Next command for microcontroller
@@ -266,14 +248,10 @@ paths:
           description: No pending command
   /api/news:
     get:
-      security:
-        - ApiToken: []
       responses:
         '200':
           description: News list
     post:
-      security:
-        - ApiToken: []
       responses:
         '201':
           description: News created
