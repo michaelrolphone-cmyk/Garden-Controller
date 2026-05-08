@@ -78,4 +78,15 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain('doc["remoteApiBase"] = remoteApiBase;');
   });
 
+  test('config api still accepts and persists wifi and remote fields', () => {
+    expect(ino).toContain('void handleApiConfigSet()');
+    expect(ino).toContain('if (doc["staSsid"].is<const char*>()) strlcpy(staSsid, doc["staSsid"], sizeof(staSsid));');
+    expect(ino).toContain('if (doc["staPass"].is<const char*>()) strlcpy(staPass, doc["staPass"], sizeof(staPass));');
+    expect(ino).toContain('if (doc["remoteApiBase"].is<const char*>()) strlcpy(remoteApiBase, doc["remoteApiBase"], sizeof(remoteApiBase));');
+    expect(ino).toContain('if (doc["remoteDeviceId"].is<const char*>()) strlcpy(remoteDeviceId, doc["remoteDeviceId"], sizeof(remoteDeviceId));');
+    expect(ino).toContain('if (doc["remoteApiKey"].is<const char*>()) strlcpy(remoteApiKey, doc["remoteApiKey"], sizeof(remoteApiKey));');
+    expect(ino).toContain('if (strlen(staSsid) > 0) connectSta(false);');
+    expect(ino).toContain('saveConfig();');
+  });
+
 });
