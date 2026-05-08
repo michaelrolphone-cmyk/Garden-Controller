@@ -845,6 +845,18 @@ function createApp(config = {}) {
         </section>
       </div>
       <section class="panel schedule">
+        <h2>Schedules</h2>
+        <p>Schedules may only use zones 1-5. Channel 6 is master valve/spigots.</p>
+        <div id="schedule-timeline">${scheduleTimelineMarkup}</div><details class="raw-schedules"><summary>Raw schedule list</summary><div id="raw-schedules">${schedulesMarkup}</div></details>
+        <h3>Update schedules</h3>
+        <p>Edit existing rows and add new time slots. The GUI submits the complete schedule list on save.</p>
+        <form method="post" action="/gui/schedules">
+          <table class="schedule-table"><thead><tr><th>Enabled</th><th>Zone</th><th>Channel</th><th>Start Time</th><th>Duration Minutes</th></tr></thead><tbody id="schedule-form-body">${defaultSchedules.map((schedule, index) => `<tr><td><input name="schedule[${index}][id]" type="hidden" value="${Number.isInteger(schedule.id) ? schedule.id : index}" /><input name="schedule[${index}][enabled]" type="checkbox" ${schedule.enabled === false ? '' : 'checked'} /></td><td><input name="schedule[${index}][zone]" value="${schedule.zone || `Zone ${schedule.channel}`}" required /></td><td><input name="schedule[${index}][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="${schedule.channel || 1}" required /></td><td><input name="schedule[${index}][startTime]" type="time" value="${schedule.startTime || '06:00'}" required /></td><td><input name="schedule[${index}][durationMinutes]" type="number" min="1" max="240" value="${Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60))}" required /></td></tr>`).join('')}</tbody></table>
+          <button type="button" id="schedule-add-row">Add time slot</button>
+          <button type="submit">Save schedules</button>
+        </form>
+      </section>
+      <section class="panel schedule">
         <h2>Environmental Monitoring (${GARDEN_LOCATION.lat}, ${GARDEN_LOCATION.lon})</h2>
         <div class="env-grid">
           <article class="env-card">
@@ -871,18 +883,6 @@ function createApp(config = {}) {
             <ul class="env-links"><li><a href="${envFeeds.lidarMapUrl}" target="_blank" rel="noreferrer">USGS National Map (3DEP)</a></li></ul>
           </article>
         </div>
-      </section>
-      <section class="panel schedule">
-        <h2>Schedules</h2>
-        <p>Schedules may only use zones 1-5. Channel 6 is master valve/spigots.</p>
-        <div id="schedule-timeline">${scheduleTimelineMarkup}</div><details class="raw-schedules"><summary>Raw schedule list</summary><div id="raw-schedules">${schedulesMarkup}</div></details>
-        <h3>Update schedules</h3>
-        <p>Edit existing rows and add new time slots. The GUI submits the complete schedule list on save.</p>
-        <form method="post" action="/gui/schedules">
-          <table class="schedule-table"><thead><tr><th>Enabled</th><th>Zone</th><th>Channel</th><th>Start Time</th><th>Duration Minutes</th></tr></thead><tbody id="schedule-form-body">${defaultSchedules.map((schedule, index) => `<tr><td><input name="schedule[${index}][id]" type="hidden" value="${Number.isInteger(schedule.id) ? schedule.id : index}" /><input name="schedule[${index}][enabled]" type="checkbox" ${schedule.enabled === false ? '' : 'checked'} /></td><td><input name="schedule[${index}][zone]" value="${schedule.zone || `Zone ${schedule.channel}`}" required /></td><td><input name="schedule[${index}][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="${schedule.channel || 1}" required /></td><td><input name="schedule[${index}][startTime]" type="time" value="${schedule.startTime || '06:00'}" required /></td><td><input name="schedule[${index}][durationMinutes]" type="number" min="1" max="240" value="${Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60))}" required /></td></tr>`).join('')}</tbody></table>
-          <button type="button" id="schedule-add-row">Add time slot</button>
-          <button type="submit">Save schedules</button>
-        </form>
       </section>
     </div>
     <script>

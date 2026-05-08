@@ -310,6 +310,9 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('Stop Spigots');
     expect(guiRes.text).toContain('timeline-track');
     expect(guiRes.text).toContain('Raw schedule list');
+    expect(guiRes.text.indexOf('<h2>Schedules</h2>')).toBeGreaterThan(-1);
+    expect(guiRes.text.indexOf('Environmental Monitoring (43.665288, -116.259186)')).toBeGreaterThan(-1);
+    expect(guiRes.text.indexOf('<h2>Schedules</h2>')).toBeLessThan(guiRes.text.indexOf('Environmental Monitoring (43.665288, -116.259186)'));
     expect(guiRes.text).toContain('Environmental Monitoring (43.665288, -116.259186)');
     expect(guiRes.text).toContain('overlay=radar');
     expect(guiRes.text).toContain('overlay=satellite');
