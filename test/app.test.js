@@ -214,6 +214,47 @@ describe('garden controller api', () => {
     expect(res.body.command.schedules).toHaveLength(2);
   });
 
+
+  test('DELETE /api/schedules/:id removes a single schedule entry and queues schedule update', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [
+        { id: 11, channel: 1, zone: 'Zone 1', enabled: true, startTime: '06:00', durationSeconds: 600 },
+        { id: 12, channel: 1, zone: 'Zone 1', enabled: true, startTime: '15:30', durationSeconds: 420 }
+      ] });
+
+    const deleteRes = await request(app).delete('/api/schedules/11').set('x-api-token', token);
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.schedules).toHaveLength(1);
+    expect(deleteRes.body.schedules[0].id).toBe(12);
+    expect(deleteRes.body.command.type).toBe('schedule_update');
+    expect(deleteRes.body.command.schedules).toHaveLength(1);
+  });
+
+  test('POST /api/schedules accepts empty list to clear all schedules', async () => {
+    const app = build();
+    const res = await request(app).post('/api/schedules').set('x-api-token', token).send({ schedules: [] });
+    expect(res.status).toBe(201);
+    expect(res.body.schedules).toEqual([]);
+    expect(res.body.command.schedules).toEqual([]);
+  });
+
+  test('gui does not prefill phantom 6:00 zone 1 schedule when no schedules are configured', async () => {
+    const app = build();
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('No schedules configured.');
+    expect(guiRes.text).not.toContain('name="schedule[0][startTime]" type="time" value="06:00"');
+
+    const postRes = await request(app).post('/gui/schedules').set('authorization', auth).send({});
+    expect(postRes.status).toBe(303);
+
+    const stateRes = await request(app).get('/api/state').set('x-api-token', token);
+    expect(stateRes.body.schedules).toEqual([]);
+  });
+
   test('POST /api/schedules rejects oversized schedule list', async () => {
     const app = build();
     const schedules = Array.from({ length: 65 }, (_, index) => ({ channel: (index % 5) + 1, zone: `Zone ${(index % 5) + 1}`, startTime: '06:00', durationSeconds: 300 }));

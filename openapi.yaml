@@ -194,10 +194,22 @@ paths:
         '502': { description: Weather refresh failed }
   /api/schedules:
     post:
-      description: Replace the active daily schedule list with this ordered array. Multiple entries may use the same channel.
+      description: Replace the active daily schedule list with this ordered array. Multiple entries may use the same channel and an empty array clears all schedules.
       responses:
         '201': { description: Schedules stored and queued }
         '400': { description: Invalid payload }
+  /api/schedules/{id}:
+    delete:
+      description: Delete a single schedule entry by id and queue a full schedule_update command for firmware.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: Schedule removed and queued }
+        '400': { description: Invalid schedule id }
+        '404': { description: Schedule not found }
   /api/news:
     get:
       responses:
@@ -233,7 +245,7 @@ paths:
         '400': { description: Invalid relay channel }
   /gui/schedules:
     post:
-      description: Submit the full daily schedule list from the GUI (edited rows plus new time slots) so the queued schedule_update command always contains complete schedules.
+      description: Submit the full daily schedule list from the GUI (edited rows plus new time slots) so the queued schedule_update command always contains complete schedules. Submitting an empty form clears all schedules.
       security:
         - basicAuth: []
       requestBody:

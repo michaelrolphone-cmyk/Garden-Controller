@@ -125,7 +125,8 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 - `POST /api/weather/refresh` - force refresh external weather datasets.
 - `POST /api/microcontroller/relays/state` - microcontroller publishes current relay on/off states.
 - `POST /api/microcontroller/schedules` - microcontroller publishes current relay schedules.
-- `POST /api/schedules` - operator/API publishes a full daily schedule list replacement and queues one `schedule_update` for the microcontroller (max 64 entries, channels 1-5, repeated channels allowed).
+- `POST /api/schedules` - operator/API publishes a full daily schedule list replacement and queues one `schedule_update` for the microcontroller (max 64 entries, channels 1-5, repeated channels allowed, supports an empty list to clear schedules).
+- `DELETE /api/schedules/:id` - remove one scheduled time block by schedule `id` and queue a replacement `schedule_update` payload for firmware.
   - body:
     ```json
     {
@@ -157,7 +158,7 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
   - per-relay explicit ON/OFF controls (based on reported state)
 - `POST /gui/relays/:channel/on` - queue a timed ON command from GUI (`minutes`, default 15) and redirect to `/gui`.
 - `POST /gui/relays/:channel/off` - queue an OFF command from GUI and redirect to `/gui`.
-- `POST /gui/schedules` - submit zone schedules from GUI (`durationMinutes`) and queue a schedule update command for the microcontroller; include `schedule[n][id]` to amend existing schedule entries instead of creating new identifiers. The GUI always submits the full schedule list (existing rows + newly added time slots) so firmware receives complete daily schedules on each save.
+- `POST /gui/schedules` - submit zone schedules from GUI (`durationMinutes`) and queue a schedule update command for the microcontroller; include `schedule[n][id]` to amend existing schedule entries instead of creating new identifiers. The GUI always submits the full schedule list (existing rows + newly added time slots) so firmware receives complete daily schedules on each save, and accepts an empty submission to clear all schedules.
 - `POST /gui/spigots/run` - queue a timed spigot run from GUI (`minutes`, default 15) and redirect to `/gui`.
 - `POST /gui/spigots/stop` - queue a spigot stop command from GUI and redirect to `/gui`.
 - `GET /gui/state` - basic-auth protected JSON state payload used by the GUI for 1-second incremental updates of relay/schedule/hardware status, including `latestSensorData` and full `deviceTelemetry`.
