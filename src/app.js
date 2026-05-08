@@ -112,6 +112,7 @@ function renderTelemetryMarkup(deviceTelemetry) {
     ['Clock Valid', String(Boolean(deviceTelemetry.clockValid))],
     ['Last Command ID', deviceTelemetry.lastCommandId || 'n/a'],
     ['Current Run', deviceTelemetry.currentRun ? JSON.stringify(deviceTelemetry.currentRun) : 'none'],
+    ['Zone Runs', Array.isArray(deviceTelemetry.zoneRuns) && deviceTelemetry.zoneRuns.length ? JSON.stringify(deviceTelemetry.zoneRuns) : 'none'],
     ['Target Location', deviceTelemetry.targetLocation ? JSON.stringify(deviceTelemetry.targetLocation) : 'n/a'],
     ['Last Seen (UTC)', deviceTelemetry.lastSeenAt || 'n/a'],
     ['Last Seen', formatTimeSince(deviceTelemetry.lastSeenAt)]
@@ -644,6 +645,7 @@ function createApp(config = {}) {
       relays,
       schedules,
       currentRun,
+      zoneRuns,
       spigotRun,
       masterValveChannel,
       masterValveOn,
@@ -678,6 +680,7 @@ function createApp(config = {}) {
       relays: state.reportedRelayState,
       schedules: state.schedules,
       currentRun: currentRun || null,
+      zoneRuns: Array.isArray(zoneRuns) ? zoneRuns.map((run) => ({ ...run })) : [],
       masterValveChannel: masterValveChannel || MASTER_VALVE_CHANNEL,
       masterValveOn: Boolean(masterValveOn),
       spigotRun: spigotRun || null,
@@ -1077,6 +1080,7 @@ function createApp(config = {}) {
               ['Clock Valid', String(Boolean(telemetry.clockValid))],
               ['Last Command ID', telemetry.lastCommandId || 'n/a'],
               ['Current Run', telemetry.currentRun ? JSON.stringify(telemetry.currentRun) : 'none'],
+              ['Zone Runs', Array.isArray(telemetry.zoneRuns) && telemetry.zoneRuns.length ? JSON.stringify(telemetry.zoneRuns) : 'none'],
               ['Target Location', telemetry.targetLocation ? JSON.stringify(telemetry.targetLocation) : 'n/a'],
               ['Last Seen (UTC)', telemetry.lastSeenAt || 'n/a'],
               ['Last Seen', formatTimeSince(telemetry.lastSeenAt)]

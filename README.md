@@ -97,12 +97,16 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
       "homeIp": "192.168.1.42",
       "relays": [{ "channel": 1, "state": "on" }],
       "schedules": [{ "channel": 2, "zone": "Patio", "startTime": "06:45", "durationSeconds": 480 }],
-      "currentRun": { "channel": 2, "remainingSeconds": 120 },
+      "currentRun": { "active": true, "activeZoneCount": 2 },
+      "zoneRuns": [
+        { "zone": 1, "channel": 1, "active": true, "remainingSeconds": 500 },
+        { "zone": 2, "channel": 2, "active": true, "remainingSeconds": 300 }
+      ],
       "lastCommandId": "1715144970000-a1b2c3"
     }
     ```
   - server fills telemetry `lastSeenAt`.
-  - telemetry may include `targetLocation` and `sensorData` snapshots and preserves firmware-provided clock/connectivity fields (`epoch`, `localTime`, `localDate`, `homeWifiConnected`, `homeIp`).
+  - telemetry may include `targetLocation` and `sensorData` snapshots, supports `zoneRuns` for concurrent zone activity telemetry, and preserves firmware-provided clock/connectivity fields (`epoch`, `localTime`, `localDate`, `homeWifiConnected`, `homeIp`).
 - `POST /api/microcontroller/sensors` - firmware publishes local sensor/device observations.
   - body:
     ```json
