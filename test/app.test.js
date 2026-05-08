@@ -133,6 +133,7 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('Castle Hills Garden Manager');
     expect(guiRes.text).toContain('grid-template-columns: 1fr 2fr');
     expect(guiRes.text).toContain('id="zone-6"');
+    expect(guiRes.text).toContain('.linework { stroke: rgba(29, 78, 216, 0.35); fill: none;');
     expect(guiRes.text).toContain('data-active="false"');
     expect(guiRes.text).toContain('/gui/relays/1/on');
     expect(guiRes.text).toContain('/gui/relays/1/off');

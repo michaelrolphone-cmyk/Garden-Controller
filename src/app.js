@@ -444,7 +444,7 @@ function createApp(config = {}) {
       .map-wrap { padding: 16px; } .map-wrap p,.relay-section p{color:#4f6474;}
       .map-wrap svg { width: 100%; height: auto; background: linear-gradient(160deg, #dbeafe, #eff6ff); border-radius: 14px; }
       .zone { fill: rgba(62, 184, 255, 0.17); stroke: #0f766e; stroke-width: 2; } .zone-active { fill: rgba(16,185,129,.4); stroke:#059669; filter: drop-shadow(var(--glow)); }
-      .linework { stroke: rgba(29, 78, 216, 0.35); } .relay-section { padding: 16px; }
+      .linework { stroke: rgba(29, 78, 216, 0.35); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .relay-section { padding: 16px; }
       .relay-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
       .relay-card { border: 1px solid #d9e5ee; border-radius: 14px; padding: 12px; background: #fcfeff; }
       .relay-header, .relay-states, .relay-actions { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
