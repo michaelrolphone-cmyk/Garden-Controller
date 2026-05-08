@@ -32,6 +32,7 @@ static const bool ENABLE_BUZZER = true;
 static const uint8_t BUZZER_PIN = 21;
 static const uint8_t RGB_LED_PIN = 38;
 static const uint8_t RGB_LED_COUNT = 1;
+static const uint8_t RGB_LED_BRIGHTNESS = 64;
 // Passive buzzer volume reduction by duty cycle.
 // Prior chirp used ~50% duty. 5% duty is roughly 1/10 of that drive time.
 static const uint8_t BUZZER_DUTY_PERCENT = 5;
@@ -1821,6 +1822,7 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
   statusPixel.begin();
+  statusPixel.setBrightness(RGB_LED_BRIGHTNESS);
   statusPixel.clear();
   statusPixel.show();
 
