@@ -97,18 +97,20 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 ## GUI endpoints
 
 - `GET /gui` - basic-auth protected management page showing:
-  - current desired relay state
+  - per-channel desired relay state and reported relay state
+  - mismatch indicator when desired and reported differ
   - current server UTC time
   - schedules list
-  - per-relay toggle controls
-- `POST /gui/relays/:channel/toggle` - queue a toggle command from GUI and redirect to `/gui`.
+  - per-relay explicit ON/OFF controls (based on reported state)
+- `POST /gui/relays/:channel/on` - queue an ON command from GUI and redirect to `/gui`.
+- `POST /gui/relays/:channel/off` - queue an OFF command from GUI and redirect to `/gui`.
 - `POST /gui/schedules` - submit a zone schedule from GUI and queue a schedule update command for the microcontroller.
 
 Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are entered in Heroku with surrounding quotes, the app normalizes them automatically.
 
 ## Microcontroller polling + acknowledgement flow
 
-1. GUI/API client queues command using `POST /api/commands` or GUI toggle control (desired state updates immediately).
+1. GUI/API client queues command using `POST /api/commands` or GUI explicit ON/OFF control (desired state updates immediately).
 2. ESP32 calls `GET /api/queue/next` on interval.
 3. API marks first queued command as `delivered` and returns it.
 4. ESP32 executes relay/schedule action locally.
