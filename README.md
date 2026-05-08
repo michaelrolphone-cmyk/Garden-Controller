@@ -24,6 +24,14 @@ npm install
 API_KEY=change-me GUI_USERNAME=admin GUI_PASSWORD=change-me npm start
 ```
 
+## Relay allocation
+
+- Channels 1-5 are scheduled irrigation zones.
+- Channel 6 is the master valve / spigot supply.
+- The firmware automatically turns channel 6 on whenever a zone is running.
+- Spigots can be run manually using channel 6 with a timed command.
+- Schedules may only target channels 1-5.
+
 ## API endpoints
 
 All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
@@ -46,6 +54,12 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
     ```json
     { "channel": 1, "action": "on", "requestedBy": "gui" }
     ```
+  - channel 6 timed run example:
+    ```json
+    { "channel": 6, "action": "on", "durationSeconds": 1800 }
+    ```
+- `POST /api/spigots/run` - queue a timed channel 6 spigot/master valve run.
+- `POST /api/spigots/stop` - queue a channel 6 spigot/master valve stop command.
 - `GET /api/queue/next` - microcontroller fetches next command.
   - supports optional query param `wait` (seconds, max `25`) for long-polling: `GET /api/queue/next?wait=25`
   - when queue is empty and `wait` is provided, server holds request until a command arrives or timeout returns `204`
@@ -143,6 +157,8 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 - `POST /gui/relays/:channel/on` - queue an ON command from GUI and redirect to `/gui`.
 - `POST /gui/relays/:channel/off` - queue an OFF command from GUI and redirect to `/gui`.
 - `POST /gui/schedules` - submit a zone schedule from GUI and queue a schedule update command for the microcontroller.
+- `POST /gui/spigots/run` - queue a timed spigot run from GUI and redirect to `/gui`.
+- `POST /gui/spigots/stop` - queue a spigot stop command from GUI and redirect to `/gui`.
 - `GET /gui/state` - basic-auth protected JSON state payload used by the GUI for 1-second incremental updates of relay/schedule/hardware status, including `latestSensorData` and full `deviceTelemetry`.
 
 Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are entered in Heroku with surrounding quotes, the app normalizes them automatically.

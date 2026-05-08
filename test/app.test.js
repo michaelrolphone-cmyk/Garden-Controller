@@ -226,7 +226,7 @@ describe('garden controller api', () => {
 
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
-    expect(guiRes.text).toContain('Relay states (desired vs reported)');
+    expect(guiRes.text).toContain('Zones (scheduled irrigation)');
     expect(guiRes.text).toContain('Desired <strong>ON</strong>');
     expect(guiRes.text).toContain('Reported <strong>OFF</strong>');
     expect(guiRes.text).toContain('status-pill status-mismatch');
@@ -237,11 +237,13 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('grid-template-columns: 1fr 2fr');
     expect(guiRes.text).toContain('id="zone-6"');
     expect(guiRes.text).toContain('zone-theme-1');
-    expect(guiRes.text).toContain('zone-theme-6');
+    expect(guiRes.text).not.toContain('Zone 6</span>');
     expect(guiRes.text).toContain('.linework { stroke: rgba(29, 78, 216, 0.35); fill: none;');
     expect(guiRes.text).toContain('data-active="false"');
     expect(guiRes.text).toContain('/gui/relays/1/on');
     expect(guiRes.text).toContain('/gui/relays/1/off');
+    expect(guiRes.text).toContain('Run Spigots');
+    expect(guiRes.text).toContain('Stop Spigots');
     expect(guiRes.text).toContain('timeline-track');
     expect(guiRes.text).toContain('Raw schedule list');
     expect(guiRes.text).toContain('Environmental Monitoring (43.665288, -116.259186)');
@@ -376,7 +378,35 @@ describe('garden controller api', () => {
     expect(stateRes.body.serverTime).toBeDefined();
     expect(stateRes.body.radarEmbedUrl).toBeUndefined();
   });
-  test('openapi spec includes new endpoints', () => {
+  
+
+  test('POST /api/schedules rejects channel 6', async () => {
+    const app = build();
+    const res = await request(app).post('/api/schedules').set('x-api-token', token).send({ schedules: [{ channel: 6, zone: 'Bad', startTime: '06:00', durationSeconds: 60 }] });
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /api/commands accepts channel 6 with durationSeconds', async () => {
+    const app = build();
+    const res = await request(app).post('/api/commands').set('x-api-token', token).send({ channel: 6, action: 'on', durationSeconds: 1800 });
+    expect(res.status).toBe(201);
+    expect(res.body.command.channel).toBe(6);
+    expect(res.body.command.durationSeconds).toBe(1800);
+  });
+
+  test('spigot run/stop endpoints queue channel 6 commands', async () => {
+    const app = build();
+    const runRes = await request(app).post('/api/spigots/run').set('x-api-token', token).send({ durationSeconds: 120 });
+    expect(runRes.status).toBe(201);
+    expect(runRes.body.command.channel).toBe(6);
+    expect(runRes.body.command.action).toBe('on');
+
+    const stopRes = await request(app).post('/api/spigots/stop').set('x-api-token', token).send({});
+    expect(stopRes.status).toBe(201);
+    expect(stopRes.body.command.channel).toBe(6);
+    expect(stopRes.body.command.action).toBe('off');
+  });
+test('openapi spec includes new endpoints', () => {
     const specPath = path.join(__dirname, '..', 'openapi.yaml');
     const spec = yaml.load(fs.readFileSync(specPath, 'utf8'));
     expect(spec.paths['/api/microcontroller/state']).toBeDefined();
@@ -387,5 +417,7 @@ describe('garden controller api', () => {
     expect(spec.paths['/gui/relays/{channel}/on']).toBeDefined();
     expect(spec.paths['/gui/relays/{channel}/off']).toBeDefined();
     expect(spec.paths['/gui/state']).toBeDefined();
+    expect(spec.paths['/api/spigots/run']).toBeDefined();
+    expect(spec.paths['/api/spigots/stop']).toBeDefined();
   });
 });

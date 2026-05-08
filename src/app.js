@@ -3,7 +3,10 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
+const ZONE_CHANNELS = 5;
 const RELAY_CHANNELS = 6;
+const MASTER_VALVE_CHANNEL = 6;
+const DEFAULT_SPIGOT_DURATION_SECONDS = 30 * 60;
 
 
 const GARDEN_LOCATION = { lat: 43.665288, lon: -116.259186, label: 'garden' };
@@ -34,8 +37,18 @@ function normalizeCredentialValue(value) {
 
 function createState() {
   return {
-    desiredRelayState: Array.from({ length: RELAY_CHANNELS }, (_, index) => ({ channel: index + 1, state: 'off' })),
-    reportedRelayState: Array.from({ length: RELAY_CHANNELS }, (_, index) => ({ channel: index + 1, state: 'off' })),
+    desiredRelayState: Array.from({ length: RELAY_CHANNELS }, (_, index) => ({
+      channel: index + 1,
+      state: 'off',
+      role: index + 1 === MASTER_VALVE_CHANNEL ? 'master_valve_spigots' : 'zone',
+      zone: index + 1 <= ZONE_CHANNELS ? index + 1 : null
+    })),
+    reportedRelayState: Array.from({ length: RELAY_CHANNELS }, (_, index) => ({
+      channel: index + 1,
+      state: 'off',
+      role: index + 1 === MASTER_VALVE_CHANNEL ? 'master_valve_spigots' : 'zone',
+      zone: index + 1 <= ZONE_CHANNELS ? index + 1 : null
+    })),
     queue: [],
     commandHistory: [],
     news: [],
@@ -43,6 +56,11 @@ function createState() {
     deviceTelemetry: null,
     sensorReadings: [],
     latestSensorData: null,
+    spigotRun: {
+      active: false,
+      remainingSeconds: 0,
+      updatedAt: null
+    },
     weatherDatasets: {
       current: null,
       forecast: null,
@@ -102,7 +120,7 @@ function renderTelemetryMarkup(deviceTelemetry) {
   return `<table class="telemetry-table" id="telemetry-table"><tbody>${rows}</tbody></table>`;
 }
 
-function createCommand({ channel, action, requestedBy }) {
+function createRelayCommand({ channel, action, requestedBy }) {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     channel,
@@ -110,6 +128,19 @@ function createCommand({ channel, action, requestedBy }) {
     requestedBy: requestedBy || 'gui',
     createdAt: new Date().toISOString(),
     status: 'queued'
+  };
+}
+
+function createSpigotCommand({ action, durationSeconds, requestedBy }) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    channel: MASTER_VALVE_CHANNEL,
+    action,
+    durationSeconds: Number.isInteger(durationSeconds) && durationSeconds > 0 ? durationSeconds : DEFAULT_SPIGOT_DURATION_SECONDS,
+    requestedBy: requestedBy || 'gui',
+    createdAt: new Date().toISOString(),
+    status: 'queued',
+    role: 'master_valve_spigots'
   };
 }
 
@@ -290,8 +321,13 @@ function createApp(config = {}) {
 
   app.get('/api/state', requireApiToken, (_req, res) => {
     res.json({
+      zoneChannels: ZONE_CHANNELS,
+      relayChannels: RELAY_CHANNELS,
+      masterValveChannel: MASTER_VALVE_CHANNEL,
       desiredRelays: state.desiredRelayState,
       reportedRelays: state.reportedRelayState,
+      masterValveState: state.reportedRelayState[MASTER_VALVE_CHANNEL - 1],
+      spigotRun: state.spigotRun,
       queueDepth: state.queue.filter((command) => command.status === 'queued').length,
       deliveredDepth: state.queue.filter((command) => command.status === 'delivered').length,
       pendingPolls: pendingPolls.length,
@@ -327,6 +363,8 @@ function createApp(config = {}) {
     relays.forEach((incomingRelay) => {
       const relay = nextRelayState[incomingRelay.channel - 1];
       relay.state = incomingRelay.state;
+      relay.role = incomingRelay.role || (incomingRelay.channel === MASTER_VALVE_CHANNEL ? 'master_valve_spigots' : 'zone');
+      relay.zone = incomingRelay.channel <= ZONE_CHANNELS ? incomingRelay.channel : null;
     });
     state.reportedRelayState = nextRelayState;
 
@@ -342,7 +380,7 @@ function createApp(config = {}) {
           schedule &&
           Number.isInteger(schedule.channel) &&
           schedule.channel >= 1 &&
-          schedule.channel <= RELAY_CHANNELS &&
+          schedule.channel <= ZONE_CHANNELS &&
           typeof schedule.zone === 'string' &&
           schedule.zone.trim().length > 0 &&
           typeof schedule.startTime === 'string' &&
@@ -352,7 +390,10 @@ function createApp(config = {}) {
       );
 
     if (!validSchedulesPayload) {
-      return res.status(400).json({ error: 'Invalid schedule payload' });
+      return res.status(400).json({
+        error: 'Invalid schedule payload',
+        detail: 'Schedules may only use zones/channels 1-5. Channel 6 is master valve/spigots.'
+      });
     }
 
     state.schedules = schedules.map((schedule) => ({ ...schedule }));
@@ -369,7 +410,7 @@ function createApp(config = {}) {
           schedule &&
           Number.isInteger(schedule.channel) &&
           schedule.channel >= 1 &&
-          schedule.channel <= RELAY_CHANNELS &&
+          schedule.channel <= ZONE_CHANNELS &&
           typeof schedule.zone === 'string' &&
           schedule.zone.trim().length > 0 &&
           typeof schedule.startTime === 'string' &&
@@ -379,7 +420,10 @@ function createApp(config = {}) {
       );
 
     if (!validSchedulesPayload) {
-      return res.status(400).json({ error: 'Invalid schedule payload' });
+      return res.status(400).json({
+        error: 'Invalid schedule payload',
+        detail: 'Schedules may only use zones/channels 1-5. Channel 6 is master valve/spigots.'
+      });
     }
 
     const normalizedSchedules = schedules.map((schedule) => ({
@@ -405,19 +449,52 @@ function createApp(config = {}) {
 
   app.post('/api/commands', requireApiToken, (req, res) => {
     const { channel, action, requestedBy } = req.body;
+    const durationSeconds = Number.parseInt(req.body.durationSeconds, 10);
     const validAction = action === 'on' || action === 'off' || action === 'toggle';
 
     if (!Number.isInteger(channel) || channel < 1 || channel > RELAY_CHANNELS || !validAction) {
       return res.status(400).json({ error: 'Invalid command payload' });
     }
 
-    const command = createCommand({ channel, action, requestedBy });
+    let command;
+    if (channel === MASTER_VALVE_CHANNEL) {
+      command = createSpigotCommand({ action, durationSeconds, requestedBy: requestedBy || 'api' });
+      const desiredMaster = state.desiredRelayState[MASTER_VALVE_CHANNEL - 1];
+      if (action === 'off') {
+        desiredMaster.state = 'off';
+        state.spigotRun = { active: false, remainingSeconds: 0, updatedAt: new Date().toISOString() };
+      } else {
+        desiredMaster.state = 'on';
+        state.spigotRun = { active: true, remainingSeconds: command.durationSeconds, updatedAt: new Date().toISOString() };
+      }
+    } else {
+      command = createRelayCommand({ channel, action, requestedBy: requestedBy || 'api' });
+      const desiredRelay = state.desiredRelayState[channel - 1];
+      desiredRelay.state = action === 'toggle' ? (desiredRelay.state === 'on' ? 'off' : 'on') : action;
+    }
 
-    const desiredRelay = state.desiredRelayState[channel - 1];
-    desiredRelay.state = action === 'toggle' ? (desiredRelay.state === 'on' ? 'off' : 'on') : action;
     state.queue.push(command);
     wakePendingPolls();
     res.status(201).json({ command });
+  });
+
+  app.post('/api/spigots/run', requireApiToken, (req, res) => {
+    const durationSeconds = Number.parseInt(req.body.durationSeconds, 10);
+    const command = createSpigotCommand({ action: 'on', durationSeconds, requestedBy: req.body.requestedBy || 'api' });
+    state.desiredRelayState[MASTER_VALVE_CHANNEL - 1].state = 'on';
+    state.spigotRun = { active: true, remainingSeconds: command.durationSeconds, updatedAt: new Date().toISOString() };
+    state.queue.push(command);
+    wakePendingPolls();
+    return res.status(201).json({ command, spigotRun: state.spigotRun });
+  });
+
+  app.post('/api/spigots/stop', requireApiToken, (req, res) => {
+    const command = createSpigotCommand({ action: 'off', durationSeconds: 0, requestedBy: req.body.requestedBy || 'api' });
+    state.desiredRelayState[MASTER_VALVE_CHANNEL - 1].state = 'off';
+    state.spigotRun = { active: false, remainingSeconds: 0, updatedAt: new Date().toISOString() };
+    state.queue.push(command);
+    wakePendingPolls();
+    return res.status(201).json({ command, spigotRun: state.spigotRun });
   });
 
   app.get('/api/queue/next', requireApiToken, (req, res) => {
@@ -475,6 +552,9 @@ function createApp(config = {}) {
       relays,
       schedules,
       currentRun,
+      spigotRun,
+      masterValveChannel,
+      masterValveOn,
       lastCommandId,
       targetLocation,
       sensorData
@@ -493,6 +573,7 @@ function createApp(config = {}) {
       state.reportedRelayState[incomingRelay.channel - 1].state = incomingRelay.state;
     });
     state.schedules = schedules.map((schedule) => ({ ...schedule }));
+    state.spigotRun = spigotRun || state.spigotRun;
     state.deviceTelemetry = {
       deviceId,
       firmwareVersion,
@@ -505,6 +586,9 @@ function createApp(config = {}) {
       relays: state.reportedRelayState,
       schedules: state.schedules,
       currentRun: currentRun || null,
+      masterValveChannel: masterValveChannel || MASTER_VALVE_CHANNEL,
+      masterValveOn: Boolean(masterValveOn),
+      spigotRun: spigotRun || null,
       lastCommandId: lastCommandId || null,
       targetLocation: targetLocation || null,
       sensorData: Array.isArray(sensorData) ? sensorData : [],
@@ -615,6 +699,7 @@ function createApp(config = {}) {
       .map((relay) => `zone-${relay.channel}`);
 
     const relayMarkup = state.desiredRelayState
+      .filter((relay) => relay.channel <= ZONE_CHANNELS)
       .map((desiredRelay) => {
         const reportedRelay = state.reportedRelayState[desiredRelay.channel - 1] || { state: 'unknown' };
         const hasMismatch = desiredRelay.state !== reportedRelay.state;
@@ -711,8 +796,18 @@ function createApp(config = {}) {
           </svg>
         </section>
         <section class="panel relay-section">
-          <h2>Relay states (desired vs reported)</h2>
+          <h2>Zones (scheduled irrigation)</h2>
           <ul id="relay-grid" class="relay-grid">${relayMarkup}</ul>
+          <h3>Master / Spigots</h3>
+          <p>Master valve: <strong>${(state.reportedRelayState[MASTER_VALVE_CHANNEL - 1]?.state || 'off').toUpperCase()}</strong></p>
+          <p>Spigot run: <strong>${state.spigotRun.active ? 'active' : 'inactive'}</strong> (${state.spigotRun.remainingSeconds}s remaining)</p>
+          <form method="post" action="/gui/spigots/run">
+            <label>Spigot minutes <input name="minutes" type="number" min="1" max="240" value="30" /></label>
+            <button type="submit">Run Spigots</button>
+          </form>
+          <form method="post" action="/gui/spigots/stop">
+            <button type="submit">Stop Spigots</button>
+          </form>
         </section>
       </div>
       <section class="panel schedule">
@@ -745,11 +840,12 @@ function createApp(config = {}) {
       </section>
       <section class="panel schedule">
         <h2>Schedules</h2>
+        <p>Schedules may only use zones 1-5. Channel 6 is master valve/spigots.</p>
         <div id="schedule-timeline">${scheduleTimelineMarkup}</div><details class="raw-schedules"><summary>Raw schedule list</summary><div id="raw-schedules">${schedulesMarkup}</div></details>
         <h3>Update schedules</h3>
         <form method="post" action="/gui/schedules">
           <label>Zone <input name="zone" value="${defaultSchedule.zone || ''}" required /></label>
-          <label>Channel <input name="channel" type="number" min="1" max="${RELAY_CHANNELS}" value="${defaultSchedule.channel || 1}" required /></label>
+          <label>Channel <input name="channel" type="number" min="1" max="${ZONE_CHANNELS}" value="${defaultSchedule.channel || 1}" required /></label>
           <label>Start Time <input name="startTime" value="${defaultSchedule.startTime || '06:00'}" required /></label>
           <label>Duration (seconds) <input name="durationSeconds" type="number" min="1" value="${defaultSchedule.durationSeconds || 900}" required /></label>
           <button type="submit">Save schedule</button>
@@ -774,7 +870,7 @@ function createApp(config = {}) {
         };
         const activeZoneIds = new Set((state.reportedRelays || []).filter((relay) => relay.state === 'on').map((relay) => \`zone-\${relay.channel}\`));
         const relayGrid = document.getElementById('relay-grid');
-        relayGrid.innerHTML = (state.desiredRelays || []).map((desiredRelay) => {
+        relayGrid.innerHTML = (state.desiredRelays || []).filter((relay) => relay.channel <= ${ZONE_CHANNELS}).map((desiredRelay) => {
           const reportedRelay = (state.reportedRelays || [])[desiredRelay.channel - 1] || { state: 'unknown' };
           const hasMismatch = desiredRelay.state !== reportedRelay.state;
           const statusClass = hasMismatch ? 'status-mismatch' : 'status-synced';
@@ -851,8 +947,13 @@ function createApp(config = {}) {
 
   app.get('/gui/state', requireGuiAuth, (_req, res) => {
     res.json({
+      zoneChannels: ZONE_CHANNELS,
+      relayChannels: RELAY_CHANNELS,
+      masterValveChannel: MASTER_VALVE_CHANNEL,
       desiredRelays: state.desiredRelayState,
       reportedRelays: state.reportedRelayState,
+      masterValveState: state.reportedRelayState[MASTER_VALVE_CHANNEL - 1],
+      spigotRun: state.spigotRun,
       schedules: state.schedules,
       serverTime: new Date().toISOString(),
       latestSensorData: state.latestSensorData,
@@ -872,7 +973,7 @@ function createApp(config = {}) {
       return res.status(400).send('Invalid relay action');
     }
 
-    const command = createCommand({ channel, action, requestedBy: 'gui-web' });
+    const command = createRelayCommand({ channel, action, requestedBy: 'gui-web' });
     const desiredRelay = state.desiredRelayState[channel - 1];
     desiredRelay.state = action;
     state.queue.push(command);
@@ -913,6 +1014,26 @@ function createApp(config = {}) {
     return res.redirect(303, '/gui');
   });
 
+  app.post('/gui/spigots/run', requireGuiAuth, (req, res) => {
+    const minutes = Number.parseInt(req.body.minutes, 10);
+    const durationSeconds = Number.isInteger(minutes) && minutes > 0 ? minutes * 60 : DEFAULT_SPIGOT_DURATION_SECONDS;
+    const command = createSpigotCommand({ action: 'on', durationSeconds, requestedBy: 'gui-web' });
+    state.desiredRelayState[MASTER_VALVE_CHANNEL - 1].state = 'on';
+    state.spigotRun = { active: true, remainingSeconds: durationSeconds, updatedAt: new Date().toISOString() };
+    state.queue.push(command);
+    wakePendingPolls();
+    return res.redirect(303, '/gui');
+  });
+
+  app.post('/gui/spigots/stop', requireGuiAuth, (_req, res) => {
+    const command = createSpigotCommand({ action: 'off', durationSeconds: 0, requestedBy: 'gui-web' });
+    state.desiredRelayState[MASTER_VALVE_CHANNEL - 1].state = 'off';
+    state.spigotRun = { active: false, remainingSeconds: 0, updatedAt: new Date().toISOString() };
+    state.queue.push(command);
+    wakePendingPolls();
+    return res.redirect(303, '/gui');
+  });
+
   if (config.enableWeatherRefresh !== false) {
     const WEATHER_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -939,4 +1060,4 @@ function createApp(config = {}) {
   return { app, state };
 }
 
-module.exports = { createApp, createState, RELAY_CHANNELS };
+module.exports = { createApp, createState, ZONE_CHANNELS, RELAY_CHANNELS, MASTER_VALVE_CHANNEL };
