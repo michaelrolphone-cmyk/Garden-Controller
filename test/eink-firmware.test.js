@@ -50,6 +50,21 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
   });
 
 
+
+  test('draws polygon zone map with active-zone inversion behavior', () => {
+    expect(ino).toContain('const Pt Z1[]');
+    expect(ino).toContain('void fillPolyHatch(const Pt* p, int n, bool active)');
+    expect(ino).toContain('drawZoneLabel(34,100,1,a1);');
+    expect(ino).toContain('display.setTextColor(GxEPD_WHITE);');
+  });
+
+  test('draws weather compass and sunrise/sunset strip in widget', () => {
+    expect(ino).toContain('display.drawCircle(cx,cy,r,GxEPD_BLACK);');
+    expect(ino).toContain('display.print("Sunrise")');
+    expect(ino).toContain('display.print("Sunset")');
+    expect(ino).toContain('state.weather.windDeg');
+  });
+
   test('supports queue and ledger maintenance endpoints', () => {
     expect(ino).toContain('server.on("/queue/clear", HTTP_GET, handleQueueClear);');
     expect(ino).toContain('server.on("/queue/stop-clear", HTTP_GET, handleQueueStopClear);');

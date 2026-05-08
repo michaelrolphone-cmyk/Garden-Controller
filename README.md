@@ -255,6 +255,8 @@ Display behavior:
   - `drawRuntimePanel(432, 339, 360, 133)`
 - Supports full-screen `Castle Hills Garden News` and `Current + Weekly Weather` screens.
 - Auto-rotation cycle: 4 minutes with watering-active suppression to schedule screen.
+- Garden map uses zone polygons with active-zone hatch + inverted label badges for readability.
+- Weather widget includes compass-style wind gauge and sunrise/sunset strip.
 - Full refresh on substantial layout/screen changes; partial refresh for runtime meter updates.
 
 CLI commands:

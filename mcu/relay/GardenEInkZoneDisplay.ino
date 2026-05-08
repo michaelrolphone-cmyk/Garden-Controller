@@ -9,6 +9,7 @@
 #include <GxEPD2_BW.h>
 #include <Fonts/FreeMonoBold12pt7b.h>
 #include <Fonts/FreeMono9pt7b.h>
+#include <math.h>
 
 // Required hardware target: 7.5-inch 800x480 GDEY075T7 black/white panel.
 // Snapshot pinout requirements:
@@ -157,8 +158,41 @@ void syncFromRelay() {
   }
 }
 
-void drawMap(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); display.setCursor(x+8,y+20); display.print("Zone 1"); display.setCursor(x+100,y+50); display.print("Zone 2"); display.setCursor(x+200,y+120); display.print("Zone 3"); display.setCursor(x+80,y+220); display.print("Zone 4"); display.setCursor(x+220,y+300); display.print("Zone 5"); }
-void drawWeatherWidget(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); display.setCursor(x+8,y+18); display.print(state.weather.condition); display.setCursor(x+8,y+42); display.printf("%.1fF", state.weather.temperatureF); display.setCursor(x+8,y+64); display.printf("Humidity %.0f%%", state.weather.humidityPct); display.setCursor(x+8,y+82); display.printf("Dew point %.0fF", state.weather.dewPointF); display.setCursor(x+8,y+100); display.printf("Precip. chance %.0f%%", state.weather.precipitationChancePct); display.setCursor(x+8,y+118); display.printf("Wind %s %.0f mph", state.weather.windDirection, state.weather.windMph); display.setCursor(x+8,y+136); display.printf("Rain %.2fin Sun %.1fhr", state.weather.rainIn, state.weather.sunlightHours); }
+
+struct Pt { int16_t x; int16_t y; };
+const Pt Z1[]={{24,80},{180,80},{190,150},{140,230},{32,220}};
+const Pt Z2[]={{192,82},{320,82},{330,180},{230,200}};
+const Pt Z3[]={{332,82},{420,82},{420,220},{332,220}};
+const Pt Z4[]={{36,232},{190,232},{180,410},{22,410}};
+const Pt Z5[]={{192,210},{420,210},{420,420},{192,420}};
+
+void drawPolyOutline(const Pt* p, int n){ for(int i=0;i<n;i++){ const Pt&a=p[i]; const Pt&b=p[(i+1)%n]; display.drawLine(a.x,a.y,b.x,b.y,GxEPD_BLACK);} }
+void fillPolyHatch(const Pt* p, int n, bool active){ int minY=999,maxY=-1,minX=999,maxX=-1; for(int i=0;i<n;i++){minY=min(minY,(int)p[i].y);maxY=max(maxY,(int)p[i].y);minX=min(minX,(int)p[i].x);maxX=max(maxX,(int)p[i].x);} int step=active?4:10; for(int y=minY;y<=maxY;y+=step) display.drawLine(minX,y,maxX,y,GxEPD_BLACK);} 
+void drawZoneLabel(int x,int y,int zone,bool active){ if(active){display.fillRect(x-2,y-12,52,14,GxEPD_BLACK); display.setTextColor(GxEPD_WHITE);} else display.setTextColor(GxEPD_BLACK); display.setCursor(x,y); display.printf("Zone %d",zone); display.setTextColor(GxEPD_BLACK); }
+void drawMap(int x, int y, int w, int h) {
+  display.drawRect(x,y,w,h,GxEPD_BLACK);
+  bool a1=state.run.active&&state.run.zone==1, a2=state.run.active&&state.run.zone==2, a3=state.run.active&&state.run.zone==3, a4=state.run.active&&state.run.zone==4, a5=state.run.active&&state.run.zone==5;
+  fillPolyHatch(Z1,5,a1); drawPolyOutline(Z1,5); drawZoneLabel(34,100,1,a1);
+  fillPolyHatch(Z2,4,a2); drawPolyOutline(Z2,4); drawZoneLabel(220,102,2,a2);
+  fillPolyHatch(Z3,4,a3); drawPolyOutline(Z3,4); drawZoneLabel(340,102,3,a3);
+  fillPolyHatch(Z4,4,a4); drawPolyOutline(Z4,4); drawZoneLabel(40,252,4,a4);
+  fillPolyHatch(Z5,4,a5); drawPolyOutline(Z5,4); drawZoneLabel(210,232,5,a5);
+}
+void drawWeatherWidget(int x, int y, int w, int h) {
+  display.drawRect(x,y,w,h,GxEPD_BLACK);
+  display.drawLine(x+235,y+2,x+235,y+h-2,GxEPD_BLACK);
+  display.setCursor(x+8,y+18); display.print(state.weather.condition);
+  display.setCursor(x+8,y+42); display.printf("%.1fF", state.weather.temperatureF);
+  display.setCursor(x+8,y+62); display.printf("Humidity %.0f%%", state.weather.humidityPct);
+  display.setCursor(x+8,y+78); display.printf("Dew point %.0fF", state.weather.dewPointF);
+  display.setCursor(x+8,y+94); display.printf("Precip. chance %.0f%%", state.weather.precipitationChancePct);
+  display.setCursor(x+8,y+110); display.printf("Wind %s %.0f mph", state.weather.windDirection, state.weather.windMph);
+  display.setCursor(x+8,y+126); display.printf("Rain %.2fin  Sun %.1fhr", state.weather.rainIn, state.weather.sunlightHours);
+  int cx=x+295, cy=y+58, r=34;
+  display.drawCircle(cx,cy,r,GxEPD_BLACK); display.setCursor(cx-4,y+20); display.print("N"); display.setCursor(cx-4,y+112); display.print("S"); display.setCursor(cx-r-12,cy+4); display.print("W"); display.setCursor(cx+r+6,cy+4); display.print("E");
+  float rad=(state.weather.windDeg-90)*0.0174533f; int ax=cx+(int)(cos(rad)*r); int ay=cy+(int)(sin(rad)*r); display.drawLine(cx,cy,ax,ay,GxEPD_BLACK);
+  display.drawLine(x+8,y+144,x+224,y+144,GxEPD_BLACK); display.setCursor(x+8,y+156); display.print("Sunrise"); display.setCursor(x+92,y+156); display.print("5:44am"); display.setCursor(x+150,y+156); display.print("Sunset"); display.setCursor(x+208,y+156); display.print("5:56pm");
+}
 void drawSchedulePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); display.setCursor(x+8,y+18); display.print("Schedule"); for (int i=0;i<5;i++){int row=i%3,col=i/3;int rx=x+8+col*170,ry=y+40+row*28;display.setCursor(rx,ry);display.printf("Zone %d %d:%02dam %dm", i+1, state.zones[i].startHour%12==0?12:state.zones[i].startHour%12, state.zones[i].startMinute, state.zones[i].baseMinutes);} }
 void drawRuntimePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); if (!state.run.active) { display.setCursor(x+8,y+20); display.print("Idle"); display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.setCursor(x+8,y+86); display.print("Remaining: Idle"); return; } display.setCursor(x+8,y+20); display.printf("Running Zone %u", state.run.zone); float r=state.run.totalSeconds?((float)(state.run.totalSeconds-state.run.remainingSeconds)/(float)state.run.totalSeconds):0; if(r<0)r=0;if(r>1)r=1; display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.fillRect(x+9,y+41,(int)((w-18)*r),18,GxEPD_BLACK); display.setCursor(x+8,y+86); display.printf("Remaining: %um %us", state.run.remainingSeconds/60, state.run.remainingSeconds%60); }
 
