@@ -41,6 +41,33 @@ All `/api/*` endpoints require header: `x-api-token: <API_TOKEN>`.
     { "channel": 1, "action": "on", "requestedBy": "gui" }
     ```
 - `GET /api/queue/next` - microcontroller polls next command; returns `204` when queue is empty.
+  - relay command response body (`200`):
+    ```json
+    {
+      "command": {
+        "id": "1715144970000-a1b2c3",
+        "channel": 1,
+        "action": "on",
+        "requestedBy": "gui-web",
+        "createdAt": "2026-05-08T09:00:00.000Z"
+      },
+      "relay": { "channel": 1, "state": "on" }
+    }
+    ```
+  - schedule update response body (`200`):
+    ```json
+    {
+      "command": {
+        "id": "1715145000000-z9y8x7",
+        "type": "schedule_update",
+        "requestedBy": "gui-web",
+        "createdAt": "2026-05-08T09:00:30.000Z",
+        "schedules": [
+          { "channel": 2, "zone": "Patio", "startTime": "06:45", "durationSeconds": 480 }
+        ]
+      }
+    }
+    ```
 - `POST /api/microcontroller/relays/state` - microcontroller publishes current relay on/off states.
   - body:
     ```json
@@ -95,7 +122,7 @@ Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are e
 
 1. GUI/API client queues a command using `POST /api/commands` or GUI toggle control.
 2. ESP32 calls `GET /api/queue/next` on interval.
-3. API returns next command and updates internal relay state.
+3. API returns either a relay command payload (`command + relay`) or schedule update payload (`command.type = schedule_update`).
 4. ESP32 executes relay change locally.
 5. ESP32 publishes actual relay state to `POST /api/microcontroller/relays/state`.
 6. ESP32 publishes runtime schedule configuration to `POST /api/microcontroller/schedules`.

@@ -291,5 +291,13 @@ describe('garden controller api', () => {
     expect(spec.paths['/gui/relays/{channel}/toggle']).toBeDefined();
     expect(spec.paths['/gui/schedules']).toBeDefined();
     expect(spec.paths['/openapi.json']).toBeDefined();
+
+    const queueResponseSchema = spec.paths['/api/queue/next'].get.responses['200'].content['application/json'].schema;
+    expect(queueResponseSchema.oneOf).toBeDefined();
+    expect(queueResponseSchema.oneOf).toHaveLength(2);
+
+    const queueExamples = spec.paths['/api/queue/next'].get.responses['200'].content['application/json'].examples;
+    expect(queueExamples.relayCommand.value.command.action).toBeDefined();
+    expect(queueExamples.scheduleUpdate.value.command.type).toBe('schedule_update');
   });
 });
