@@ -18,7 +18,7 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain('Castle Hills Garden Manager (Firmware Local)');
     expect(ino).toContain('Garden Zone Map');
     expect(ino).toContain('Schedule Timeline');
-    expect(ino).toContain("setInterval(refresh,1000)");
+    expect(ino).toContain("setInterval(()=>refresh(false),1000)");
   });
 
   test('admin ui maps zone activity, color-codes map zones, and provides schedule CRUD inputs', () => {
@@ -32,5 +32,9 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain('addScheduleRow(');
     expect(ino).toContain('saveSchedules()');
     expect(ino).toContain("#adminSchedRows .actions");
+    expect(ino).toContain('lastScheduleKey');
+    expect(ino).toContain('scheduleEditorBusy()');
+    expect(ino).toContain('const shouldRedrawSchedules=forceScheduleRedraw||nextScheduleKey!==lastScheduleKey');
+    expect(ino).toContain('class=\"relay-card zone-color-${zoneChannel(z)}\"');
   });
 });
