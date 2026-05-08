@@ -211,24 +211,45 @@ The `schedules` array is a full daily schedule list. The same zone/channel may a
 
 ## E-Ink zone map companion firmware
 
-Companion firmware for the **7.5 Inch E-Ink Display Module (800x480 SPI) + ESP32-C6 E-Paper Driver Board + SD card**:
-
+Firmware file:
 - `mcu/relay/GardenEInkZoneDisplay.ino`
 
-Device API endpoints (hosted on the e-ink board):
-- `GET /` - local admin/status page.
-- `GET /api/config` - read WiFi/AP/API configuration.
-- `POST /api/config` - update WiFi/AP/API configuration and persist to flash preferences.
-- `GET /api/state` - local e-ink firmware state summary.
-Relay API endpoint consumed by e-ink firmware:
-- `GET /api/state` with `x-api-token` to read `deviceTelemetry.zoneRuns`.
+Hardware target:
+- 7.5-inch 800x480 black/white e-paper using `GxEPD2_750_GDEY075T7`.
+- Display pin map: MOSI 14, SCLK 13, CS 15, DC 27, RST 26, BUSY 25.
+- SD pin map: CS 5, MISO 12.
+
+E-paper controller APIs:
+- `GET /`
+- `GET /state`
+- `GET /extra?zone=N&minutes=M`
+- `GET /stop`
+- `GET /sync`
+- `GET /redraw`
+- `GET /saveZone`
+- `GET /saveLogic`
+- `POST /saveNews`
+- `GET /history.csv`
+- `GET /clearHistory`
+- `GET /display?mode=auto|schedule|news|graph`
+- `GET /api/config`
+- `POST /api/config`
+
+Relay APIs consumed by e-paper firmware:
+- `GET /time` (`epoch`, `synced`)
+- `GET /weather` (`summary`, `condition`, `temperatureF`, `rainIn`, `windMph`, `windDeg`, `windDirection`, `humidityPct`, `dewPointF`, `precipitationChancePct`, `sunlightHours`, `sunriseEpoch`, `sunsetEpoch`, `weatherCode`, `lastWeatherMs`)
+- `GET /status` (running state) with fallback to `GET /api/state`
 
 Display behavior:
-- Renders polygon-based garden zone map.
-- Uses full refresh for first render and when firmware detects substantial redraw scope changes (e.g., zone active-state map hatch changes).
-- Uses partial refresh window for runtime legend/meter updates when only small telemetry regions need redraw.
-- Holds static e-paper image when state is unchanged (no redraw performed).
-- Logs snapshots to SD card file `/zone_state.log`.
+- Main schedule screen title: `Castle Hills Garden Watering Schedule`.
+- Uses required layout coordinates:
+  - `drawMap(8, 48, 424, 424)`
+  - `drawWeatherWidget(432, 48, 360, 160)`
+  - `drawSchedulePanel(432, 207, 360, 133)`
+  - `drawRuntimePanel(432, 339, 360, 133)`
+- Supports full-screen `Castle Hills Garden News` and `Current + Weekly Weather` screens.
+- Auto-rotation cycle: 4 minutes with watering-active suppression to schedule screen.
+- Full refresh on substantial layout/screen changes; partial refresh for runtime meter updates.
 
 CLI commands:
 ```bash
