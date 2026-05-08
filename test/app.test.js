@@ -323,6 +323,29 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('06:00 · 10 min');
     expect(guiRes.text).toContain('name="schedule[0][enabled]"');
     expect(guiRes.text).toContain('name="schedule[1][enabled]"');
+    expect(guiRes.text).toContain('<th>Delete</th>');
+    expect(guiRes.text).toContain('formaction="/gui/schedules/0/delete"');
+  });
+  test('gui schedule delete endpoint removes one row and queues replacement schedule update', async () => {
+    const app = build();
+    await request(app).post('/api/schedules').set('x-api-token', token).send({ schedules: [
+      { id: 11, channel: 1, zone: 'Zone 1', enabled: true, startTime: '06:00', durationSeconds: 600 },
+      { id: 12, channel: 1, zone: 'Zone 1', enabled: true, startTime: '15:30', durationSeconds: 420 }
+    ]});
+
+    const deleteRes = await request(app).post('/gui/schedules/11/delete').set('authorization', auth);
+    expect(deleteRes.status).toBe(303);
+
+    const stateRes = await request(app).get('/api/state').set('x-api-token', token);
+    expect(stateRes.body.schedules).toHaveLength(1);
+    expect(stateRes.body.schedules[0].id).toBe(12);
+
+    await request(app).get('/api/queue/next').set('x-api-token', token);
+    const commandRes = await request(app).get('/api/queue/next').set('x-api-token', token);
+    expect(commandRes.status).toBe(200);
+    expect(commandRes.body.command.type).toBe('schedule_update');
+    expect(commandRes.body.command.schedules).toHaveLength(1);
+    expect(commandRes.body.command.schedules[0].id).toBe(12);
   });
   test('queue next supports long-poll and wakes when new command is queued', async () => {
     const app = build();
@@ -699,5 +722,6 @@ test('openapi spec includes new endpoints', () => {
     expect(spec.paths['/gui/state']).toBeDefined();
     expect(spec.paths['/api/spigots/run']).toBeDefined();
     expect(spec.paths['/api/spigots/stop']).toBeDefined();
+    expect(spec.paths['/gui/schedules/{id}/delete']).toBeDefined();
   });
 });

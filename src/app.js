@@ -905,7 +905,7 @@ function createApp(config = {}) {
         <h3>Update schedules</h3>
         <p>Edit existing rows and add new time slots. The GUI submits the complete schedule list on save.</p>
         <form method="post" action="/gui/schedules">
-          <table class="schedule-table"><thead><tr><th>Enabled</th><th>Zone</th><th>Channel</th><th>Start Time</th><th>Duration Minutes</th></tr></thead><tbody id="schedule-form-body">${defaultSchedules.map((schedule, index) => `<tr><td><input name="schedule[${index}][id]" type="hidden" value="${Number.isInteger(schedule.id) ? schedule.id : index}" /><input name="schedule[${index}][enabled]" type="checkbox" ${schedule.enabled === false ? '' : 'checked'} /></td><td><input name="schedule[${index}][zone]" value="${schedule.zone || `Zone ${schedule.channel}`}" required /></td><td><input name="schedule[${index}][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="${schedule.channel || 1}" required /></td><td><input name="schedule[${index}][startTime]" type="time" value="${schedule.startTime || '06:00'}" required /></td><td><input name="schedule[${index}][durationMinutes]" type="number" min="1" max="240" value="${Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60))}" required /></td></tr>`).join('')}</tbody></table>
+          <table class="schedule-table"><thead><tr><th>Enabled</th><th>Zone</th><th>Channel</th><th>Start Time</th><th>Duration Minutes</th><th>Delete</th></tr></thead><tbody id="schedule-form-body">${defaultSchedules.map((schedule, index) => `<tr><td><input name="schedule[${index}][id]" type="hidden" value="${Number.isInteger(schedule.id) ? schedule.id : index}" /><input name="schedule[${index}][enabled]" type="checkbox" ${schedule.enabled === false ? '' : 'checked'} /></td><td><input name="schedule[${index}][zone]" value="${schedule.zone || `Zone ${schedule.channel}`}" required /></td><td><input name="schedule[${index}][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="${schedule.channel || 1}" required /></td><td><input name="schedule[${index}][startTime]" type="time" value="${schedule.startTime || '06:00'}" required /></td><td><input name="schedule[${index}][durationMinutes]" type="number" min="1" max="240" value="${Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60))}" required /></td><td><button type="submit" formaction="/gui/schedules/${Number.isInteger(schedule.id) ? schedule.id : index}/delete" formmethod="post">Delete</button></td></tr>`).join('')}</tbody></table>
           <button type="button" id="schedule-add-row">Add time slot</button>
           <button type="submit">Save schedules</button>
         </form>
@@ -951,7 +951,8 @@ function createApp(config = {}) {
             + '<td><input name="schedule[' + nextIndex + '][zone]" value="Zone 1" required /></td>'
             + '<td><input name="schedule[' + nextIndex + '][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="1" required /></td>'
             + '<td><input name="schedule[' + nextIndex + '][startTime]" type="time" value="06:00" required /></td>'
-            + '<td><input name="schedule[' + nextIndex + '][durationMinutes]" type="number" min="1" max="240" value="10" required /></td>';
+            + '<td><input name="schedule[' + nextIndex + '][durationMinutes]" type="number" min="1" max="240" value="10" required /></td>'
+            + '<td><button type="submit" formaction="/gui/schedules/' + nextIndex + '/delete" formmethod="post">Delete</button></td>';
           scheduleFormBody.appendChild(row);
         });
       }
@@ -1046,7 +1047,8 @@ function createApp(config = {}) {
                 + '<td><input name="schedule[' + index + '][zone]" value="' + zoneName + '" required /></td>'
                 + '<td><input name="schedule[' + index + '][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="' + channel + '" required /></td>'
                 + '<td><input name="schedule[' + index + '][startTime]" type="time" value="' + startTime + '" required /></td>'
-                + '<td><input name="schedule[' + index + '][durationMinutes]" type="number" min="1" max="240" value="' + durationMinutes + '" required /></td></tr>';
+                + '<td><input name="schedule[' + index + '][durationMinutes]" type="number" min="1" max="240" value="' + durationMinutes + '" required /></td>'
+                + '<td><button type="submit" formaction="/gui/schedules/' + scheduleId + '/delete" formmethod="post">Delete</button></td></tr>';
             }).join('');
             lastRenderedScheduleFormSignature = scheduleFormSignature;
           }
@@ -1185,6 +1187,35 @@ function createApp(config = {}) {
 
     state.schedules = schedules;
     const command = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, type: 'schedule_update', schedules, requestedBy: 'gui-web', createdAt: new Date().toISOString(), status: 'queued' };
+    state.queue.push(command);
+    wakePendingPolls();
+    return res.redirect(303, '/gui');
+  });
+
+  app.post('/gui/schedules/:id/delete', requireGuiAuth, (req, res) => {
+    const scheduleId = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(scheduleId)) {
+      return res.status(400).send('Invalid schedule id');
+    }
+
+    const remainingSchedules = state.schedules.filter((schedule, index) => {
+      const id = Number.isInteger(schedule.id) ? schedule.id : index;
+      return id !== scheduleId;
+    });
+
+    if (remainingSchedules.length === state.schedules.length) {
+      return res.status(404).send('Schedule not found');
+    }
+
+    state.schedules = remainingSchedules;
+    const command = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'schedule_update',
+      schedules: remainingSchedules,
+      requestedBy: 'gui-web',
+      createdAt: new Date().toISOString(),
+      status: 'queued'
+    };
     state.queue.push(command);
     wakePendingPolls();
     return res.redirect(303, '/gui');
