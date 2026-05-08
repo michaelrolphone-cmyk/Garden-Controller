@@ -20,4 +20,17 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain('Schedule Timeline');
     expect(ino).toContain("setInterval(refresh,1000)");
   });
+
+  test('admin ui maps zone activity, color-codes map zones, and provides schedule CRUD inputs', () => {
+    expect(ino).toContain('zone-color-1');
+    expect(ino).toContain('zone-color-2');
+    expect(ino).toContain('zone-color-3');
+    expect(ino).toContain('zone-color-4');
+    expect(ino).toContain('zone-color-5');
+    expect(ino).toContain('zoneChannel(z)');
+    expect(ino).toContain("d.zoneName||('Zone '+d.zone)");
+    expect(ino).toContain('addScheduleRow(');
+    expect(ino).toContain('saveSchedules()');
+    expect(ino).toContain("#adminSchedRows .actions");
+  });
 });
