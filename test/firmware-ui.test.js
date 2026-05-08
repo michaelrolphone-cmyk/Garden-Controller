@@ -34,6 +34,8 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain("#adminSchedRows .actions");
     expect(ino).toContain('lastScheduleKey');
     expect(ino).toContain('scheduleEditorBusy()');
+    expect(ino).toContain("style='max-width:88px'");
+    expect(ino).toContain("<button class='danger' onclick=\"this.parentElement.remove()\">Delete</button>");
     expect(ino).toContain('const shouldRedrawSchedules=forceScheduleRedraw||nextScheduleKey!==lastScheduleKey');
     expect(ino).toContain('class=\"relay-card zone-color-${zoneChannel(z)}\"');
   });
@@ -68,12 +70,16 @@ describe('firmware local admin/mobile api integration', () => {
     expect(wifiIdx).toBeGreaterThan(schedulesIdx);
     expect(factoryResetIdx).toBeGreaterThan(remoteSettingsIdx);
     expect(ino).toContain('class="actions header-actions"');
+    expect(ino).toContain('Save WiFi Settings');
+    expect(ino).toContain('grid-template-columns:90px 1fr');
+    expect(ino).toContain('timeline-block zone-color-${Number(r.channel||0)}');
     expect(ino).not.toContain(">Test Buzzer<");
     expect(ino).toContain('flex-wrap:wrap');
     expect(ino).toContain("function hydrateConfig(s){document.getElementById('apSsid').value=s.apSsid||''");
     expect(ino).toContain("document.getElementById('remoteApiBase').value=s.remoteApiBase||''");
     expect(ino).toContain("document.getElementById('remoteDeviceId').value=s.remoteDeviceId||''");
     expect(ino).toContain("document.getElementById('remoteApiKey').value=s.remoteApiKey||''");
+    expect(ino).toContain("cmd('/api/manual-run?zone=${z.zone}&minutes='+encodeURIComponent(document.getElementById('m${z.zone}').value))");
     expect(ino).toContain('doc["staSsid"] = staSsid;');
     expect(ino).toContain('doc["remoteApiBase"] = remoteApiBase;');
   });
