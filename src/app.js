@@ -397,10 +397,19 @@ function createApp(config = {}) {
       })
       .join('');
 
-    const schedulesMarkup = state.schedules.length
-      ? `<ul>${state.schedules.map((schedule) => `<li>${formatScheduleLabel(schedule)}</li>`).join('')}</ul>`
+    const parsedSchedules = state.schedules.filter((schedule) => typeof schedule === 'object' && schedule).map((schedule) => ({ ...schedule }));
+    const scheduleTimelineMarkup = parsedSchedules.length
+      ? `<div class="timeline">${parsedSchedules
+          .map((schedule) => {
+            const [hoursText = '0', minutesText = '0'] = String(schedule.startTime || '00:00').split(':');
+            const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
+            const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
+            const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
+            return `<div class="timeline-row"><span class="timeline-zone">${schedule.zone}</span><div class="timeline-track"><span class="timeline-block" style="left:${leftPercent}%;width:${widthPercent}%">${schedule.startTime} · ${schedule.durationSeconds}s</span></div></div>`;
+          })
+          .join('')}</div>`
       : '<p>No schedules configured.</p>';
-
+    const schedulesMarkup = state.schedules.length ? `<ul>${state.schedules.map((schedule) => `<li>${formatScheduleLabel(schedule)}</li>`).join('')}</ul>` : '';
     const defaultSchedule = state.schedules.find((schedule) => typeof schedule === 'object') || {};
 
     res.type('html').send(`<!doctype html>
@@ -410,39 +419,34 @@ function createApp(config = {}) {
     <meta http-equiv="refresh" content="1" />
     <style>
       :root { color-scheme: dark; --glow: 0 0 18px rgba(120,255,221,0.55); }
-      body { font-family: Inter, system-ui, sans-serif; margin: 0; color: #d8e6ff; background: radial-gradient(circle at top, #17331f 0%, #081628 38%, #03060f 100%); }
-      .shell { max-width: 1200px; margin: 0 auto; padding: 24px; }
-      .panel { background: rgba(8, 20, 30, 0.74); border: 1px solid rgba(128, 255, 199, 0.35); border-radius: 18px; box-shadow: 0 0 30px rgba(98, 255, 210, 0.2); backdrop-filter: blur(8px); }
-      h1,h2,h3 { color: #8fe8ff; letter-spacing: 0.03em; }
-      .hero { padding: 20px; margin-bottom: 18px; }
-      .timestamp { color: #93b9ff; }
-      .layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; }
-      .map-wrap { padding: 16px; }
-      .map-wrap svg { width: 100%; height: auto; background: linear-gradient(160deg, #020617, #071a32); border-radius: 14px; }
-      .zone { fill: rgba(111, 255, 205, 0.09); stroke: #72ffcb; stroke-width: 2.2; transition: fill 120ms linear, filter 120ms linear, stroke 120ms linear; }
-      .zone-active { fill: rgba(104, 255, 140, 0.45); stroke: #c0ffd2; filter: drop-shadow(var(--glow)); }
-      .linework { stroke: rgba(132, 163, 255, 0.6); }
-      .relay-section { padding: 16px; }
+      body { font-family: Inter, system-ui, sans-serif; margin: 0; color: #d8e6ff; background: #f1f5f9; }
+      .shell { max-width: 1400px; margin: 0 auto; padding: 16px; }
+      .panel { background: #ffffff; border: 1px solid #dbe7ef; border-radius: 18px; color:#123; box-shadow: 0 6px 18px rgba(15,23,42,0.07); }
+      h1,h2,h3 { color: #0f2d3f; letter-spacing: 0.01em; margin:0; }
+      .hero { padding: 20px; margin-bottom: 14px; display:flex; justify-content:space-between; align-items:center; }
+      .timestamp { color: #5d7284; margin:4px 0 0; }
+      .layout { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; }
+      .map-wrap { padding: 16px; } .map-wrap p,.relay-section p{color:#4f6474;}
+      .map-wrap svg { width: 100%; height: auto; background: linear-gradient(160deg, #dbeafe, #eff6ff); border-radius: 14px; }
+      .zone { fill: rgba(62, 184, 255, 0.17); stroke: #0f766e; stroke-width: 2; } .zone-active { fill: rgba(16,185,129,.4); stroke:#059669; filter: drop-shadow(var(--glow)); }
+      .linework { stroke: rgba(29, 78, 216, 0.35); } .relay-section { padding: 16px; }
       .relay-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
-      .relay-card { border: 1px solid rgba(127, 188, 255, 0.35); border-radius: 14px; padding: 12px; background: rgba(7, 17, 42, 0.85); }
+      .relay-card { border: 1px solid #d9e5ee; border-radius: 14px; padding: 12px; background: #fcfeff; }
       .relay-header, .relay-states, .relay-actions { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
-      .relay-states { font-size: 0.88rem; color: #b6d2ff; margin: 8px 0 12px; }
-      .status-pill { font-size: 0.7rem; padding: 4px 8px; border-radius: 999px; font-weight: 700; }
-      .status-mismatch { background: rgba(255, 88, 132, 0.22); color: #ff8fb0; }
-      .status-synced { background: rgba(83, 255, 204, 0.18); color: #8bffd3; }
-      button { border: 1px solid rgba(113, 255, 250, 0.5); color: #bcf9ff; background: linear-gradient(180deg, #103a61, #0b203f); padding: 7px 11px; border-radius: 10px; cursor: pointer; }
-      button:disabled { opacity: 0.4; cursor: not-allowed; }
-      .schedule { margin-top: 18px; padding: 16px; }
-      .schedule form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
-      label { display: flex; flex-direction: column; font-size: 0.85rem; color: #a9c4ff; }
-      input { margin-top: 6px; border-radius: 10px; border: 1px solid rgba(128, 173, 255, 0.35); background: #060d20; color: #d8e6ff; padding: 8px; }
-      @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .relay-grid, .schedule form { grid-template-columns: 1fr; } }
+      .relay-states { font-size: 0.88rem; color: #476070; margin: 8px 0 12px; }
+      .status-pill { font-size: 0.7rem; padding: 4px 8px; border-radius: 999px; font-weight: 700; } .status-mismatch { background: #ffe4ea; color: #b42345; } .status-synced { background: #dff8ea; color: #18794e; }
+      button { border: 1px solid #9cc3da; color: #123; background: #f3f9ff; padding: 7px 11px; border-radius: 10px; cursor: pointer; } button:disabled { opacity: 0.4; cursor: not-allowed; }
+      .schedule { margin-top: 14px; padding: 16px; } .timeline{display:grid;gap:8px;margin:12px 0 16px;} .timeline-row{display:grid;grid-template-columns:170px 1fr;align-items:center;gap:10px;} .timeline-zone{font-weight:600;color:#204055;}
+      .timeline-track{height:28px;background:repeating-linear-gradient(to right,#edf2f7,#edf2f7 7.6%,#f8fafc 7.6%,#f8fafc 8.33%);border:1px solid #d8e3eb;border-radius:999px;position:relative;overflow:hidden;} .timeline-block{position:absolute;top:2px;height:22px;border-radius:999px;background:linear-gradient(90deg,#16a34a,#22c55e);color:white;font-size:.75rem;display:flex;align-items:center;padding:0 10px;white-space:nowrap;}
+      .schedule form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; } label { display: flex; flex-direction: column; font-size: 0.85rem; color: #395267; }
+      input { margin-top: 6px; border-radius: 10px; border: 1px solid #c7d8e5; background: #fff; color: #213547; padding: 8px; } .raw-schedules{color:#688093;font-size:.85rem;}
+      @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .relay-grid, .schedule form { grid-template-columns: 1fr; } .timeline-row{grid-template-columns:1fr;} .hero{display:block;} }
     </style>
   </head>
   <body>
     <div class="shell">
       <section class="panel hero">
-        <h1>ESP32-S3-Relay-6CH Controller · Garden Fresh Futurism</h1>
+        <h1>Castle Hills Garden Manager</h1>
         <p class="timestamp">Current server time (UTC): <strong>${new Date().toISOString()}</strong></p>
         <p class="timestamp">Auto-refresh: every 1 second · Active zones glowing on map.</p>
       </section>
@@ -466,7 +470,7 @@ function createApp(config = {}) {
       </div>
       <section class="panel schedule">
         <h2>Schedules</h2>
-        ${schedulesMarkup}
+        ${scheduleTimelineMarkup}<details class="raw-schedules"><summary>Raw schedule list</summary>${schedulesMarkup}</details>
         <h3>Update schedules</h3>
         <form method="post" action="/gui/schedules">
           <label>Zone <input name="zone" value="${defaultSchedule.zone || ''}" required /></label>
