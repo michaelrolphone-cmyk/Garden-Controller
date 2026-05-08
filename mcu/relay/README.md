@@ -355,7 +355,7 @@ Added endpoints:
 - `POST /api/schedules` - replace schedules from JSON array payload.
 
 Existing control/telemetry endpoints retained for local clients:
-- `GET /api/state`
+- `GET /api/state` (includes runtime telemetry plus editable local config fields used by `/admin` hydration: `apSsid`, `apPass`, `staSsid`, `staPass`, `remoteEnabled`, `remoteApiBase`, `remoteDeviceId`, `remoteApiKey`, `gardenLatitude`, `gardenLongitude`, `gardenTimeZone`, `gardenPosixTimeZone`)
 - `GET /api/time/set?epoch=...`
 - `GET /api/relay?zone=1&state=1`
 - `GET /api/manual-run?zone=1&minutes=15`

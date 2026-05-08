@@ -34,6 +34,8 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain("#adminSchedRows .actions");
     expect(ino).toContain('lastScheduleKey');
     expect(ino).toContain('scheduleEditorBusy()');
+    expect(ino).toContain("style='max-width:88px'");
+    expect(ino).toContain("<button class='danger' onclick=\"this.parentElement.remove()\">Delete</button>");
     expect(ino).toContain('const shouldRedrawSchedules=forceScheduleRedraw||nextScheduleKey!==lastScheduleKey');
     expect(ino).toContain('class=\"relay-card zone-color-${zoneChannel(z)}\"');
   });
@@ -58,4 +60,39 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain("fetch('/api/alloff')");
     expect(ino).toContain("fetch('/api/factory-reset')");
   });
+  test('admin ui separates remote api test section and places wifi settings below schedules with bottom factory reset', () => {
+    const wifiIdx = ino.indexOf('<h2>WiFi Settings</h2>');
+    const schedulesIdx = ino.indexOf('<h2>Zones (scheduled irrigation)</h2>');
+    const remoteSettingsIdx = ino.indexOf('<h2>Remote API Settings</h2>');
+    const factoryResetIdx = ino.indexOf('<h2>Factory Reset</h2>');
+
+    expect(schedulesIdx).toBeGreaterThan(-1);
+    expect(wifiIdx).toBeGreaterThan(schedulesIdx);
+    expect(factoryResetIdx).toBeGreaterThan(remoteSettingsIdx);
+    expect(ino).toContain('class="actions header-actions"');
+    expect(ino).toContain('Save WiFi Settings');
+    expect(ino).toContain('grid-template-columns:90px 1fr');
+    expect(ino).toContain('timeline-block zone-color-${Number(r.channel||0)}');
+    expect(ino).not.toContain(">Test Buzzer<");
+    expect(ino).toContain('flex-wrap:wrap');
+    expect(ino).toContain("function hydrateConfig(s){document.getElementById('apSsid').value=s.apSsid||''");
+    expect(ino).toContain("document.getElementById('remoteApiBase').value=s.remoteApiBase||''");
+    expect(ino).toContain("document.getElementById('remoteDeviceId').value=s.remoteDeviceId||''");
+    expect(ino).toContain("document.getElementById('remoteApiKey').value=s.remoteApiKey||''");
+    expect(ino).toContain("cmd('/api/manual-run?zone=${z.zone}&minutes='+encodeURIComponent(document.getElementById('m${z.zone}').value))");
+    expect(ino).toContain('doc["staSsid"] = staSsid;');
+    expect(ino).toContain('doc["remoteApiBase"] = remoteApiBase;');
+  });
+
+  test('config api still accepts and persists wifi and remote fields', () => {
+    expect(ino).toContain('void handleApiConfigSet()');
+    expect(ino).toContain('if (doc["staSsid"].is<const char*>()) strlcpy(staSsid, doc["staSsid"], sizeof(staSsid));');
+    expect(ino).toContain('if (doc["staPass"].is<const char*>()) strlcpy(staPass, doc["staPass"], sizeof(staPass));');
+    expect(ino).toContain('if (doc["remoteApiBase"].is<const char*>()) strlcpy(remoteApiBase, doc["remoteApiBase"], sizeof(remoteApiBase));');
+    expect(ino).toContain('if (doc["remoteDeviceId"].is<const char*>()) strlcpy(remoteDeviceId, doc["remoteDeviceId"], sizeof(remoteDeviceId));');
+    expect(ino).toContain('if (doc["remoteApiKey"].is<const char*>()) strlcpy(remoteApiKey, doc["remoteApiKey"], sizeof(remoteApiKey));');
+    expect(ino).toContain('if (strlen(staSsid) > 0) connectSta(false);');
+    expect(ino).toContain('saveConfig();');
+  });
+
 });
