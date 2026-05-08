@@ -61,20 +61,21 @@ describe('firmware local admin/mobile api integration', () => {
   test('admin ui separates remote api test section and places wifi settings below schedules with bottom factory reset', () => {
     const wifiIdx = ino.indexOf('<h2>WiFi Settings</h2>');
     const schedulesIdx = ino.indexOf('<h2>Zones (scheduled irrigation)</h2>');
-    const remoteTestIdx = ino.indexOf('<h2>Test Remote API</h2>');
     const remoteSettingsIdx = ino.indexOf('<h2>Remote API Settings</h2>');
     const factoryResetIdx = ino.indexOf('<h2>Factory Reset</h2>');
 
     expect(schedulesIdx).toBeGreaterThan(-1);
     expect(wifiIdx).toBeGreaterThan(schedulesIdx);
-    expect(remoteTestIdx).toBeGreaterThan(remoteSettingsIdx);
-    expect(factoryResetIdx).toBeGreaterThan(remoteTestIdx);
+    expect(factoryResetIdx).toBeGreaterThan(remoteSettingsIdx);
     expect(ino).toContain('class="actions header-actions"');
+    expect(ino).not.toContain(">Test Buzzer<");
     expect(ino).toContain('flex-wrap:wrap');
     expect(ino).toContain("function hydrateConfig(s){document.getElementById('apSsid').value=s.apSsid||''");
     expect(ino).toContain("document.getElementById('remoteApiBase').value=s.remoteApiBase||''");
     expect(ino).toContain("document.getElementById('remoteDeviceId').value=s.remoteDeviceId||''");
     expect(ino).toContain("document.getElementById('remoteApiKey').value=s.remoteApiKey||''");
+    expect(ino).toContain('doc["staSsid"] = staSsid;');
+    expect(ino).toContain('doc["remoteApiBase"] = remoteApiBase;');
   });
 
 });
