@@ -243,6 +243,7 @@ paths:
               type: object
               properties:
                 schedule[0][enabled]: { type: boolean, default: true }
+                schedule[0][id]: { type: integer, description: Existing firmware schedule identifier to amend an existing entry. }
                 schedule[0][channel]: { type: integer, minimum: 1, maximum: 5 }
                 schedule[0][zone]: { type: string }
                 schedule[0][startTime]: { type: string, example: '06:00' }
