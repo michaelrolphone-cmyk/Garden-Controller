@@ -52,7 +52,7 @@ paths:
                 durationSeconds:
                   type: integer
                   minimum: 1
-                  description: Used for channel 6 spigot/master-valve timed runs.
+                  description: Used for timed ON runs (zones and channel 6); defaults to 900 seconds (15 minutes).
       responses:
         '201': { description: Command queued }
         '400': { description: Invalid payload }

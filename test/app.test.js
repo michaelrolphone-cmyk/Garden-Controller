@@ -342,8 +342,8 @@ describe('garden controller api', () => {
 
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
-    expect(guiRes.text).toContain('id="zone-2" class="zone zone-theme-2 zone-active" data-active="true"');
-    expect(guiRes.text).toContain('id="zone-1" class="zone zone-theme-1 " data-active="false"');
+    expect(guiRes.text).toContain('id="zone-6" class="zone zone-theme-2 zone-active" data-active="true"');
+    expect(guiRes.text).toContain('id="zone-3" class="zone zone-theme-1 " data-active="false"');
   });
 
   test('gui relay action endpoint only allows explicit on/off actions', async () => {
@@ -386,7 +386,14 @@ describe('garden controller api', () => {
     expect(res.status).toBe(400);
   });
 
-  test('POST /api/commands accepts channel 6 with durationSeconds', async () => {
+  
+  test('zone on commands default to 15-minute timed runs', async () => {
+    const app = build();
+    const res = await request(app).post('/api/commands').set('x-api-token', token).send({ channel: 1, action: 'on' });
+    expect(res.status).toBe(201);
+    expect(res.body.command.durationSeconds).toBe(900);
+  });
+test('POST /api/commands accepts channel 6 with durationSeconds', async () => {
     const app = build();
     const res = await request(app).post('/api/commands').set('x-api-token', token).send({ channel: 6, action: 'on', durationSeconds: 1800 });
     expect(res.status).toBe(201);
