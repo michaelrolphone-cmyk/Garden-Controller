@@ -761,14 +761,30 @@ function createApp(config = {}) {
       .filter((schedule) => typeof schedule === 'object' && schedule)
       .map((schedule, index) => ({ id: schedule.id ?? index, ...schedule }))
       .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
-    const scheduleTimelineMarkup = parsedSchedules.length
-      ? `<div class="timeline">${parsedSchedules
-          .map((schedule) => {
-            const [hoursText = '0', minutesText = '0'] = String(schedule.startTime || '00:00').split(':');
-            const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
-            const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
-            const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
-            return `<div class="timeline-row"><span class="timeline-zone">${schedule.zone}</span><div class="timeline-track"><span class="timeline-block" style="left:${leftPercent}%;width:${widthPercent}%">${schedule.startTime} · ${Math.max(1, Math.round((Number(schedule.durationSeconds) || 0) / 60))} min</span></div></div>`;
+    const timelineRows = parsedSchedules.reduce((rows, schedule) => {
+      const key = `${schedule.channel}:${schedule.zone}`;
+      const existingRow = rows.find((row) => row.key === key);
+      if (existingRow) {
+        existingRow.schedules.push(schedule);
+      } else {
+        rows.push({ key, channel: schedule.channel, zone: schedule.zone, schedules: [schedule] });
+      }
+      return rows;
+    }, []);
+    const scheduleTimelineMarkup = timelineRows.length
+      ? `<div class="timeline">${timelineRows
+          .map((row) => {
+            const blocksMarkup = row.schedules
+              .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)))
+              .map((schedule) => {
+                const [hoursText = '0', minutesText = '0'] = String(schedule.startTime || '00:00').split(':');
+                const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
+                const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
+                const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
+                return `<span class="timeline-block" style="left:${leftPercent}%;width:${widthPercent}%">${schedule.startTime} · ${Math.max(1, Math.round((Number(schedule.durationSeconds) || 0) / 60))} min</span>`;
+              })
+              .join('');
+            return `<div class="timeline-row"><span class="timeline-zone">${row.zone}</span><div class="timeline-track">${blocksMarkup}</div></div>`;
           })
           .join('')}</div>`
       : '<p>No schedules configured.</p>';

@@ -400,6 +400,26 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('13:00 · 30 min');
   });
 
+  test('gui renders multiple daily schedules for a zone on the same timeline row', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/microcontroller/schedules')
+      .set('x-api-token', token)
+      .send({
+        schedules: [
+          { channel: 2, zone: 'Herbs', startTime: '06:00', durationSeconds: 600 },
+          { channel: 2, zone: 'Herbs', startTime: '18:00', durationSeconds: 300 }
+        ]
+      });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('06:00 · 10 min');
+    expect(guiRes.text).toContain('18:00 · 5 min');
+    expect(guiRes.text.match(/<span class="timeline-zone">Herbs<\/span>/g)).toHaveLength(1);
+    expect(guiRes.text).toMatch(/<span class="timeline-zone">Herbs<\/span><div class="timeline-track">.*06:00 · 10 min.*18:00 · 5 min.*<\/div><\/div>/s);
+  });
+
   test('gui schedule form accepts minutes and stores seconds', async () => {
     const app = build();
     const res = await request(app)
