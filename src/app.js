@@ -960,6 +960,7 @@ function createApp(config = {}) {
       const formatScheduleLabel = (schedule) => typeof schedule === 'string'
         ? schedule
         : \`\${schedule.zone} (relay \${schedule.channel}) at \${schedule.startTime} for \${schedule.durationSeconds}s\`;
+      let lastRenderedScheduleFormSignature = null;
       function renderFromState(state) {
         const formatTimeSince = (lastSeenAt) => {
           if (!lastSeenAt) return 'never';
@@ -1025,19 +1026,30 @@ function createApp(config = {}) {
         rawSchedules.innerHTML = schedules.length ? \`<ul>\${schedules.map((schedule) => \`<li>\${formatScheduleLabel(schedule)}</li>\`).join('')}</ul>\` : '';
         const scheduleFormBody = document.getElementById('schedule-form-body');
         if (scheduleFormBody) {
-          scheduleFormBody.innerHTML = parsedSchedules.map((schedule, index) => {
-            const scheduleId = Number.isInteger(schedule.id) ? schedule.id : index;
-            const isEnabled = schedule.enabled === false ? '' : 'checked';
-            const zoneName = schedule.zone || ('Zone ' + schedule.channel);
-            const channel = schedule.channel || 1;
-            const startTime = schedule.startTime || '06:00';
-            const durationMinutes = Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60));
-            return '<tr><td><input name="schedule[' + index + '][id]" type="hidden" value="' + scheduleId + '" /><input name="schedule[' + index + '][enabled]" type="checkbox" ' + isEnabled + ' /></td>'
-              + '<td><input name="schedule[' + index + '][zone]" value="' + zoneName + '" required /></td>'
-              + '<td><input name="schedule[' + index + '][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="' + channel + '" required /></td>'
-              + '<td><input name="schedule[' + index + '][startTime]" type="time" value="' + startTime + '" required /></td>'
-              + '<td><input name="schedule[' + index + '][durationMinutes]" type="number" min="1" max="240" value="' + durationMinutes + '" required /></td></tr>';
-          }).join('');
+          const scheduleFormSignature = JSON.stringify(parsedSchedules.map((schedule) => ({
+            id: Number.isInteger(schedule.id) ? schedule.id : null,
+            enabled: schedule.enabled !== false,
+            zone: schedule.zone || '',
+            channel: schedule.channel || 1,
+            startTime: schedule.startTime || '06:00',
+            durationSeconds: Number(schedule.durationSeconds) || 900
+          })));
+          if (scheduleFormSignature !== lastRenderedScheduleFormSignature) {
+            scheduleFormBody.innerHTML = parsedSchedules.map((schedule, index) => {
+              const scheduleId = Number.isInteger(schedule.id) ? schedule.id : index;
+              const isEnabled = schedule.enabled === false ? '' : 'checked';
+              const zoneName = schedule.zone || ('Zone ' + schedule.channel);
+              const channel = schedule.channel || 1;
+              const startTime = schedule.startTime || '06:00';
+              const durationMinutes = Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60));
+              return '<tr><td><input name="schedule[' + index + '][id]" type="hidden" value="' + scheduleId + '" /><input name="schedule[' + index + '][enabled]" type="checkbox" ' + isEnabled + ' /></td>'
+                + '<td><input name="schedule[' + index + '][zone]" value="' + zoneName + '" required /></td>'
+                + '<td><input name="schedule[' + index + '][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="' + channel + '" required /></td>'
+                + '<td><input name="schedule[' + index + '][startTime]" type="time" value="' + startTime + '" required /></td>'
+                + '<td><input name="schedule[' + index + '][durationMinutes]" type="number" min="1" max="240" value="' + durationMinutes + '" required /></td></tr>';
+            }).join('');
+            lastRenderedScheduleFormSignature = scheduleFormSignature;
+          }
         }
         const sensorContainer = document.getElementById('sensor-data');
         const readings = state.latestSensorData && Array.isArray(state.latestSensorData.sensorData)
