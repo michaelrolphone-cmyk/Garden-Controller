@@ -20,9 +20,11 @@ components:
     PublishedSchedule:
       type: object
       properties:
+        id: { type: integer }
         channel: { type: integer, minimum: 1, maximum: 5 }
         zone: { type: string }
-        startTime: { type: string }
+        enabled: { type: boolean, default: true }
+        startTime: { type: string, example: '15:30' }
         durationSeconds: { type: integer, minimum: 1 }
       required: [channel, zone, startTime, durationSeconds]
 paths:
@@ -192,6 +194,7 @@ paths:
         '502': { description: Weather refresh failed }
   /api/schedules:
     post:
+      description: Replace the active daily schedule list with this ordered array. Multiple entries may use the same channel.
       responses:
         '201': { description: Schedules stored and queued }
         '400': { description: Invalid payload }
@@ -239,10 +242,11 @@ paths:
             schema:
               type: object
               properties:
-                channel: { type: integer, minimum: 1, maximum: 5 }
-                zone: { type: string }
-                startTime: { type: string }
-                durationMinutes: { type: integer, minimum: 1 }
+                schedule[0][enabled]: { type: boolean, default: true }
+                schedule[0][channel]: { type: integer, minimum: 1, maximum: 5 }
+                schedule[0][zone]: { type: string }
+                schedule[0][startTime]: { type: string, example: '06:00' }
+                schedule[0][durationMinutes]: { type: integer, minimum: 1 }
       responses:
         '303': { description: Schedule update queued }
         '400': { description: Invalid schedule payload }

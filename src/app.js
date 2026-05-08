@@ -8,7 +8,7 @@ const RELAY_CHANNELS = 6;
 const MASTER_VALVE_CHANNEL = 6;
 const DEFAULT_ON_DURATION_MINUTES = 15;
 const DEFAULT_ON_DURATION_SECONDS = DEFAULT_ON_DURATION_MINUTES * 60;
-
+const MAX_DAILY_SCHEDULES = 64;
 
 const GARDEN_LOCATION = { lat: 43.665288, lon: -116.259186, label: 'garden' };
 
@@ -420,6 +420,12 @@ function createApp(config = {}) {
 
   app.post('/api/schedules', requireApiToken, (req, res) => {
     const { schedules } = req.body;
+    if (Array.isArray(schedules) && schedules.length > MAX_DAILY_SCHEDULES) {
+      return res.status(400).json({
+        error: 'Too many schedule entries',
+        detail: `Firmware supports up to ${MAX_DAILY_SCHEDULES} daily schedule entries.`
+      });
+    }
     const validSchedulesPayload =
       Array.isArray(schedules) &&
       schedules.length > 0 &&
@@ -444,9 +450,11 @@ function createApp(config = {}) {
       });
     }
 
-    const normalizedSchedules = schedules.map((schedule) => ({
+    const normalizedSchedules = schedules.map((schedule, index) => ({
+      id: schedule.id ?? index,
       channel: schedule.channel,
       zone: schedule.zone.trim(),
+      enabled: schedule.enabled === undefined ? true : Boolean(schedule.enabled),
       startTime: schedule.startTime.trim(),
       durationSeconds: schedule.durationSeconds
     }));
@@ -749,7 +757,10 @@ function createApp(config = {}) {
       .join('');
 
     const envFeeds = buildEnvironmentalFeeds();
-    const parsedSchedules = state.schedules.filter((schedule) => typeof schedule === 'object' && schedule).map((schedule) => ({ ...schedule }));
+    const parsedSchedules = state.schedules
+      .filter((schedule) => typeof schedule === 'object' && schedule)
+      .map((schedule, index) => ({ id: schedule.id ?? index, ...schedule }))
+      .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
     const scheduleTimelineMarkup = parsedSchedules.length
       ? `<div class="timeline">${parsedSchedules
           .map((schedule) => {
@@ -762,7 +773,7 @@ function createApp(config = {}) {
           .join('')}</div>`
       : '<p>No schedules configured.</p>';
     const schedulesMarkup = state.schedules.length ? `<ul>${state.schedules.map((schedule) => `<li>${formatScheduleLabel(schedule)}</li>`).join('')}</ul>` : '';
-    const defaultSchedule = state.schedules.find((schedule) => typeof schedule === 'object') || {};
+    const defaultSchedules = parsedSchedules.length ? parsedSchedules : [{ id: 0, channel: 1, zone: 'Zone 1', enabled: true, startTime: '06:00', durationSeconds: 600 }];
     const sensorDataMarkup = renderSensorDataMarkup(state.latestSensorData, state.deviceTelemetry);
     const telemetryMarkup = renderTelemetryMarkup(state.deviceTelemetry);
 
@@ -792,7 +803,8 @@ function createApp(config = {}) {
       .env-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px;} .env-card{border:1px solid #d9e5ee;border-radius:12px;padding:12px;background:#fcfeff;} .env-card iframe{width:100%;height:260px;border:0;border-radius:10px;} .env-links{margin:8px 0 0;padding-left:18px;} .sensor-table{width:100%;border-collapse:collapse;margin-top:8px;} .sensor-table th,.sensor-table td,.telemetry-table th,.telemetry-table td{border-bottom:1px solid #d9e5ee;padding:8px 6px;text-align:left;font-size:.85rem;color:#28455a;} .telemetry-table{width:100%;border-collapse:collapse;margin-top:8px;}
       .schedule { margin-top: 14px; padding: 16px; } .timeline{display:grid;gap:8px;margin:12px 0 16px;} .timeline-row{display:grid;grid-template-columns:170px 1fr;align-items:center;gap:10px;} .timeline-zone{font-weight:600;color:#204055;}
       .timeline-track{height:28px;background:repeating-linear-gradient(to right,#edf2f7,#edf2f7 7.6%,#f8fafc 7.6%,#f8fafc 8.33%);border:1px solid #d8e3eb;border-radius:999px;position:relative;overflow:hidden;} .timeline-block{position:absolute;top:2px;height:22px;border-radius:999px;background:linear-gradient(90deg,#16a34a,#22c55e);color:white;font-size:.75rem;display:flex;align-items:center;padding:0 10px;white-space:nowrap;}
-      .schedule form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; } label { display: flex; flex-direction: column; font-size: 0.85rem; color: #395267; }
+.schedule-table{width:100%;border-collapse:collapse;margin:12px 0;} .schedule-table th,.schedule-table td{border-bottom:1px solid #d9e5ee;padding:8px 6px;text-align:left;font-size:.85rem;color:#28455a;} .schedule-table input[type='checkbox']{margin:0;}
+      .schedule form { display: grid; grid-template-columns: 1fr; gap: 10px; } label { display: flex; flex-direction: column; font-size: 0.85rem; color: #395267; }
       input { margin-top: 6px; border-radius: 10px; border: 1px solid #c7d8e5; background: #fff; color: #213547; padding: 8px; } .raw-schedules{color:#688093;font-size:.85rem;}
       @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .relay-grid, .schedule form { grid-template-columns: 1fr; } .timeline-row{grid-template-columns:1fr;} .hero{display:block;} }
     </style>
@@ -866,11 +878,8 @@ function createApp(config = {}) {
         <div id="schedule-timeline">${scheduleTimelineMarkup}</div><details class="raw-schedules"><summary>Raw schedule list</summary><div id="raw-schedules">${schedulesMarkup}</div></details>
         <h3>Update schedules</h3>
         <form method="post" action="/gui/schedules">
-          <label>Zone <input name="zone" value="${defaultSchedule.zone || ''}" required /></label>
-          <label>Channel <input name="channel" type="number" min="1" max="${ZONE_CHANNELS}" value="${defaultSchedule.channel || 1}" required /></label>
-          <label>Start Time <input name="startTime" value="${defaultSchedule.startTime || '06:00'}" required /></label>
-          <label>Duration (minutes) <input name="durationMinutes" type="number" min="1" value="${Math.max(1, Math.round((Number(defaultSchedule.durationSeconds) || 900) / 60))}" required /></label>
-          <button type="submit">Save schedule</button>
+          <table class="schedule-table"><thead><tr><th>Enabled</th><th>Zone</th><th>Channel</th><th>Start Time</th><th>Duration Minutes</th></tr></thead><tbody>${defaultSchedules.map((schedule, index) => `<tr><td><input name="schedule[${index}][enabled]" type="checkbox" ${schedule.enabled === false ? '' : 'checked'} /></td><td><input name="schedule[${index}][zone]" value="${schedule.zone || `Zone ${schedule.channel}`}" required /></td><td><input name="schedule[${index}][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="${schedule.channel || 1}" required /></td><td><input name="schedule[${index}][startTime]" type="time" value="${schedule.startTime || '06:00'}" required /></td><td><input name="schedule[${index}][durationMinutes]" type="number" min="1" max="240" value="${Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60))}" required /></td></tr>`).join('')}</tbody></table>
+          <button type="submit">Save schedules</button>
         </form>
       </section>
     </div>
@@ -917,7 +926,10 @@ function createApp(config = {}) {
           }
         }
         const schedules = Array.isArray(state.schedules) ? state.schedules : [];
-        const parsedSchedules = schedules.filter((schedule) => typeof schedule === 'object' && schedule);
+        const parsedSchedules = schedules
+          .filter((schedule) => typeof schedule === 'object' && schedule)
+          .map((schedule, index) => ({ id: schedule.id ?? index, ...schedule }))
+          .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
         const scheduleTimeline = document.getElementById('schedule-timeline');
         scheduleTimeline.innerHTML = parsedSchedules.length ? \`<div class="timeline">\${parsedSchedules.map((schedule) => {
           const [hoursText = '0', minutesText = '0'] = String(schedule.startTime || '00:00').split(':');
@@ -1024,34 +1036,44 @@ function createApp(config = {}) {
   });
 
   app.post('/gui/schedules', requireGuiAuth, (req, res) => {
-    const channel = Number.parseInt(req.body.channel, 10);
-    const durationMinutes = Number.parseInt(req.body.durationMinutes ?? req.body.durationSeconds, 10);
-    const durationSeconds = Number.isInteger(durationMinutes) && durationMinutes > 0 ? durationMinutes * 60 : Number.NaN;
-    const zone = typeof req.body.zone === 'string' ? req.body.zone.trim() : '';
-    const startTime = typeof req.body.startTime === 'string' ? req.body.startTime.trim() : '';
-
-    if (
-      !Number.isInteger(channel) ||
-      channel < 1 ||
-      channel > RELAY_CHANNELS ||
-      !Number.isInteger(durationSeconds) ||
-      durationSeconds <= 0 ||
-      !zone ||
-      !startTime
-    ) {
-      return res.status(400).send('Invalid schedule payload');
+    const rowsByIndex = {};
+    for (const [key, value] of Object.entries(req.body)) {
+      const match = key.match(/^schedule\[(\d+)\]\[(\w+)\]$/);
+      if (match) {
+        const index = Number.parseInt(match[1], 10);
+        const field = match[2];
+        rowsByIndex[index] = rowsByIndex[index] || {};
+        rowsByIndex[index][field] = value;
+      }
     }
 
-    const schedule = { channel, zone, startTime, durationSeconds };
-    state.schedules = [schedule];
-    const command = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type: 'schedule_update',
-      schedules: [schedule],
-      requestedBy: 'gui-web',
-      createdAt: new Date().toISOString(),
-      status: 'queued'
-    };
+    if (!Object.keys(rowsByIndex).length && req.body.channel && req.body.zone) {
+      rowsByIndex[0] = {
+        channel: req.body.channel,
+        zone: req.body.zone,
+        startTime: req.body.startTime,
+        durationMinutes: req.body.durationMinutes,
+        enabled: 'on'
+      };
+    }
+
+    const scheduleRows = Object.keys(rowsByIndex).sort((a,b)=>Number(a)-Number(b)).map((key) => rowsByIndex[key]);
+    if (!scheduleRows.length || scheduleRows.length > MAX_DAILY_SCHEDULES) return res.status(400).send('Invalid schedule payload');
+
+    const schedules = scheduleRows.map((row, index) => ({
+      id: index,
+      channel: Number.parseInt(row.channel, 10),
+      zone: typeof row.zone === 'string' ? row.zone.trim() : '',
+      enabled: row.enabled !== undefined,
+      startTime: typeof row.startTime === 'string' ? row.startTime.trim() : '',
+      durationSeconds: Number.parseInt(row.durationMinutes, 10) * 60
+    }));
+
+    const hasInvalid = schedules.some((schedule) => !Number.isInteger(schedule.channel) || schedule.channel < 1 || schedule.channel > ZONE_CHANNELS || !Number.isInteger(schedule.durationSeconds) || schedule.durationSeconds <= 0 || !schedule.zone || !schedule.startTime);
+    if (hasInvalid) return res.status(400).send('Invalid schedule payload');
+
+    state.schedules = schedules;
+    const command = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, type: 'schedule_update', schedules, requestedBy: 'gui-web', createdAt: new Date().toISOString(), status: 'queued' };
     state.queue.push(command);
     wakePendingPolls();
     return res.redirect(303, '/gui');

@@ -198,6 +198,67 @@ describe('garden controller api', () => {
     expect(res.body.command.status).toBe('queued');
   });
 
+
+  test('POST /api/schedules accepts multiple entries for the same zone', async () => {
+    const app = build();
+    const res = await request(app)
+      .post('/api/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [
+        { channel: 1, zone: 'Zone 1', enabled: true, startTime: '06:00', durationSeconds: 600 },
+        { channel: 1, zone: 'Zone 1', enabled: true, startTime: '15:30', durationSeconds: 420 }
+      ] });
+    expect(res.status).toBe(201);
+    expect(res.body.schedules).toHaveLength(2);
+    expect(res.body.command.type).toBe('schedule_update');
+    expect(res.body.command.schedules).toHaveLength(2);
+  });
+
+  test('POST /api/schedules rejects oversized schedule list', async () => {
+    const app = build();
+    const schedules = Array.from({ length: 65 }, (_, index) => ({ channel: (index % 5) + 1, zone: `Zone ${(index % 5) + 1}`, startTime: '06:00', durationSeconds: 300 }));
+    const res = await request(app).post('/api/schedules').set('x-api-token', token).send({ schedules });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Too many schedule entries');
+  });
+
+  test('POST /api/schedules preserves enabled=false', async () => {
+    const app = build();
+    const res = await request(app).post('/api/schedules').set('x-api-token', token).send({ schedules: [{ channel: 2, zone: 'Zone 2', enabled: false, startTime: '09:00', durationSeconds: 600 }] });
+    expect(res.status).toBe(201);
+    expect(res.body.schedules[0].enabled).toBe(false);
+    expect(res.body.command.schedules[0].enabled).toBe(false);
+  });
+
+  test('POST /api/microcontroller/state stores repeated-channel schedules', async () => {
+    const app = build();
+    const res = await request(app).post('/api/microcontroller/state').set('x-api-token', token).send({
+      deviceId: 'garden-relay-6', firmwareVersion: 'v23', relays: [{ channel: 1, state: 'off' }],
+      schedules: [
+        { id: 11, channel: 1, zone: 'Zone 1', enabled: true, startTime: '06:00', durationSeconds: 600 },
+        { id: 12, channel: 1, zone: 'Zone 1', enabled: false, startTime: '15:30', durationSeconds: 420 }
+      ]
+    });
+    expect(res.status).toBe(200);
+    const stateRes = await request(app).get('/api/state').set('x-api-token', token);
+    expect(stateRes.body.schedules).toHaveLength(2);
+    expect(stateRes.body.schedules[1].enabled).toBe(false);
+    expect(stateRes.body.schedules[1].id).toBe(12);
+  });
+
+  test('gui renders multiple schedule entries for same channel without collapsing', async () => {
+    const app = build();
+    await request(app).post('/api/schedules').set('x-api-token', token).send({ schedules: [
+      { channel: 1, zone: 'Zone 1', enabled: true, startTime: '15:30', durationSeconds: 420 },
+      { channel: 1, zone: 'Zone 1', enabled: true, startTime: '06:00', durationSeconds: 600 }
+    ]});
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('15:30 · 7 min');
+    expect(guiRes.text).toContain('06:00 · 10 min');
+    expect(guiRes.text).toContain('name="schedule[0][enabled]"');
+    expect(guiRes.text).toContain('name="schedule[1][enabled]"');
+  });
   test('queue next supports long-poll and wakes when new command is queued', async () => {
     const app = build();
     const pollPromise = request(app).get('/api/queue/next?wait=1').set('x-api-token', token);
@@ -350,7 +411,7 @@ describe('garden controller api', () => {
 
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.text).toContain('for 12 min');
-    expect(guiRes.text).toContain('Duration (minutes)');
+    expect(guiRes.text).toContain('Duration Minutes');
   });
 
   test('gui map marks active zones from reported relay state', async () => {
