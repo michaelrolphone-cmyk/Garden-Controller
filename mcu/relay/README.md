@@ -343,3 +343,37 @@ Restored the configuration and daily schedule helper functions that were missing
 - `factoryReset`
 
 Also added explicit forward declarations so the Arduino builder does not fail prototype generation.
+
+## v26 local API expansion for admin/mobile clients
+
+Firmware now exposes local API resources so local clients can use API calls directly for telemetry, configuration, schedules, relay state control, and feature discovery over Wi-Fi. The firmware admin UI now includes direct zone ON/OFF controls and an API-backed schedule manager that posts full schedule payloads to local endpoints.
+
+Added endpoints:
+- `GET /api/features` - discover available telemetry and controls.
+- `GET /api/config` - read current editable local configuration.
+- `POST /api/config` - update local configuration using JSON.
+- `POST /api/schedules` - replace schedules from JSON array payload.
+
+Existing control/telemetry endpoints retained for local clients:
+- `GET /api/state`
+- `GET /api/time/set?epoch=...`
+- `GET /api/relay?zone=1&state=1`
+- `GET /api/manual-run?zone=1&minutes=15`
+- `GET /api/spigots-run?minutes=15`
+- `GET /api/spigots-run?action=off`
+- `GET /api/alloff`
+- `GET /api/buzzer-test`
+- `GET /api/factory-reset`
+
+This keeps local API access unauthenticated on the LAN/AP as requested.
+
+## v27 admin UI aligned to server web app layout
+
+The firmware `/admin` page now mirrors the server web interface structure for local-only operation:
+- "Castle Hills Garden Manager" style admin shell
+- Garden zone map with active-zone highlighting
+- Zone cards with run/stop/timed-run controls
+- Schedule timeline rendering from firmware local state
+- 1-second refresh loop from `GET /api/state`
+
+This admin UI uses firmware local endpoints directly over Wi-Fi and does not depend on server-pushed payloads.
