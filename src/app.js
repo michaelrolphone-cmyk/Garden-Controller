@@ -55,9 +55,72 @@ function createApp(config = {}) {
   app.use(express.urlencoded({ extended: false }));
 
   const state = config.state || createState();
+  const pendingPolls = [];
+  const MAX_LONG_POLL_WAIT_MS = 25_000;
   const guiUsername = normalizeCredentialValue(config.guiUsername ?? process.env.GUI_USERNAME);
   const guiPassword = normalizeCredentialValue(config.guiPassword ?? process.env.GUI_PASSWORD);
   const apiToken = normalizeCredentialValue(config.apiKey ?? config.apiToken ?? process.env.API_KEY ?? process.env.API_TOKEN);
+
+  function getNextQueuedCommand() {
+    return state.queue.find((queuedCommand) => queuedCommand.status === 'queued');
+  }
+
+  function deliverCommand(command) {
+    command.status = 'delivered';
+    command.deliveredAt = new Date().toISOString();
+    return { command };
+  }
+
+  function removePendingPoll(poll) {
+    const index = pendingPolls.indexOf(poll);
+    if (index >= 0) {
+      pendingPolls.splice(index, 1);
+    }
+  }
+
+  function wakePendingPolls() {
+    while (pendingPolls.length > 0) {
+      const command = getNextQueuedCommand();
+      if (!command) {
+        return false;
+      }
+
+      const poll = pendingPolls.shift();
+      clearTimeout(poll.timeout);
+      poll.res.json(deliverCommand(command));
+      return true;
+    }
+
+    return false;
+  }
+
+  function holdLongPoll(req, res) {
+    const requestedWaitSeconds = Number.parseInt(req.query.wait, 10);
+    const waitMs = Number.isInteger(requestedWaitSeconds)
+      ? Math.max(1000, Math.min(requestedWaitSeconds * 1000, MAX_LONG_POLL_WAIT_MS))
+      : 0;
+
+    if (waitMs <= 0) {
+      return res.status(204).send();
+    }
+
+    const poll = { req, res, timeout: null };
+
+    poll.timeout = setTimeout(() => {
+      removePendingPoll(poll);
+      if (!res.headersSent) {
+        res.status(204).send();
+      }
+    }, waitMs);
+
+    req.on('close', () => {
+      clearTimeout(poll.timeout);
+      removePendingPoll(poll);
+    });
+
+    pendingPolls.push(poll);
+    return undefined;
+  }
 
   function requireApiToken(req, res, next) {
     const provided = req.get('x-api-token');
@@ -109,9 +172,12 @@ function createApp(config = {}) {
       desiredRelays: state.desiredRelayState,
       reportedRelays: state.reportedRelayState,
       queueDepth: state.queue.filter((command) => command.status === 'queued').length,
+      deliveredDepth: state.queue.filter((command) => command.status === 'delivered').length,
+      pendingPolls: pendingPolls.length,
       commandHistory: state.commandHistory,
       serverTime: new Date().toISOString(),
-      schedules: state.schedules
+      schedules: state.schedules,
+      deviceTelemetry: state.deviceTelemetry
     });
   });
 
@@ -205,9 +271,11 @@ function createApp(config = {}) {
       type: 'schedule_update',
       schedules: normalizedSchedules,
       requestedBy: req.body.requestedBy || 'api',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      status: 'queued'
     };
     state.queue.push(command);
+    wakePendingPolls();
     return res.status(201).json({ schedules: state.schedules, command });
   });
 
@@ -224,19 +292,16 @@ function createApp(config = {}) {
     const desiredRelay = state.desiredRelayState[channel - 1];
     desiredRelay.state = action === 'toggle' ? (desiredRelay.state === 'on' ? 'off' : 'on') : action;
     state.queue.push(command);
+    wakePendingPolls();
     res.status(201).json({ command });
   });
 
-  app.get('/api/queue/next', requireApiToken, (_req, res) => {
-    const command = state.queue.find((queuedCommand) => queuedCommand.status === 'queued');
+  app.get('/api/queue/next', requireApiToken, (req, res) => {
+    const command = getNextQueuedCommand();
     if (!command) {
-      return res.status(204).send();
+      return holdLongPoll(req, res);
     }
-
-    command.status = 'delivered';
-    command.deliveredAt = new Date().toISOString();
-
-    return res.json({ command });
+    return res.json(deliverCommand(command));
   });
 
 
@@ -261,10 +326,11 @@ function createApp(config = {}) {
   });
 
   app.post('/api/microcontroller/commands/:id/ack', requireApiToken, (req, res) => {
-    const command = state.queue.find((item) => item.id === req.params.id);
-    if (!command) {
+    const commandIndex = state.queue.findIndex((item) => item.id === req.params.id);
+    if (commandIndex < 0) {
       return res.status(404).json({ error: 'Command not found' });
     }
+    const command = state.queue[commandIndex];
 
     const status = req.body.status === 'failed' ? 'failed' : 'applied';
     if (command.status !== 'delivered') {
@@ -274,6 +340,8 @@ function createApp(config = {}) {
     command.status = status;
     command.acknowledgedAt = new Date().toISOString();
     state.commandHistory.unshift({ ...command });
+    state.commandHistory = state.commandHistory.slice(0, 100);
+    state.queue.splice(commandIndex, 1);
     return res.json({ command });
   });
   app.get('/api/news', requireApiToken, (_req, res) => {
@@ -423,6 +491,7 @@ function createApp(config = {}) {
     const desiredRelay = state.desiredRelayState[channel - 1];
     desiredRelay.state = action;
     state.queue.push(command);
+    wakePendingPolls();
     return res.redirect(303, '/gui');
   });
 
@@ -446,14 +515,16 @@ function createApp(config = {}) {
 
     const schedule = { channel, zone, startTime, durationSeconds };
     state.schedules = [schedule];
-    state.queue.push({
+    const command = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       type: 'schedule_update',
       schedules: [schedule],
       requestedBy: 'gui-web',
       createdAt: new Date().toISOString(),
       status: 'queued'
-    });
+    };
+    state.queue.push(command);
+    wakePendingPolls();
     return res.redirect(303, '/gui');
   });
 

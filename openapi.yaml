@@ -44,9 +44,18 @@ paths:
         '400': { description: Invalid payload }
   /api/queue/next:
     get:
+      parameters:
+        - name: wait
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 25
+          description: Optional long-poll wait duration in seconds.
       responses:
         '200': { description: Delivered command }
-        '204': { description: No pending command }
+        '204': { description: No pending command (immediate or long-poll timeout) }
   /api/microcontroller/commands/{id}/ack:
     post:
       parameters:
@@ -91,12 +100,19 @@ paths:
         - basicAuth: []
       responses:
         '200': { description: Management GUI }
-  /gui/relays/{channel}/toggle:
+  /gui/relays/{channel}/on:
     post:
       security:
         - basicAuth: []
       responses:
-        '303': { description: Relay toggle command queued }
+        '303': { description: Relay ON command queued }
+        '400': { description: Invalid relay channel }
+  /gui/relays/{channel}/off:
+    post:
+      security:
+        - basicAuth: []
+      responses:
+        '303': { description: Relay OFF command queued }
         '400': { description: Invalid relay channel }
   /gui/schedules:
     post:

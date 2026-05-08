@@ -43,6 +43,12 @@ describe('garden controller api', () => {
       .send({ status: 'applied' });
     expect(ackRes.status).toBe(200);
     expect(ackRes.body.command.status).toBe('applied');
+
+    const stateRes = await request(app).get('/api/state').set('x-api-token', token);
+    expect(stateRes.body.commandHistory).toHaveLength(1);
+    expect(stateRes.body.commandHistory[0].id).toBe(commandId);
+    expect(stateRes.body.queueDepth).toBe(0);
+    expect(stateRes.body.deliveredDepth).toBe(0);
   });
 
   test('canonical microcontroller state endpoint persists telemetry', async () => {
@@ -65,7 +71,7 @@ describe('garden controller api', () => {
     expect(res.body.telemetry.lastSeenAt).toBeDefined();
   });
 
-  test('api state includes desired/reported and queue depth for queued commands only', async () => {
+  test('api state includes desired/reported queue and telemetry metadata', async () => {
     const app = build();
     await request(app).post('/api/commands').set('x-api-token', token).send({ channel: 1, action: 'on' });
     await request(app).get('/api/queue/next').set('x-api-token', token);
@@ -73,8 +79,32 @@ describe('garden controller api', () => {
     const stateRes = await request(app).get('/api/state').set('x-api-token', token);
     expect(stateRes.status).toBe(200);
     expect(stateRes.body.queueDepth).toBe(0);
+    expect(stateRes.body.deliveredDepth).toBe(1);
+    expect(stateRes.body.pendingPolls).toBe(0);
     expect(stateRes.body.desiredRelays).toBeDefined();
     expect(stateRes.body.reportedRelays).toBeDefined();
+    expect(stateRes.body.deviceTelemetry).toBeNull();
+  });
+
+  test('api schedules queue schedule_update command with queued status', async () => {
+    const app = build();
+    const res = await request(app)
+      .post('/api/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [{ channel: 3, zone: 'Beds', startTime: '07:00', durationSeconds: 180 }] });
+    expect(res.status).toBe(201);
+    expect(res.body.command.status).toBe('queued');
+  });
+
+  test('queue next supports long-poll and wakes when new command is queued', async () => {
+    const app = build();
+    const pollPromise = request(app).get('/api/queue/next?wait=1').set('x-api-token', token);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await request(app).post('/api/commands').set('x-api-token', token).send({ channel: 4, action: 'on' });
+    const pollRes = await pollPromise;
+    expect(pollRes.status).toBe(200);
+    expect(pollRes.body.command.channel).toBe(4);
+    expect(pollRes.body.command.status).toBe('delivered');
   });
 
   test('gui uses basic authentication', async () => {
@@ -125,5 +155,8 @@ describe('garden controller api', () => {
     expect(spec.paths['/api/microcontroller/commands/{id}/ack']).toBeDefined();
     expect(spec.paths['/api/relays']).toBeDefined();
     expect(spec.paths['/api/state']).toBeDefined();
+    expect(spec.paths['/api/queue/next'].get.parameters[0].name).toBe('wait');
+    expect(spec.paths['/gui/relays/{channel}/on']).toBeDefined();
+    expect(spec.paths['/gui/relays/{channel}/off']).toBeDefined();
   });
 });
