@@ -57,6 +57,8 @@ bool forceFullRedraw = true;
 bool queueStopped = false;
 int queueDepth = 0;
 float zoneLedger[5] = {0,0,0,0,0};
+int pendingExtraZone = 0;
+int pendingExtraMinutes = 0;
 
 const char* MODE_AUTO = "auto";
 const char* MODE_SCHEDULE = "schedule";
@@ -207,6 +209,8 @@ void handleState() {
   doc["displayMode"] = state.displayMode;
   doc["queueState"] = queueStopped ? "stopped" : "running";
   doc["queueDepth"] = queueDepth;
+  doc["pendingExtraZone"] = pendingExtraZone;
+  doc["pendingExtraMinutes"] = pendingExtraMinutes;
   JsonArray zones = doc.createNestedArray("zones");
   for (int i = 0; i < 5; i++) { JsonObject z = zones.createNestedObject(); z["name"] = state.zones[i].name; z["baseMinutes"] = state.zones[i].baseMinutes; z["startHour"] = state.zones[i].startHour; z["startMinute"] = state.zones[i].startMinute; }
   JsonArray history = doc.createNestedArray("history"); history.add("epoch,tempF,rainIn,sunlightHours,windMph,weatherCode,reason");
@@ -218,9 +222,29 @@ void handleConfigPost(){ if(!server.hasArg("plain")){server.send(400,"applicatio
 void handleDisplayMode(){ String m=server.arg("mode"); if(m=="auto"||m=="schedule"||m=="news"||m=="graph"){strlcpy(state.displayMode,m.c_str(),sizeof(state.displayMode)); saveConfig(); forceFullRedraw=true;} server.send(200,"application/json","{\"ok\":true}"); }
 void handleRedraw(){ forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true}"); }
 void handleSync(){ syncFromRelay(); forceFullRedraw=true; server.send(200,"application/json","{\"ok\":true}"); }
-void handleExtra(){ server.send(200,"application/json","{\"ok\":true,\"queued\":true}"); }
-void handleStop(){ server.send(200,"application/json","{\"ok\":true,\"stopped\":true}"); }
-void handleSaveZone(){ server.send(200,"application/json","{\"ok\":true}"); }
+void handleExtra(){
+  int zone = server.hasArg("zone") ? server.arg("zone").toInt() : 0;
+  int minutes = server.hasArg("minutes") ? server.arg("minutes").toInt() : 0;
+  if (zone < 1 || zone > 5 || minutes < 1 || minutes > 240) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"zone must be 1-5 and minutes 1-240\"}");
+    return;
+  }
+  if (!queueStopped) queueDepth++;
+  pendingExtraZone = zone;
+  pendingExtraMinutes = minutes;
+  server.send(200,"application/json","{\"ok\":true,\"queued\":true}");
+}
+void handleStop(){ queueStopped = true; state.run.active = false; pendingExtraZone = 0; pendingExtraMinutes = 0; forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true,\"stopped\":true}"); }
+void handleSaveZone(){
+  int zone = server.hasArg("zone") ? server.arg("zone").toInt() : 0;
+  if (zone < 1 || zone > 5) { server.send(400,"application/json","{"ok":false,"error":"zone must be 1-5"}"); return; }
+  ZoneCfg& z = state.zones[zone - 1];
+  if (server.hasArg("name")) strlcpy(z.name, server.arg("name").c_str(), sizeof(z.name));
+  if (server.hasArg("baseMinutes")) z.baseMinutes = constrain(server.arg("baseMinutes").toInt(), 1, 240);
+  if (server.hasArg("startHour")) z.startHour = constrain(server.arg("startHour").toInt(), 0, 23);
+  if (server.hasArg("startMinute")) z.startMinute = constrain(server.arg("startMinute").toInt(), 0, 59);
+  saveConfig(); forceFullRedraw = true; server.send(200,"application/json","{"ok":true}");
+}
 void handleSaveLogic(){ server.send(200,"application/json","{\"ok\":true}"); }
 void handleSaveNews(){ if(server.hasArg("plain")){strlcpy(state.gardenNews, server.arg("plain").c_str(), sizeof(state.gardenNews)); saveConfig(); forceFullRedraw=true;} server.send(200,"application/json","{\"ok\":true}"); }
 void handleHistoryCsv(){ server.send(200,"text/csv","epoch,tempF,rainIn,sunlightHours,windMph,weatherCode,reason\n"); }

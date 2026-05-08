@@ -58,6 +58,23 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
     expect(ino).toContain('JsonArray ledger = doc.createNestedArray("soilLedger")');
   });
 
+
+  test('validates manual extra watering and exposes pending queue fields', () => {
+    expect(ino).toContain('zone must be 1-5 and minutes 1-240');
+    expect(ino).toContain('int pendingExtraZone = 0;');
+    expect(ino).toContain('int pendingExtraMinutes = 0;');
+    expect(ino).toContain('doc["pendingExtraZone"] = pendingExtraZone;');
+    expect(ino).toContain('doc["pendingExtraMinutes"] = pendingExtraMinutes;');
+  });
+
+  test('validates and persists zone configuration fields', () => {
+    expect(ino).toContain('void handleSaveZone()');
+    expect(ino).toContain('zone must be 1-5');
+    expect(ino).toContain('z.baseMinutes = constrain(server.arg("baseMinutes").toInt(), 1, 240);');
+    expect(ino).toContain('z.startHour = constrain(server.arg("startHour").toInt(), 0, 23);');
+    expect(ino).toContain('z.startMinute = constrain(server.arg("startMinute").toInt(), 0, 59);');
+  });
+
   test('consumes relay weather and time fields and updates runtime meter with partial refresh', () => {
     expect(ino).toContain('fetchRelayJson("/weather", wdoc)');
     expect(ino).toContain('state.weather.precipitationChancePct');

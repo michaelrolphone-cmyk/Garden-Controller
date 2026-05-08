@@ -222,11 +222,11 @@ Hardware target:
 E-paper controller APIs:
 - `GET /`
 - `GET /state`
-- `GET /extra?zone=N&minutes=M`
+- `GET /extra?zone=N&minutes=M` (validates `zone` 1-5 and `minutes` 1-240)
 - `GET /stop`
 - `GET /sync`
 - `GET /redraw`
-- `GET /saveZone`
+- `GET /saveZone?zone=N&name=...&baseMinutes=M&startHour=H&startMinute=M` (persists zone fields with bounds checks)
 - `GET /saveLogic`
 - `POST /saveNews`
 - `GET /history.csv`
@@ -244,7 +244,7 @@ Relay APIs consumed by e-paper firmware:
 - `GET /status` (running state) with fallback to `GET /api/state`
 
 State payload additions:
-- `/state` includes `queueState`, `queueDepth`, and `soilLedger` metrics for dashboard/admin visibility.
+- `/state` includes `queueState`, `queueDepth`, `pendingExtraZone`, `pendingExtraMinutes`, and `soilLedger` metrics for dashboard/admin visibility.
 
 Display behavior:
 - Main schedule screen title: `Castle Hills Garden Watering Schedule`.
