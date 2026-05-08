@@ -138,7 +138,7 @@ function zoneShapeIdForChannel(channel) {
     1: 'zone-3',
     2: 'zone-6',
     3: 'zone-5',
-    4: 'zone-1a zone-2a',
+    4: 'zone-1 zone-2',
     5: 'zone-4'
   };
   return mapping[channel] || `zone-${channel}`;
@@ -891,7 +891,9 @@ function createApp(config = {}) {
           if (diffSeconds < 86400) return \`\${Math.floor(diffSeconds / 3600)}h ago\`;
           return \`\${Math.floor(diffSeconds / 86400)}d ago\`;
         };
-        const activeZoneIds = new Set((state.reportedRelays || []).filter((relay) => relay.state === 'on').map((relay) => \`zone-\${relay.channel}\`));
+        const activeZoneIds = new Set((state.reportedRelays || [])
+          .filter((relay) => relay.state === 'on')
+          .flatMap((relay) => zoneShapeIdsForChannel(relay.channel)));
         const relayGrid = document.getElementById('relay-grid');
         relayGrid.innerHTML = (state.desiredRelays || []).filter((relay) => relay.channel <= ${ZONE_CHANNELS}).map((desiredRelay) => {
           const reportedRelay = (state.reportedRelays || [])[desiredRelay.channel - 1] || { state: 'unknown' };
@@ -904,11 +906,14 @@ function createApp(config = {}) {
           </li>\`;
         }).join('');
         for (let channel = 1; channel <= relayChannelCount; channel += 1) {
-          const zoneEl = document.getElementById(\`zone-\${channel}\`);
-          if (!zoneEl) continue;
-          const isActive = activeZoneIds.has(\`zone-\${channel}\`);
-          zoneEl.setAttribute('data-active', String(isActive));
-          zoneEl.setAttribute('class', \`zone zone-theme-\${channel} \${isActive ? 'zone-active' : ''}\`);
+          const zoneShapeIds = zoneShapeIdsForChannel(channel);
+          for (const zoneShapeId of zoneShapeIds) {
+            const zoneEl = document.getElementById(zoneShapeId);
+            if (!zoneEl) continue;
+            const isActive = activeZoneIds.has(zoneShapeId);
+            zoneEl.setAttribute('data-active', String(isActive));
+            zoneEl.setAttribute('class', \`zone zone-theme-\${channel} \${isActive ? 'zone-active' : ''}\`);
+          }
         }
         const schedules = Array.isArray(state.schedules) ? state.schedules : [];
         const parsedSchedules = schedules.filter((schedule) => typeof schedule === 'object' && schedule);
