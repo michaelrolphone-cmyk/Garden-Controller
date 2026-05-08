@@ -130,15 +130,33 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('status-pill status-mismatch');
     expect(guiRes.text).toContain('Garden Zone Map');
     expect(guiRes.text).toContain('<meta http-equiv="refresh" content="1" />');
-    expect(guiRes.text).toContain('Garden Fresh Futurism');
+    expect(guiRes.text).toContain('Castle Hills Garden Manager');
+    expect(guiRes.text).toContain('grid-template-columns: 1fr 2fr');
     expect(guiRes.text).toContain('id="zone-6"');
     expect(guiRes.text).toContain('data-active="false"');
     expect(guiRes.text).toContain('/gui/relays/1/on');
     expect(guiRes.text).toContain('/gui/relays/1/off');
+    expect(guiRes.text).toContain('timeline-track');
+    expect(guiRes.text).toContain('Raw schedule list');
     expect(guiRes.text).not.toContain('/gui/relays/1/toggle');
   });
 
 
+
+
+  test('gui renders schedule as a visual timeline block', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/microcontroller/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [{ channel: 3, zone: 'Vegetable Garden', startTime: '13:00', durationSeconds: 1800 }] });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('Vegetable Garden');
+    expect(guiRes.text).toContain('timeline-block');
+    expect(guiRes.text).toContain('13:00 · 1800s');
+  });
   test('gui map marks active zones from reported relay state', async () => {
     const app = build();
 
