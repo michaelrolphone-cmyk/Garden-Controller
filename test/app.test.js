@@ -671,7 +671,7 @@ describe('garden controller api', () => {
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
     expect(guiRes.text).toContain("const scheduleFormBody = document.getElementById('schedule-form-body');");
-    expect(guiRes.text).toContain('scheduleFormBody.innerHTML = parsedSchedules.map((schedule, index) =>');
+    expect(guiRes.text).toContain('if (scheduleFormSignature !== lastRenderedScheduleFormSignature) {');
     expect(guiRes.text).toContain('name="schedule[\' + index + \'][startTime]" type="time" value="\' + startTime + \'"');
   });
   
