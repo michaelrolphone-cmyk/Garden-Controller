@@ -208,3 +208,30 @@ The `schedules` array is a full daily schedule list. The same zone/channel may a
 ```
 
 `POST /api/schedules` replaces the firmware’s active daily schedule list.
+
+## E-Ink zone map companion firmware
+
+Companion firmware for the **7.5 Inch E-Ink Display Module (800x480 SPI) + ESP32-C6 E-Paper Driver Board + SD card**:
+
+- `mcu/relay/GardenEInkZoneDisplay.ino`
+
+Device API endpoints (hosted on the e-ink board):
+- `GET /` - local admin/status page.
+- `GET /api/config` - read WiFi/AP/API configuration.
+- `POST /api/config` - update WiFi/AP/API configuration and persist to flash preferences.
+- `GET /api/state` - local e-ink firmware state summary.
+Relay API endpoint consumed by e-ink firmware:
+- `GET /api/state` with `x-api-token` to read `deviceTelemetry.zoneRuns`.
+
+Display behavior:
+- Renders polygon-based garden zone map.
+- Uses full refresh for first render and when firmware detects substantial redraw scope changes (e.g., zone active-state map hatch changes).
+- Uses partial refresh window for runtime legend/meter updates when only small telemetry regions need redraw.
+- Holds static e-paper image when state is unchanged (no redraw performed).
+- Logs snapshots to SD card file `/zone_state.log`.
+
+CLI commands:
+```bash
+npm start
+npm test -- --runTestsByPath test/eink-firmware.test.js
+```
