@@ -235,7 +235,7 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain("setInterval(refreshState, 1000);");
     expect(guiRes.text).toContain('Castle Hills Garden Manager');
     expect(guiRes.text).toContain('grid-template-columns: 1fr 2fr');
-    expect(guiRes.text).toContain('id="zone-6"');
+    expect(guiRes.text).not.toContain('id="zone-6"');
     expect(guiRes.text).toContain('zone-theme-1');
     expect(guiRes.text).not.toContain('Zone 6</span>');
     expect(guiRes.text).toContain('.linework { stroke: rgba(29, 78, 216, 0.35); fill: none;');
@@ -342,8 +342,9 @@ describe('garden controller api', () => {
 
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
-    expect(guiRes.text).toContain('id="zone-6" class="zone zone-theme-2 zone-active" data-active="true"');
+    expect(guiRes.text).toContain('id="zone-2" class="zone zone-theme-4 zone-active" data-active="true"');
     expect(guiRes.text).toContain('id="zone-3" class="zone zone-theme-1 " data-active="false"');
+    expect(guiRes.text).toContain('filter: saturate(1.4) brightness(1.15) drop-shadow(0 0 18px rgba(var(--zone-color-rgb, 62, 184, 255), 0.72));');
   });
 
 
