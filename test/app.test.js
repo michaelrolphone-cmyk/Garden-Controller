@@ -346,6 +346,22 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('id="zone-3" class="zone zone-theme-1 " data-active="false"');
   });
 
+
+  test('gui map maps reported channel 4 to visual zones 1 and 2', async () => {
+    const app = build();
+
+    await request(app)
+      .post('/api/microcontroller/relays/state')
+      .set('x-api-token', token)
+      .send({ relays: [{ channel: 4, state: 'on' }] });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('id="zone-1" class="zone zone-theme-4 zone-active" data-active="true"');
+    expect(guiRes.text).toContain('id="zone-2" class="zone zone-theme-4 zone-active" data-active="true"');
+    expect(guiRes.text).toContain("flatMap((relay) => zoneShapeIdsForChannel(relay.channel))");
+  });
+
   test('gui relay action endpoint only allows explicit on/off actions', async () => {
     const app = build();
 
