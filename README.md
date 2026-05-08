@@ -76,6 +76,11 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
       "deviceId": "garden-relay-6",
       "firmwareVersion": "v12",
       "clockValid": true,
+      "epoch": 1777901400,
+      "localTime": "6:30am",
+      "localDate": "Monday, May 4th",
+      "homeWifiConnected": true,
+      "homeIp": "192.168.1.42",
       "relays": [{ "channel": 1, "state": "on" }],
       "schedules": [{ "channel": 2, "zone": "Patio", "startTime": "06:45", "durationSeconds": 480 }],
       "currentRun": { "channel": 2, "remainingSeconds": 120 },
@@ -83,7 +88,7 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
     }
     ```
   - server fills telemetry `lastSeenAt`.
-  - telemetry may include `targetLocation` and `sensorData` snapshots.
+  - telemetry may include `targetLocation` and `sensorData` snapshots and preserves firmware-provided clock/connectivity fields (`epoch`, `localTime`, `localDate`, `homeWifiConnected`, `homeIp`).
 - `POST /api/microcontroller/sensors` - firmware publishes local sensor/device observations.
   - body:
     ```json
