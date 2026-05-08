@@ -69,6 +69,45 @@ paths:
         '409': { description: Command not yet delivered }
   /api/microcontroller/state:
     post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId, firmwareVersion, relays, schedules]
+              properties:
+                deviceId: { type: string }
+                firmwareVersion: { type: string }
+                clockValid: { type: boolean }
+                epoch: { type: integer, description: Unix epoch seconds reported by firmware clock }
+                localTime: { type: string }
+                localDate: { type: string }
+                homeWifiConnected: { type: boolean }
+                homeIp: { type: string }
+                relays:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Relay'
+                schedules:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PublishedSchedule'
+                currentRun:
+                  type: object
+                  additionalProperties: true
+                lastCommandId: { type: string }
+                targetLocation:
+                  type: object
+                  properties:
+                    lat: { type: number }
+                    lon: { type: number }
+                    label: { type: string }
+                sensorData:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
       responses:
         '200': { description: Canonical telemetry persisted }
         '400': { description: Invalid payload }

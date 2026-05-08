@@ -463,7 +463,22 @@ function createApp(config = {}) {
   });
 
   app.post('/api/microcontroller/state', requireApiToken, (req, res) => {
-    const { deviceId, firmwareVersion, clockValid, relays, schedules, currentRun, lastCommandId, targetLocation, sensorData } = req.body;
+    const {
+      deviceId,
+      firmwareVersion,
+      clockValid,
+      epoch,
+      localTime,
+      localDate,
+      homeWifiConnected,
+      homeIp,
+      relays,
+      schedules,
+      currentRun,
+      lastCommandId,
+      targetLocation,
+      sensorData
+    } = req.body;
     if (!deviceId || !firmwareVersion || !Array.isArray(relays) || !Array.isArray(schedules)) {
       return res.status(400).json({ error: 'Invalid state payload' });
     }
@@ -478,7 +493,23 @@ function createApp(config = {}) {
       state.reportedRelayState[incomingRelay.channel - 1].state = incomingRelay.state;
     });
     state.schedules = schedules.map((schedule) => ({ ...schedule }));
-    state.deviceTelemetry = { deviceId, firmwareVersion, clockValid: Boolean(clockValid), relays: state.reportedRelayState, schedules: state.schedules, currentRun: currentRun || null, lastCommandId: lastCommandId || null, targetLocation: targetLocation || null, sensorData: Array.isArray(sensorData) ? sensorData : [], lastSeenAt: new Date().toISOString() };
+    state.deviceTelemetry = {
+      deviceId,
+      firmwareVersion,
+      clockValid: Boolean(clockValid),
+      epoch,
+      localTime,
+      localDate,
+      homeWifiConnected,
+      homeIp,
+      relays: state.reportedRelayState,
+      schedules: state.schedules,
+      currentRun: currentRun || null,
+      lastCommandId: lastCommandId || null,
+      targetLocation: targetLocation || null,
+      sensorData: Array.isArray(sensorData) ? sensorData : [],
+      lastSeenAt: new Date().toISOString()
+    };
 
     if (targetLocation && Array.isArray(sensorData)) {
       const reading = {

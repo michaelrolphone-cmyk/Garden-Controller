@@ -119,6 +119,36 @@ describe('garden controller api', () => {
     expect(latestRes.body.latest.sourceEndpoint).toBe('/api/microcontroller/state');
   });
 
+  test('canonical state telemetry retains device clock and connectivity metadata', async () => {
+    const app = build();
+    const res = await request(app)
+      .post('/api/microcontroller/state')
+      .set('x-api-token', token)
+      .send({
+        deviceId: 'garden-relay-6',
+        firmwareVersion: 'v16-weather-sensor-baseline',
+        clockValid: true,
+        epoch: 1777901400,
+        localTime: '6:30am',
+        localDate: 'Monday, May 4th',
+        homeWifiConnected: true,
+        homeIp: '192.168.1.42',
+        relays: [{ channel: 1, state: 'off' }],
+        schedules: [{ channel: 1, zone: 'Zone 1', startTime: '06:00', durationSeconds: 600 }],
+        currentRun: { active: false },
+        lastCommandId: '1715144970000-a1b2c3'
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.telemetry.epoch).toBe(1777901400);
+    expect(res.body.telemetry.localTime).toBe('6:30am');
+    expect(res.body.telemetry.localDate).toBe('Monday, May 4th');
+    expect(res.body.telemetry.homeWifiConnected).toBe(true);
+    expect(res.body.telemetry.homeIp).toBe('192.168.1.42');
+    expect(res.body.telemetry.currentRun).toEqual({ active: false });
+    expect(res.body.telemetry.lastCommandId).toBe('1715144970000-a1b2c3');
+  });
+
   test('refreshes and serves weather datasets', async () => {
     const app = build();
     const originalFetch = global.fetch;
