@@ -6,20 +6,41 @@ const yaml = require('js-yaml');
 const RELAY_CHANNELS = 6;
 
 function normalizeCredentialValue(value) {
-  return typeof value === 'string' ? value.trim() : value;
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  const wrappedInQuotes =
+    (trimmed.startsWith('\"') && trimmed.endsWith('\"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"));
+
+  return wrappedInQuotes ? trimmed.slice(1, -1).trim() : trimmed;
 }
 
 function createState() {
   return {
     relayState: Array.from({ length: RELAY_CHANNELS }, (_, index) => ({ channel: index + 1, state: 'off' })),
     queue: [],
-    news: []
+    news: [],
+    schedules: []
+  };
+}
+
+function createCommand({ channel, action, requestedBy }) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    channel,
+    action,
+    requestedBy: requestedBy || 'gui',
+    createdAt: new Date().toISOString()
   };
 }
 
 function createApp(config = {}) {
   const app = express();
   app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
 
   const state = config.state || createState();
   const guiUsername = normalizeCredentialValue(config.guiUsername ?? process.env.GUI_USERNAME);
@@ -71,6 +92,15 @@ function createApp(config = {}) {
     res.json({ relays: state.relayState });
   });
 
+  app.get('/api/state', requireApiToken, (_req, res) => {
+    res.json({
+      relays: state.relayState,
+      queueDepth: state.queue.length,
+      serverTime: new Date().toISOString(),
+      schedules: state.schedules
+    });
+  });
+
   app.post('/api/commands', requireApiToken, (req, res) => {
     const { channel, action, requestedBy } = req.body;
     const validAction = action === 'on' || action === 'off' || action === 'toggle';
@@ -79,13 +109,7 @@ function createApp(config = {}) {
       return res.status(400).json({ error: 'Invalid command payload' });
     }
 
-    const command = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      channel,
-      action,
-      requestedBy: requestedBy || 'gui',
-      createdAt: new Date().toISOString()
-    };
+    const command = createCommand({ channel, action, requestedBy });
 
     state.queue.push(command);
     res.status(201).json({ command });
@@ -130,18 +154,42 @@ function createApp(config = {}) {
 
   app.get('/gui', requireGuiAuth, (_req, res) => {
     const relayMarkup = state.relayState
-      .map((relay) => `<li>Channel ${relay.channel}: <strong>${relay.state.toUpperCase()}</strong></li>`)
+      .map(
+        (relay) => `<li>
+            Channel ${relay.channel}: <strong>${relay.state.toUpperCase()}</strong>
+            <form method="post" action="/gui/relays/${relay.channel}/toggle" style="display:inline; margin-left:8px;">
+              <button type="submit">Toggle</button>
+            </form>
+          </li>`
+      )
       .join('');
+
+    const schedulesMarkup = state.schedules.length
+      ? `<ul>${state.schedules.map((schedule) => `<li>${schedule}</li>`).join('')}</ul>`
+      : '<p>No schedules configured.</p>';
 
     res.type('html').send(`<!doctype html>
 <html>
   <head><title>Garden Controller</title></head>
   <body>
     <h1>ESP32-S3-Relay-6CH Controller</h1>
-    <p>Use the API to queue commands for the microcontroller.</p>
+    <p>Current server time (UTC): <strong>${new Date().toISOString()}</strong></p>
+    <h2>Relay state</h2>
     <ul>${relayMarkup}</ul>
+    <h2>Schedules</h2>
+    ${schedulesMarkup}
   </body>
 </html>`);
+  });
+
+  app.post('/gui/relays/:channel/toggle', requireGuiAuth, (req, res) => {
+    const channel = Number.parseInt(req.params.channel, 10);
+    if (!Number.isInteger(channel) || channel < 1 || channel > RELAY_CHANNELS) {
+      return res.status(400).send('Invalid relay channel');
+    }
+
+    state.queue.push(createCommand({ channel, action: 'toggle', requestedBy: 'gui-web' }));
+    return res.redirect(303, '/gui');
   });
 
   app.get('/openapi.json', (_req, res) => {
