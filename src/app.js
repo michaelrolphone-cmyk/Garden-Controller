@@ -166,7 +166,8 @@ function formatScheduleLabel(schedule) {
     return schedule;
   }
 
-  return `${schedule.zone} (relay ${schedule.channel}) at ${schedule.startTime} for ${schedule.durationSeconds}s`;
+  const durationMinutes = Math.max(1, Math.round((Number(schedule.durationSeconds) || 0) / 60));
+  return `${schedule.zone} (relay ${schedule.channel}) at ${schedule.startTime} for ${durationMinutes} min`;
 }
 
 function createApp(config = {}) {
@@ -756,7 +757,7 @@ function createApp(config = {}) {
             const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
             const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
             const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
-            return `<div class="timeline-row"><span class="timeline-zone">${schedule.zone}</span><div class="timeline-track"><span class="timeline-block" style="left:${leftPercent}%;width:${widthPercent}%">${schedule.startTime} · ${schedule.durationSeconds}s</span></div></div>`;
+            return `<div class="timeline-row"><span class="timeline-zone">${schedule.zone}</span><div class="timeline-track"><span class="timeline-block" style="left:${leftPercent}%;width:${widthPercent}%">${schedule.startTime} · ${Math.max(1, Math.round((Number(schedule.durationSeconds) || 0) / 60))} min</span></div></div>`;
           })
           .join('')}</div>`
       : '<p>No schedules configured.</p>';
@@ -868,7 +869,7 @@ function createApp(config = {}) {
           <label>Zone <input name="zone" value="${defaultSchedule.zone || ''}" required /></label>
           <label>Channel <input name="channel" type="number" min="1" max="${ZONE_CHANNELS}" value="${defaultSchedule.channel || 1}" required /></label>
           <label>Start Time <input name="startTime" value="${defaultSchedule.startTime || '06:00'}" required /></label>
-          <label>Duration (seconds) <input name="durationSeconds" type="number" min="1" value="${defaultSchedule.durationSeconds || 900}" required /></label>
+          <label>Duration (minutes) <input name="durationMinutes" type="number" min="1" value="${Math.max(1, Math.round((Number(defaultSchedule.durationSeconds) || 900) / 60))}" required /></label>
           <button type="submit">Save schedule</button>
         </form>
       </section>
@@ -923,7 +924,7 @@ function createApp(config = {}) {
           const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
           const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
           const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
-          return \`<div class="timeline-row"><span class="timeline-zone">\${schedule.zone}</span><div class="timeline-track"><span class="timeline-block" style="left:\${leftPercent}%;width:\${widthPercent}%">\${schedule.startTime} · \${schedule.durationSeconds}s</span></div></div>\`;
+          return \`<div class="timeline-row"><span class="timeline-zone">\${schedule.zone}</span><div class="timeline-track"><span class="timeline-block" style="left:\${leftPercent}%;width:\${widthPercent}%">\${schedule.startTime} · \${Math.max(1, Math.round((Number(schedule.durationSeconds) || 0) / 60))} min</span></div></div>\`;
         }).join('')}</div>\` : '<p>No schedules configured.</p>';
         const rawSchedules = document.getElementById('raw-schedules');
         rawSchedules.innerHTML = schedules.length ? \`<ul>\${schedules.map((schedule) => \`<li>\${formatScheduleLabel(schedule)}</li>\`).join('')}</ul>\` : '';
@@ -1024,7 +1025,8 @@ function createApp(config = {}) {
 
   app.post('/gui/schedules', requireGuiAuth, (req, res) => {
     const channel = Number.parseInt(req.body.channel, 10);
-    const durationSeconds = Number.parseInt(req.body.durationSeconds, 10);
+    const durationMinutes = Number.parseInt(req.body.durationMinutes ?? req.body.durationSeconds, 10);
+    const durationSeconds = Number.isInteger(durationMinutes) && durationMinutes > 0 ? durationMinutes * 60 : Number.NaN;
     const zone = typeof req.body.zone === 'string' ? req.body.zone.trim() : '';
     const startTime = typeof req.body.startTime === 'string' ? req.body.startTime.trim() : '';
 

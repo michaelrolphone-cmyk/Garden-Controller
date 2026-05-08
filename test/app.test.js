@@ -333,8 +333,26 @@ describe('garden controller api', () => {
     expect(guiRes.status).toBe(200);
     expect(guiRes.text).toContain('Vegetable Garden');
     expect(guiRes.text).toContain('timeline-block');
-    expect(guiRes.text).toContain('13:00 · 1800s');
+    expect(guiRes.text).toContain('13:00 · 30 min');
   });
+
+  test('gui schedule form accepts minutes and stores seconds', async () => {
+    const app = build();
+    const res = await request(app)
+      .post('/gui/schedules')
+      .set('authorization', auth)
+      .send({ channel: '2', zone: 'Herbs', startTime: '07:30', durationMinutes: '12' });
+
+    expect(res.status).toBe(303);
+
+    const stateRes = await request(app).get('/api/state').set('x-api-token', token);
+    expect(stateRes.body.schedules[0].durationSeconds).toBe(720);
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.text).toContain('for 12 min');
+    expect(guiRes.text).toContain('Duration (minutes)');
+  });
+
   test('gui map marks active zones from reported relay state', async () => {
     const app = build();
 
