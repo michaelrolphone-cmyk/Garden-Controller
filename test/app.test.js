@@ -9,7 +9,7 @@ describe('garden controller api', () => {
   const auth = `Basic ${Buffer.from('admin:password').toString('base64')}`;
 
   function build() {
-    return createApp({ apiKey: token, guiUsername: 'admin', guiPassword: 'password' }).app;
+    return createApp({ apiKey: token, guiUsername: 'admin', guiPassword: 'password', enableWeatherRefresh: false }).app;
   }
 
   test('requires token for protected endpoints', async () => {
@@ -69,6 +69,78 @@ describe('garden controller api', () => {
     expect(res.status).toBe(200);
     expect(res.body.telemetry.deviceId).toBe('garden-relay-6');
     expect(res.body.telemetry.lastSeenAt).toBeDefined();
+  });
+
+
+
+  test('stores firmware sensor payload via dedicated endpoint and exposes it in state', async () => {
+    const app = build();
+    const payload = {
+      deviceId: 'garden-relay-6',
+      firmwareVersion: 'v16-weather-sensor-baseline',
+      targetLocation: { lat: 43.665288, lon: -116.259186, label: 'garden' },
+      sensorData: [{ source: 'relay-hardware', type: 'wifi_rssi', value: -67, unit: 'dBm' }]
+    };
+
+    const postRes = await request(app).post('/api/microcontroller/sensors').set('x-api-token', token).send(payload);
+    expect(postRes.status).toBe(201);
+
+    const listRes = await request(app).get('/api/sensors?limit=10').set('x-api-token', token);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.readings).toHaveLength(1);
+    expect(listRes.body.latest.deviceId).toBe('garden-relay-6');
+
+    const stateRes = await request(app).get('/api/state').set('x-api-token', token);
+    expect(stateRes.body.latestSensorData).toBeDefined();
+    expect(stateRes.body.sensorReadingCount).toBe(1);
+    expect(stateRes.body.weatherDatasets).toBeDefined();
+  });
+
+  test('canonical state telemetry retains targetLocation and sensorData', async () => {
+    const app = build();
+    const res = await request(app)
+      .post('/api/microcontroller/state')
+      .set('x-api-token', token)
+      .send({
+        deviceId: 'garden-relay-6',
+        firmwareVersion: 'v16-weather-sensor-baseline',
+        clockValid: true,
+        relays: [{ channel: 1, state: 'on' }],
+        schedules: [{ channel: 1, zone: 'North', startTime: '06:00', durationSeconds: 300 }],
+        targetLocation: { lat: 43.665288, lon: -116.259186, label: 'garden' },
+        sensorData: [{ source: 'relay-hardware', type: 'uptime', value: 921, unit: 's' }]
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.telemetry.targetLocation.label).toBe('garden');
+    expect(res.body.telemetry.sensorData).toHaveLength(1);
+
+    const latestRes = await request(app).get('/api/sensors/latest').set('x-api-token', token);
+    expect(latestRes.body.latest.sourceEndpoint).toBe('/api/microcontroller/state');
+  });
+
+  test('refreshes and serves weather datasets', async () => {
+    const app = build();
+    const originalFetch = global.fetch;
+    const point = { properties: { forecast: 'https://api.weather.gov/f', forecastHourly: 'https://api.weather.gov/h', forecastGridData: 'https://api.weather.gov/g' } };
+    const ok = (data) => ({ ok: true, json: async () => data });
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).includes('/points/')) return ok(point);
+      if (String(url).endsWith('/f')) return ok({ periods: [] });
+      if (String(url).endsWith('/h')) return ok({ periods: [] });
+      if (String(url).endsWith('/g')) return ok({ grid: true });
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+
+    const refreshRes = await request(app).post('/api/weather/refresh').set('x-api-token', token).send({});
+    expect(refreshRes.status).toBe(200);
+    expect(refreshRes.body.datasets.current.source).toBe('NWS');
+
+    const datasetsRes = await request(app).get('/api/weather/datasets').set('x-api-token', token);
+    expect(datasetsRes.status).toBe(200);
+    expect(datasetsRes.body.datasets.updatedAt).toBeDefined();
+
+    global.fetch = originalFetch;
   });
 
   test('api state includes desired/reported queue and telemetry metadata', async () => {

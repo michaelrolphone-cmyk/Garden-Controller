@@ -6,10 +6,10 @@ const yaml = require('js-yaml');
 const RELAY_CHANNELS = 6;
 
 
-const GARDEN_LOCATION = { latitude: 43.665288, longitude: -116.259186 };
+const GARDEN_LOCATION = { lat: 43.665288, lon: -116.259186, label: 'garden' };
 
 function buildEnvironmentalFeeds() {
-  const { latitude, longitude } = GARDEN_LOCATION;
+  const { lat: latitude, lon: longitude } = GARDEN_LOCATION;
   return {
     radarEmbedUrl: `https://embed.windy.com/embed2.html?lat=${latitude}&lon=${longitude}&zoom=8&level=surface&overlay=radar&product=radar`,
     satelliteEmbedUrl: `https://embed.windy.com/embed2.html?lat=${latitude}&lon=${longitude}&zoom=6&level=surface&overlay=satellite&product=ecmwf`,
@@ -40,7 +40,16 @@ function createState() {
     commandHistory: [],
     news: [],
     schedules: [],
-    deviceTelemetry: null
+    deviceTelemetry: null,
+    sensorReadings: [],
+    latestSensorData: null,
+    weatherDatasets: {
+      current: null,
+      forecast: null,
+      radar: null,
+      satellite: null,
+      updatedAt: null
+    }
   };
 }
 
@@ -144,6 +153,55 @@ function createApp(config = {}) {
     return next();
   }
 
+
+
+  async function refreshWeatherDatasets() {
+    const pointUrl = `https://api.weather.gov/points/${GARDEN_LOCATION.lat},${GARDEN_LOCATION.lon}`;
+
+    const headers = {
+      'User-Agent': 'Garden-Controller/1.0 contact@example.com',
+      Accept: 'application/geo+json'
+    };
+
+    const pointRes = await fetch(pointUrl, { headers });
+    if (!pointRes.ok) {
+      throw new Error(`NWS point lookup failed: ${pointRes.status}`);
+    }
+
+    const pointData = await pointRes.json();
+    const props = pointData.properties || {};
+
+    const [forecastRes, hourlyRes, gridRes] = await Promise.all([
+      props.forecast ? fetch(props.forecast, { headers }) : null,
+      props.forecastHourly ? fetch(props.forecastHourly, { headers }) : null,
+      props.forecastGridData ? fetch(props.forecastGridData, { headers }) : null
+    ]);
+
+    const forecast = forecastRes && forecastRes.ok ? await forecastRes.json() : null;
+    const hourly = hourlyRes && hourlyRes.ok ? await hourlyRes.json() : null;
+    const grid = gridRes && gridRes.ok ? await gridRes.json() : null;
+
+    state.weatherDatasets.current = { source: 'NWS', point: props, grid, updatedAt: new Date().toISOString() };
+    state.weatherDatasets.forecast = { source: 'NWS', forecast, hourly, updatedAt: new Date().toISOString() };
+    state.weatherDatasets.radar = {
+      source: 'NOAA/NEXRAD',
+      targetLocation: GARDEN_LOCATION,
+      status: 'metadata-placeholder',
+      note: 'Add NEXRAD/MRMS tile or image service integration here.',
+      updatedAt: new Date().toISOString()
+    };
+    state.weatherDatasets.satellite = {
+      source: 'NOAA/GOES',
+      targetLocation: GARDEN_LOCATION,
+      status: 'metadata-placeholder',
+      note: 'Add GOES/GEOSS tile or image service integration here.',
+      updatedAt: new Date().toISOString()
+    };
+    state.weatherDatasets.updatedAt = new Date().toISOString();
+
+    return state.weatherDatasets;
+  }
+
   function requireGuiAuth(req, res, next) {
     const auth = req.get('authorization');
     if (!auth || !/^Basic\s+/i.test(auth)) {
@@ -191,7 +249,10 @@ function createApp(config = {}) {
       commandHistory: state.commandHistory,
       serverTime: new Date().toISOString(),
       schedules: state.schedules,
-      deviceTelemetry: state.deviceTelemetry
+      deviceTelemetry: state.deviceTelemetry,
+      latestSensorData: state.latestSensorData,
+      sensorReadingCount: state.sensorReadings.length,
+      weatherDatasets: state.weatherDatasets
     });
   });
 
@@ -319,8 +380,41 @@ function createApp(config = {}) {
   });
 
 
+
+  app.post('/api/microcontroller/sensors', requireApiToken, (req, res) => {
+    const { deviceId, firmwareVersion, targetLocation, sensorData } = req.body;
+
+    const validLocation =
+      targetLocation &&
+      Number.isFinite(Number(targetLocation.lat)) &&
+      Number.isFinite(Number(targetLocation.lon));
+
+    const validSensorData =
+      Array.isArray(sensorData) &&
+      sensorData.every((item) => item && typeof item.source === 'string' && typeof item.type === 'string');
+
+    if (!deviceId || !firmwareVersion || !validLocation || !validSensorData) {
+      return res.status(400).json({ error: 'Invalid sensor payload' });
+    }
+
+    const reading = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      deviceId,
+      firmwareVersion,
+      targetLocation: { lat: Number(targetLocation.lat), lon: Number(targetLocation.lon), label: targetLocation.label || 'garden' },
+      sensorData: sensorData.map((item) => ({ ...item })),
+      receivedAt: new Date().toISOString()
+    };
+
+    state.latestSensorData = reading;
+    state.sensorReadings.unshift(reading);
+    state.sensorReadings = state.sensorReadings.slice(0, 1000);
+
+    return res.status(201).json({ reading });
+  });
+
   app.post('/api/microcontroller/state', requireApiToken, (req, res) => {
-    const { deviceId, firmwareVersion, clockValid, relays, schedules, currentRun, lastCommandId } = req.body;
+    const { deviceId, firmwareVersion, clockValid, relays, schedules, currentRun, lastCommandId, targetLocation, sensorData } = req.body;
     if (!deviceId || !firmwareVersion || !Array.isArray(relays) || !Array.isArray(schedules)) {
       return res.status(400).json({ error: 'Invalid state payload' });
     }
@@ -335,7 +429,23 @@ function createApp(config = {}) {
       state.reportedRelayState[incomingRelay.channel - 1].state = incomingRelay.state;
     });
     state.schedules = schedules.map((schedule) => ({ ...schedule }));
-    state.deviceTelemetry = { deviceId, firmwareVersion, clockValid: Boolean(clockValid), relays: state.reportedRelayState, schedules: state.schedules, currentRun: currentRun || null, lastCommandId: lastCommandId || null, lastSeenAt: new Date().toISOString() };
+    state.deviceTelemetry = { deviceId, firmwareVersion, clockValid: Boolean(clockValid), relays: state.reportedRelayState, schedules: state.schedules, currentRun: currentRun || null, lastCommandId: lastCommandId || null, targetLocation: targetLocation || null, sensorData: Array.isArray(sensorData) ? sensorData : [], lastSeenAt: new Date().toISOString() };
+
+    if (targetLocation && Array.isArray(sensorData)) {
+      const reading = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        deviceId,
+        firmwareVersion,
+        targetLocation,
+        sensorData,
+        receivedAt: new Date().toISOString(),
+        sourceEndpoint: '/api/microcontroller/state'
+      };
+
+      state.latestSensorData = reading;
+      state.sensorReadings.unshift(reading);
+      state.sensorReadings = state.sensorReadings.slice(0, 1000);
+    }
     return res.json({ telemetry: state.deviceTelemetry });
   });
 
@@ -358,6 +468,46 @@ function createApp(config = {}) {
     state.queue.splice(commandIndex, 1);
     return res.json({ command });
   });
+
+
+  app.get('/api/sensors', requireApiToken, (req, res) => {
+    const limit = Math.max(1, Math.min(Number.parseInt(req.query.limit, 10) || 100, 1000));
+    res.json({ readings: state.sensorReadings.slice(0, limit), latest: state.latestSensorData });
+  });
+
+  app.get('/api/sensors/latest', requireApiToken, (_req, res) => {
+    res.json({ latest: state.latestSensorData });
+  });
+
+  app.get('/api/weather/datasets', requireApiToken, (_req, res) => {
+    res.json({ targetLocation: GARDEN_LOCATION, datasets: state.weatherDatasets });
+  });
+
+  app.get('/api/weather/current', requireApiToken, (_req, res) => {
+    res.json({ targetLocation: GARDEN_LOCATION, current: state.weatherDatasets.current });
+  });
+
+  app.get('/api/weather/forecast', requireApiToken, (_req, res) => {
+    res.json({ targetLocation: GARDEN_LOCATION, forecast: state.weatherDatasets.forecast });
+  });
+
+  app.get('/api/weather/radar', requireApiToken, (_req, res) => {
+    res.json({ targetLocation: GARDEN_LOCATION, radar: state.weatherDatasets.radar });
+  });
+
+  app.get('/api/weather/satellite', requireApiToken, (_req, res) => {
+    res.json({ targetLocation: GARDEN_LOCATION, satellite: state.weatherDatasets.satellite });
+  });
+
+  app.post('/api/weather/refresh', requireApiToken, async (_req, res) => {
+    try {
+      const datasets = await refreshWeatherDatasets();
+      res.json({ datasets });
+    } catch (error) {
+      res.status(502).json({ error: 'Weather refresh failed', message: error.message });
+    }
+  });
+
   app.get('/api/news', requireApiToken, (_req, res) => {
     res.json({ news: state.news });
   });
@@ -485,7 +635,7 @@ function createApp(config = {}) {
         </section>
       </div>
       <section class="panel schedule">
-        <h2>Environmental Monitoring (${GARDEN_LOCATION.latitude}, ${GARDEN_LOCATION.longitude})</h2>
+        <h2>Environmental Monitoring (${GARDEN_LOCATION.lat}, ${GARDEN_LOCATION.lon})</h2>
         <div class="env-grid">
           <article class="env-card">
             <h3>Weather Radar</h3>
@@ -574,6 +724,22 @@ function createApp(config = {}) {
     wakePendingPolls();
     return res.redirect(303, '/gui');
   });
+
+  if (config.enableWeatherRefresh !== false) {
+    const WEATHER_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+
+    setInterval(() => {
+      refreshWeatherDatasets().catch((error) => {
+        console.error('Weather refresh failed:', error.message);
+      });
+    }, WEATHER_REFRESH_INTERVAL_MS);
+
+    setTimeout(() => {
+      refreshWeatherDatasets().catch((error) => {
+        console.error('Initial weather refresh failed:', error.message);
+      });
+    }, 2000);
+  }
 
   app.get('/openapi.json', (_req, res) => {
     const specPath = path.join(__dirname, '..', 'openapi.yaml');

@@ -82,6 +82,53 @@ paths:
       responses:
         '200': { description: Schedules accepted and persisted }
         '400': { description: Invalid payload }
+
+  /api/microcontroller/sensors:
+    post:
+      responses:
+        '201': { description: Sensor reading stored }
+        '400': { description: Invalid sensor payload }
+
+  /api/sensors:
+    get:
+      responses:
+        '200': { description: Recent sensor readings }
+
+  /api/sensors/latest:
+    get:
+      responses:
+        '200': { description: Latest sensor reading }
+
+  /api/weather/datasets:
+    get:
+      responses:
+        '200': { description: Cached weather datasets }
+
+  /api/weather/current:
+    get:
+      responses:
+        '200': { description: Current weather dataset }
+
+  /api/weather/forecast:
+    get:
+      responses:
+        '200': { description: Forecast weather dataset }
+
+  /api/weather/radar:
+    get:
+      responses:
+        '200': { description: Radar dataset }
+
+  /api/weather/satellite:
+    get:
+      responses:
+        '200': { description: Satellite dataset }
+
+  /api/weather/refresh:
+    post:
+      responses:
+        '200': { description: Weather refresh completed }
+        '502': { description: Weather refresh failed }
   /api/schedules:
     post:
       responses:

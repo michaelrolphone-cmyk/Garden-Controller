@@ -83,6 +83,27 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
     }
     ```
   - server fills telemetry `lastSeenAt`.
+  - telemetry may include `targetLocation` and `sensorData` snapshots.
+- `POST /api/microcontroller/sensors` - firmware publishes local sensor/device observations.
+  - body:
+    ```json
+    {
+      "deviceId": "garden-relay-6",
+      "firmwareVersion": "v16-weather-sensor-baseline",
+      "targetLocation": { "lat": 43.665288, "lon": -116.259186, "label": "garden" },
+      "sensorData": [
+        { "source": "relay-hardware", "type": "wifi_rssi", "value": -67, "unit": "dBm" }
+      ]
+    }
+    ```
+- `GET /api/sensors` - list recent sensor readings.
+- `GET /api/sensors/latest` - latest sensor payload from firmware.
+- `GET /api/weather/datasets` - all cached weather datasets.
+- `GET /api/weather/current` - current NWS/grid weather dataset.
+- `GET /api/weather/forecast` - NWS forecast/hourly dataset.
+- `GET /api/weather/radar` - radar metadata/dataset.
+- `GET /api/weather/satellite` - satellite metadata/dataset.
+- `POST /api/weather/refresh` - force refresh external weather datasets.
 - `POST /api/microcontroller/relays/state` - microcontroller publishes current relay on/off states.
 - `POST /api/microcontroller/schedules` - microcontroller publishes current relay schedules.
 - `POST /api/schedules` - operator/API publishes schedule updates and queues them for the microcontroller.
