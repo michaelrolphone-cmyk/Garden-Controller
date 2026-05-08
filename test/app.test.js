@@ -218,12 +218,75 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('overlay=radar');
     expect(guiRes.text).toContain('overlay=satellite');
     expect(guiRes.text).toContain('USGS National Map (3DEP)');
+    expect(guiRes.text).toContain('Microcontroller Weather Sensors');
+    expect(guiRes.text).toContain('No microcontroller weather sensor data reported yet.');
+    expect(guiRes.text).toContain('Device Telemetry');
+    expect(guiRes.text).toContain('No device telemetry reported yet.');
     expect(guiRes.text).not.toContain('/gui/relays/1/toggle');
   });
 
 
 
 
+
+  test('gui renders microcontroller weather sensor data table', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/microcontroller/sensors')
+      .set('x-api-token', token)
+      .send({
+        deviceId: 'garden-relay-6',
+        firmwareVersion: 'v16-weather-sensor-baseline',
+        targetLocation: { lat: 43.665288, lon: -116.259186, label: 'garden' },
+        sensorData: [
+          { source: 'relay-hardware', type: 'temperature_c', value: 21.7, unit: 'C' },
+          { source: 'relay-hardware', type: 'humidity_pct', value: 54, unit: '%' }
+        ]
+      });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('id="sensor-table"');
+    expect(guiRes.text).toContain('temperature_c');
+    expect(guiRes.text).toContain('humidity_pct');
+    expect(guiRes.text).toContain('relay-hardware');
+
+    const stateRes = await request(app).get('/gui/state').set('authorization', auth);
+    expect(stateRes.status).toBe(200);
+    expect(stateRes.body.latestSensorData.sensorData).toHaveLength(2);
+  });
+
+  test('gui renders telemetry table with last seen relative time', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/microcontroller/state')
+      .set('x-api-token', token)
+      .send({
+        deviceId: 'garden-relay-6',
+        firmwareVersion: 'v17',
+        clockValid: true,
+        relays: [{ channel: 1, state: 'on' }],
+        schedules: [{ channel: 1, zone: 'North', startTime: '06:00', durationSeconds: 300 }],
+        currentRun: { channel: 1, remainingSeconds: 120 },
+        lastCommandId: 'cmd-123',
+        targetLocation: { lat: 43.665288, lon: -116.259186, label: 'garden' },
+        sensorData: [{ source: 'relay-hardware', type: 'temperature_c', value: 20.1, unit: 'C' }]
+      });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('id="telemetry-table"');
+    expect(guiRes.text).toContain('garden-relay-6');
+    expect(guiRes.text).toContain('v17');
+    expect(guiRes.text).toContain('cmd-123');
+    expect(guiRes.text).toContain('Last Seen');
+    expect(guiRes.text).toMatch(/\d+s ago/);
+
+    const stateRes = await request(app).get('/gui/state').set('authorization', auth);
+    expect(stateRes.status).toBe(200);
+    expect(stateRes.body.deviceTelemetry.deviceId).toBe('garden-relay-6');
+    expect(stateRes.body.deviceTelemetry.lastSeenAt).toBeDefined();
+  });
   test('gui renders schedule as a visual timeline block', async () => {
     const app = build();
     await request(app)
