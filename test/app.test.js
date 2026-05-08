@@ -613,6 +613,20 @@ describe('garden controller api', () => {
     expect(stateRes.body.serverTime).toBeDefined();
     expect(stateRes.body.radarEmbedUrl).toBeUndefined();
   });
+
+  test('gui refresh script repopulates schedule edit rows from refreshed zone schedules', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/microcontroller/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [{ id: 22, channel: 2, zone: 'Front Beds', startTime: '08:00', durationSeconds: 600 }] });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain("const scheduleFormBody = document.getElementById('schedule-form-body');");
+    expect(guiRes.text).toContain('scheduleFormBody.innerHTML = parsedSchedules.map((schedule, index) =>');
+    expect(guiRes.text).toContain('name="schedule[\' + index + \'][startTime]" type="time" value="\' + startTime + \'"');
+  });
   
 
   test('POST /api/schedules rejects channel 6', async () => {
