@@ -268,6 +268,29 @@ describe('garden controller api', () => {
     delete process.env.GUI_PASSWORD;
   });
 
+
+  test('reads quoted API token from process.env', async () => {
+    process.env.API_TOKEN = '"quoted-token"';
+
+    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' }).app;
+    const authorized = await request(app).get('/api/state').set('x-api-token', 'quoted-token');
+
+    expect(authorized.status).toBe(200);
+
+    delete process.env.API_TOKEN;
+  });
+
+  test('reads API token with surrounding whitespace from process.env', async () => {
+    process.env.API_TOKEN = '  spaced-token  ';
+
+    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' }).app;
+    const authorized = await request(app).get('/api/state').set('x-api-token', 'spaced-token');
+
+    expect(authorized.status).toBe(200);
+
+    delete process.env.API_TOKEN;
+  });
+
   test('accepts lowercase basic auth scheme', async () => {
     const app = build();
     const lowercaseSchemeAuth = `basic ${Buffer.from('admin:password').toString('base64')}`;

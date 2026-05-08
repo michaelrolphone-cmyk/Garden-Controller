@@ -53,7 +53,7 @@ function createApp(config = {}) {
   const state = config.state || createState();
   const guiUsername = normalizeCredentialValue(config.guiUsername ?? process.env.GUI_USERNAME);
   const guiPassword = normalizeCredentialValue(config.guiPassword ?? process.env.GUI_PASSWORD);
-  const apiToken = config.apiToken ?? process.env.API_TOKEN;
+  const apiToken = normalizeCredentialValue(config.apiToken ?? process.env.API_TOKEN);
 
   function requireApiToken(req, res, next) {
     const provided = req.get('x-api-token');
