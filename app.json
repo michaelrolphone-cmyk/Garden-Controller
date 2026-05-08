@@ -1,0 +1,15 @@
+{
+  "name": "garden-controller",
+  "description": "API and GUI for ESP32-S3-Relay-6CH on Heroku",
+  "env": {
+    "API_TOKEN": {
+      "description": "Shared token for API and microcontroller authentication"
+    },
+    "GUI_USERNAME": {
+      "description": "Username for public GUI basic authentication"
+    },
+    "GUI_PASSWORD": {
+      "description": "Password for public GUI basic authentication"
+    }
+  }
+}
