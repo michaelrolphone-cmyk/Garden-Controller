@@ -10,6 +10,21 @@ const DEFAULT_ON_DURATION_MINUTES = 15;
 const DEFAULT_ON_DURATION_SECONDS = DEFAULT_ON_DURATION_MINUTES * 60;
 const MAX_DAILY_SCHEDULES = 64;
 
+const ZONE_COLORS = Object.freeze({
+  1: { hex: '#3b82f6', rgb: { r: 59, g: 130, b: 246 } },
+  2: { hex: '#22c55e', rgb: { r: 34, g: 197, b: 94 } },
+  3: { hex: '#f59e0b', rgb: { r: 245, g: 158, b: 11 } },
+  4: { hex: '#a855f7', rgb: { r: 168, g: 85, b: 247 } },
+  5: { hex: '#ec4899', rgb: { r: 236, g: 72, b: 153 } }
+});
+
+function buildZoneColorList() {
+  return Array.from({ length: ZONE_CHANNELS }, (_, index) => {
+    const zone = index + 1;
+    return { zone, channel: zone, ...ZONE_COLORS[zone] };
+  });
+}
+
 const GARDEN_LOCATION = { lat: 43.665288, lon: -116.259186, label: 'garden' };
 
 function buildEnvironmentalFeeds() {
@@ -367,11 +382,13 @@ function createApp(config = {}) {
   });
 
   app.get('/api/relays', requireApiToken, (_req, res) => {
-    res.json({ desiredRelays: state.desiredRelayState, reportedRelays: state.reportedRelayState });
+    res.json({
+      zoneColors: buildZoneColorList(), desiredRelays: state.desiredRelayState, reportedRelays: state.reportedRelayState });
   });
 
   app.get('/api/state', requireApiToken, (_req, res) => {
     res.json({
+      zoneColors: buildZoneColorList(),
       zoneChannels: ZONE_CHANNELS,
       relayChannels: RELAY_CHANNELS,
       masterValveChannel: MASTER_VALVE_CHANNEL,
@@ -1106,6 +1123,7 @@ function createApp(config = {}) {
   app.get('/gui/state', requireGuiAuth, (_req, res) => {
     res.json({
       zoneChannels: ZONE_CHANNELS,
+      zoneColors: buildZoneColorList(),
       relayChannels: RELAY_CHANNELS,
       masterValveChannel: MASTER_VALVE_CHANNEL,
       desiredRelays: state.desiredRelayState,
@@ -1271,4 +1289,4 @@ function createApp(config = {}) {
   return { app, state };
 }
 
-module.exports = { createApp, createState, ZONE_CHANNELS, RELAY_CHANNELS, MASTER_VALVE_CHANNEL };
+module.exports = { createApp, createState, ZONE_CHANNELS, RELAY_CHANNELS, MASTER_VALVE_CHANNEL, ZONE_COLORS, buildZoneColorList };

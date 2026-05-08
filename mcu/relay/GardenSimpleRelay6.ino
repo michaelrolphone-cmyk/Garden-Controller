@@ -29,6 +29,9 @@ static const uint8_t RELAY_OFF = LOW;
 
 static const bool ENABLE_BUZZER = true;
 static const uint8_t BUZZER_PIN = 21;
+static const uint8_t RGB_LED_PIN_R = 38;
+static const uint8_t RGB_LED_PIN_G = 39;
+static const uint8_t RGB_LED_PIN_B = 40;
 // Passive buzzer volume reduction by duty cycle.
 // Prior chirp used ~50% duty. 5% duty is roughly 1/10 of that drive time.
 static const uint8_t BUZZER_DUTY_PERCENT = 5;
@@ -261,6 +264,42 @@ bool anyZoneRelayOn() {
   return false;
 }
 
+struct ZoneColor {
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+};
+
+const ZoneColor ZONE_COLORS[ZONE_COUNT] = {
+  {59, 130, 246},
+  {34, 197, 94},
+  {245, 158, 11},
+  {168, 85, 247},
+  {236, 72, 153}
+};
+
+void setRgbLed(uint8_t r, uint8_t g, uint8_t b) {
+  analogWrite(RGB_LED_PIN_R, r);
+  analogWrite(RGB_LED_PIN_G, g);
+  analogWrite(RGB_LED_PIN_B, b);
+}
+
+void updateZoneRgbLed() {
+  uint8_t active[ZONE_COUNT];
+  uint8_t activeCount = 0;
+  for (uint8_t i = 0; i < ZONE_COUNT; i++) {
+    if (relayState[i]) active[activeCount++] = i;
+  }
+  if (activeCount == 0) {
+    setRgbLed(0, 0, 0);
+    return;
+  }
+  uint32_t nowBucket = millis() / 1000UL;
+  uint8_t colorIndex = active[nowBucket % activeCount];
+  const ZoneColor& color = ZONE_COLORS[colorIndex];
+  setRgbLed(color.r, color.g, color.b);
+}
+
 void updateMasterValve() {
   bool masterNeeded = anyZoneRelayOn() || spigotRun.active;
   setRelay(MASTER_RELAY_INDEX, masterNeeded);
@@ -270,6 +309,7 @@ void setZoneRelay(uint8_t zoneIndex, bool on) {
   if (zoneIndex >= ZONE_COUNT) return;
   setRelay(zoneIndex, on);
   updateMasterValve();
+  updateZoneRgbLed();
 }
 
 
@@ -1156,6 +1196,19 @@ void buildStateJson(JsonDocument& doc) {
     o["name"] = zones[i].name;
     o["enabled"] = zones[i].enabled;
     o["relayOn"] = relayState[i];
+    JsonObject color = o.createNestedObject("color");
+    color["r"] = ZONE_COLORS[i].r;
+    color["g"] = ZONE_COLORS[i].g;
+    color["b"] = ZONE_COLORS[i].b;
+  }
+  JsonArray zoneColors = doc.createNestedArray("zoneColors");
+  for (uint8_t i = 0; i < ZONE_COUNT; i++) {
+    JsonObject c = zoneColors.createNestedObject();
+    c["zone"] = i + 1;
+    c["channel"] = i + 1;
+    c["r"] = ZONE_COLORS[i].r;
+    c["g"] = ZONE_COLORS[i].g;
+    c["b"] = ZONE_COLORS[i].b;
   }
 
   JsonArray sched = doc.createNestedArray("dailySchedules");
@@ -1527,14 +1580,14 @@ const char ADMIN_PAGE[] PROGMEM = R"rawliteral(
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Garden Relay Admin</title>
 <style>
 body{font-family:Inter,Arial,sans-serif;margin:0;background:#f1f5f9;color:#123}.shell{max-width:1200px;margin:0 auto;padding:12px}.panel{background:#fff;border:1px solid #dbe7ef;border-radius:16px;padding:14px;margin-bottom:12px}
-.layout{display:grid;grid-template-columns:1fr 1.4fr;gap:12px}.relay-grid{list-style:none;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.relay-card{border:1px solid #d8e3eb;border-radius:12px;padding:10px}.relay-card.zone-color-1{background:rgba(59,130,246,.08)}.relay-card.zone-color-2{background:rgba(34,197,94,.08)}.relay-card.zone-color-3{background:rgba(245,158,11,.08)}.relay-card.zone-color-4{background:rgba(168,85,247,.08)}.relay-card.zone-color-5{background:rgba(236,72,153,.08)}
-.zone{stroke-width:2}.zone-color-1{fill:rgba(59,130,246,.2);stroke:rgba(59,130,246,.9)}.zone-color-1.zone-active{fill:rgba(59,130,246,.55)}.zone-color-2{fill:rgba(34,197,94,.2);stroke:rgba(34,197,94,.9)}.zone-color-2.zone-active{fill:rgba(34,197,94,.55)}.zone-color-3{fill:rgba(245,158,11,.2);stroke:rgba(245,158,11,.92)}.zone-color-3.zone-active{fill:rgba(245,158,11,.55)}.zone-color-4{fill:rgba(168,85,247,.2);stroke:rgba(168,85,247,.9)}.zone-color-4.zone-active{fill:rgba(168,85,247,.55)}.zone-color-5{fill:rgba(236,72,153,.2);stroke:rgba(236,72,153,.9)}.zone-color-5.zone-active{fill:rgba(236,72,153,.55)} .status-mismatch{color:#b42345} .status-synced{color:#18794e}
-.timeline{display:grid;gap:8px}.timeline-row{display:grid;grid-template-columns:90px 1fr;gap:8px}.timeline-track{height:26px;background:#f3f7fb;border:1px solid #d8e3eb;border-radius:999px;position:relative}.timeline-block{position:absolute;top:2px;height:20px;border-radius:999px;color:#fff;font-size:.75rem;padding:0 8px;display:flex;align-items:center;white-space:nowrap}.timeline-block.zone-color-1{background:#3b82f6}.timeline-block.zone-color-2{background:#22c55e}.timeline-block.zone-color-3{background:#f59e0b}.timeline-block.zone-color-4{background:#a855f7}.timeline-block.zone-color-5{background:#ec4899}
+.layout{display:grid;grid-template-columns:1fr 1.4fr;gap:12px}.relay-grid{list-style:none;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.relay-card{border:1px solid #d8e3eb;border-radius:12px;padding:10px}
+.zone{stroke-width:2}.zone-active{filter:saturate(1.2)} .status-mismatch{color:#b42345} .status-synced{color:#18794e}
+.timeline{display:grid;gap:8px}.timeline-row{display:grid;grid-template-columns:90px 1fr;gap:8px}.timeline-track{height:26px;background:#f3f7fb;border:1px solid #d8e3eb;border-radius:999px;position:relative}.timeline-block{position:absolute;top:2px;height:20px;border-radius:999px;color:#fff;font-size:.75rem;padding:0 8px;display:flex;align-items:center;white-space:nowrap}
 button,input,select{border:1px solid #c7d8e5;border-radius:8px;padding:7px} label{display:flex;flex-direction:column;gap:6px;font-size:.92rem} .grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:10px 12px;margin:10px 0} .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap} .header-actions button{flex:1 1 170px} .schedule-actions{margin-top:10px} .danger{background:#9a2b2b;color:#fff;border-color:#7d2020}
 @media(max-width:900px){.layout{grid-template-columns:1fr}.relay-grid{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}
 </style></head><body><div class="shell">
 <section class="panel"><h1>Castle Hills Garden Manager (Firmware Local)</h1><p id="meta">Loading state...</p><p><a href="/">Mobile View</a></p><div class="actions header-actions"><button onclick="syncTime()">Sync Phone Time</button><button onclick="cmd('/api/alloff')">Turn Off All Relays</button><button onclick="const m=prompt('Run spigots for how many minutes?','15');if(m)cmd('/api/spigots-run?minutes='+encodeURIComponent(m))">Run Spigots</button><button onclick="cmd('/api/spigots-run?action=off')">Stop Spigots</button></div></section>
-<div class="layout"><section class="panel"><h2>Garden Zone Map</h2><svg viewBox="0 0 295.743 295.482"><polygon id="zone-4b" class="zone zone-color-4" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/><polygon id="zone-4a" class="zone zone-color-4" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/><polygon id="zone-1" class="zone zone-color-1" points="205.581,96.842 264.287,97.694 263.108,173.173 198.935,169.661 205.581,96.842"/><polygon id="zone-5" class="zone zone-color-5" points="32,46.388 46.493,52.635 95.676,139.247 128.342,140.128 127.534,159.189 22.68,152.017 32,46.388"/><polygon id="zone-3" class="zone zone-color-3" points="152.903,89.893 152.691,13.195 50.949,12.06 136.836,89.869 152.903,89.893"/><polygon id="zone-2" class="zone zone-color-2" points="249.304,90.041 249.095,14.271 152.691,13.195 152.903,89.893 249.304,90.041"/></svg></section>
+<div class="layout"><section class="panel"><h2>Garden Zone Map</h2><svg viewBox="0 0 295.743 295.482"><polygon id="zone-4b" data-zone="4" class="zone" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/><polygon id="zone-4a" data-zone="4" class="zone" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/><polygon id="zone-1" data-zone="1" class="zone" points="205.581,96.842 264.287,97.694 263.108,173.173 198.935,169.661 205.581,96.842"/><polygon id="zone-5" data-zone="5" class="zone" points="32,46.388 46.493,52.635 95.676,139.247 128.342,140.128 127.534,159.189 22.68,152.017 32,46.388"/><polygon id="zone-3" data-zone="3" class="zone" points="152.903,89.893 152.691,13.195 50.949,12.06 136.836,89.869 152.903,89.893"/><polygon id="zone-2" data-zone="2" class="zone" points="249.304,90.041 249.095,14.271 152.691,13.195 152.903,89.893 249.304,90.041"/></svg></section>
 <section class="panel"><h2>Zones (scheduled irrigation)</h2><ul id="relay-grid" class="relay-grid"></ul><h3>Schedule Timeline</h3><div id="timeline"></div><h3>Schedule Manager</h3><p>Create, update, and delete schedule rows directly in firmware.</p><div id="adminSchedRows"></div><div class="actions schedule-actions"><button onclick="addScheduleRow()">Add Schedule</button><button onclick="saveSchedules()">Save Schedules</button></div></section></div>
 <section class="panel"><h2>WiFi Settings</h2><div class="grid"><label>AP SSID<input id="apSsid" autocomplete="off"></label><label>AP Password<input id="apPass" autocomplete="off"></label><label>Home WiFi SSID<input id="staSsid" autocomplete="off"></label><label>Home WiFi Password<input id="staPass" autocomplete="off"></label></div><div class="actions"><button onclick="saveConfig()">Save WiFi Settings</button></div></section>
 <section class="panel"><h2>Remote API Settings</h2><div class="grid"><label>Remote API Base URL<input id="remoteApiBase" autocomplete="off"></label><label>Device ID / local metadata<input id="remoteDeviceId" autocomplete="off"></label><label>API Token<input id="remoteApiKey" autocomplete="off"></label><label><span>Remote API enabled</span><input type="checkbox" id="remoteEnabled"></label></div><div class="actions"><button onclick="testRemote()">Test Remote API</button></div></section>
@@ -1544,9 +1597,11 @@ button,input,select{border:1px solid #c7d8e5;border-radius:8px;padding:7px} labe
 <script>
 function zids(ch){if(ch===4)return ['zone-4a','zone-4b'];return ['zone-'+ch]}
 function zoneChannel(z){return Number(z&&((z.channel??z.zone))||0)}
+function colorByChannel(zoneColors, ch){return (zoneColors||[]).find(c=>Number(c.channel)===Number(ch))}
+function toRgb(c){if(!c||!c.rgb)return '0,0,0';return `${Number(c.rgb.r)||0},${Number(c.rgb.g)||0},${Number(c.rgb.b)||0}`}
 function buildTimelineRows(s){const m={};(s||[]).forEach(x=>{const k=`${x.channel}:${x.zone}`;(m[k]=m[k]||{zone:x.zone,channel:x.channel,schedules:[]}).schedules.push(x)});return Object.values(m)}
-function renderTimeline(rows){if(!rows.length)return '<p>No schedules configured.</p>';return `<div class=timeline>${rows.map(r=>{const b=r.schedules.map(s=>{const p=String(s.startTime||'00:00').split(':');const l=((Number(p[0])*60+Number(p[1]))/1440)*100;const w=Math.max(2,Math.min(((Number(s.durationSeconds)||60)/86400)*100,100-l));return `<span class="timeline-block zone-color-${Number(r.channel||0)}" style="left:${l}%;width:${w}%">${s.startTime} · ${Math.max(1,Math.round((Number(s.durationSeconds)||0)/60))} min</span>`}).join('');return `<div class=timeline-row><span>Zone ${r.channel}</span><div class=timeline-track>${b}</div></div>`}).join('')}</div>`}
-function addScheduleRow(v){const rows=document.getElementById('adminSchedRows');const row=document.createElement('div');row.className='actions';const z=Number(v&&v.zone||1);const t=(v&&v.timeValue)||'06:00';const m=Number(v&&v.runMinutes||10);const en=v&&v.enabled===false?'off':'on';row.innerHTML=`<input type=number min=1 max=5 value='${z}' title='Zone'><input type=time style='max-width:88px' value='${t}' title='Start'><input type=number min=1 max=240 value='${m}' title='Minutes'><select title='Enabled'><option value='on'>On</option><option value='off'>Off</option></select><button class='danger' onclick="this.parentElement.remove()">Delete</button>`;row.querySelector('select').value=en;rows.appendChild(row)}
+function renderTimeline(rows, zoneColors){if(!rows.length)return '<p>No schedules configured.</p>';return `<div class=timeline>${rows.map(r=>{const b=r.schedules.map(s=>{const p=String(s.startTime||'00:00').split(':');const l=((Number(p[0])*60+Number(p[1]))/1440)*100;const w=Math.max(2,Math.min(((Number(s.durationSeconds)||60)/86400)*100,100-l));const rgb=toRgb(colorByChannel(zoneColors, Number(r.channel||0)));return `<span class="timeline-block" style="left:${l}%;width:${w}%;background:rgb(${rgb})">${s.startTime} · ${Math.max(1,Math.round((Number(s.durationSeconds)||0)/60))} min</span>`}).join('');return `<div class=timeline-row><span>Zone ${r.channel}</span><div class=timeline-track>${b}</div></div>`}).join('')}</div>`}
+function addScheduleRow(v){const rows=document.getElementById('adminSchedRows');const row=document.createElement('div');row.className='actions';const z=Number(v&&v.zone||1);const t=(v&&v.timeValue)||'06:00';const m=Number(v&&v.runMinutes||10);const en=v&&v.enabled===false?'off':'on';row.innerHTML=`<input type=number min=1 max=5 value='${z}' title='Zone'><input type=time style='max-width:70px' value='${t}' title='Start'><input type=number min=1 max=240 style='max-width:52px' value='${m}' title='Minutes'><select title='Enabled'><option value='on'>On</option><option value='off'>Off</option></select><button class='danger' onclick="this.parentElement.remove()">Delete</button>`;row.querySelector('select').value=en;rows.appendChild(row)}
 function normalizeSchedules(s){return (s||[]).map(d=>({channel:Number(d.channel||d.zone||0),zone:d.zoneName||('Zone '+d.zone),startTime:d.timeValue||'00:00',durationSeconds:(d.runMinutes||1)*60,enabled:d.enabled!==false}))}
 function scheduleKey(rows){return JSON.stringify(rows)}
 function scheduleEditorBusy(){const a=document.activeElement;return !!(a&&a.closest&&a.closest('#adminSchedRows'))}
@@ -1559,7 +1614,7 @@ async function saveConfig(){const res=await fetch('/api/config',{method:'POST',h
 let lastScheduleKey='';
 async function saveSchedules(){const rows=[...document.querySelectorAll('#adminSchedRows .actions')];const schedules=rows.map(r=>({channel:Number(r.children[0].value),startTime:r.children[1].value,durationSeconds:Number(r.children[2].value)*60,enabled:r.children[3].value==='on'}));const res=await fetch('/api/schedules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedules})});if(!res.ok){alert('Failed to save schedules');return;}await refresh(true);alert('Schedules saved')}
 async function cmd(url){await fetch(url);await refresh(true)}
-async function refresh(forceScheduleRedraw){const s=await (await fetch('/api/state',{cache:'no-store'})).json();hydrateConfig(s);meta.textContent=`${s.date} ${s.time} · WiFi ${s.homeWifiConnected?s.homeIp:s.homeWifiStatus} · Master ${s.masterValveOn?'ON':'OFF'}`;const rg=document.getElementById('relay-grid');rg.innerHTML=(s.zones||[]).map(z=>`<li class="relay-card zone-color-${zoneChannel(z)}"><div><b>Zone ${z.zone}</b> <span class='${z.relayOn?'status-synced':'status-mismatch'}'>${z.relayOn?'ON':'OFF'}</span></div><div class=actions><input id="m${z.zone}" type=number min=1 max=240 value=15><button onclick="cmd('/api/manual-run?zone=${z.zone}&minutes='+encodeURIComponent(document.getElementById('m${z.zone}').value))">Run</button><button onclick="cmd('/api/relay?zone=${z.zone}&state=0')">Stop</button></div></li>`).join('');(s.zones||[]).forEach(z=>zids(zoneChannel(z)).forEach(id=>{const e=document.getElementById(id);if(e)e.classList.toggle('zone-active',!!z.relayOn)}));const schedules=normalizeSchedules(s.dailySchedules||[]);const nextScheduleKey=scheduleKey(schedules);const shouldRedrawSchedules=forceScheduleRedraw||nextScheduleKey!==lastScheduleKey;if(shouldRedrawSchedules){document.getElementById('timeline').innerHTML=renderTimeline(buildTimelineRows(schedules));if(forceScheduleRedraw||!scheduleEditorBusy()){const rows=document.getElementById('adminSchedRows');rows.innerHTML='';(s.dailySchedules||[]).forEach(addScheduleRow);}lastScheduleKey=nextScheduleKey;}}
+async function refresh(forceScheduleRedraw){const s=await (await fetch('/api/state',{cache:'no-store'})).json();hydrateConfig(s);meta.textContent=`${s.date} ${s.time} · WiFi ${s.homeWifiConnected?s.homeIp:s.homeWifiStatus} · Master ${s.masterValveOn?'ON':'OFF'}`;const rg=document.getElementById('relay-grid');rg.innerHTML=(s.zones||[]).map(z=>{const c=colorByChannel(s.zoneColors, zoneChannel(z));const rgb=toRgb(c);return `<li class="relay-card" style="background:rgba(${rgb},0.08);border-color:rgba(${rgb},0.35)"><div><b>Zone ${z.zone}</b> <span class='${z.relayOn?'status-synced':'status-mismatch'}'>${z.relayOn?'ON':'OFF'}</span></div><div class=actions><input id="m${z.zone}" type=number min=1 max=240 value=15><button onclick="cmd('/api/manual-run?zone=${z.zone}&minutes='+encodeURIComponent(document.getElementById('m${z.zone}').value))">Run</button><button onclick="cmd('/api/relay?zone=${z.zone}&state=0')">Stop</button></div></li>`}).join('');(s.zones||[]).forEach(z=>zids(zoneChannel(z)).forEach(id=>{const e=document.getElementById(id);if(!e)return;const c=colorByChannel(s.zoneColors, zoneChannel(z));const rgb=toRgb(c);e.style.fill=`rgba(${rgb},${z.relayOn?0.55:0.2})`;e.style.stroke=`rgba(${rgb},0.9)`;e.classList.toggle('zone-active',!!z.relayOn)}));const schedules=normalizeSchedules(s.dailySchedules||[]);const nextScheduleKey=scheduleKey(schedules);const shouldRedrawSchedules=forceScheduleRedraw||nextScheduleKey!==lastScheduleKey;if(shouldRedrawSchedules){document.getElementById('timeline').innerHTML=renderTimeline(buildTimelineRows(schedules), s.zoneColors||[]);if(forceScheduleRedraw||!scheduleEditorBusy()){const rows=document.getElementById('adminSchedRows');rows.innerHTML='';(s.dailySchedules||[]).forEach(addScheduleRow);}lastScheduleKey=nextScheduleKey;}}
 refresh(true);setInterval(()=>refresh(false),1000);
 </script></body></html>
 )rawliteral";
@@ -1761,6 +1816,10 @@ void setup() {
 
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+  pinMode(RGB_LED_PIN_R, OUTPUT);
+  pinMode(RGB_LED_PIN_G, OUTPUT);
+  pinMode(RGB_LED_PIN_B, OUTPUT);
+  setRgbLed(0, 0, 0);
 
   for (uint8_t i = 0; i < RELAY_COUNT; i++) {
     pinMode(RELAY_PINS[i], OUTPUT);
@@ -1801,6 +1860,7 @@ void loop() {
 
   updateRunState();
   checkSchedule();
+  updateZoneRgbLed();
 
   if (WiFi.status() == WL_CONNECTED && (staConnectInProgress || lastStaStatus.startsWith("connecting"))) {
     staConnectInProgress = false;

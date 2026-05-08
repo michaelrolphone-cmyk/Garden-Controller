@@ -17,6 +17,19 @@ components:
         channel: { type: integer, minimum: 1, maximum: 6 }
         state: { type: string, enum: [on, off] }
       required: [channel, state]
+    ZoneColor:
+      type: object
+      properties:
+        zone: { type: integer, minimum: 1, maximum: 5 }
+        channel: { type: integer, minimum: 1, maximum: 5 }
+        hex: { type: string, example: '#3b82f6' }
+        rgb:
+          type: object
+          properties:
+            r: { type: integer, minimum: 0, maximum: 255 }
+            g: { type: integer, minimum: 0, maximum: 255 }
+            b: { type: integer, minimum: 0, maximum: 255 }
+      required: [zone, channel, hex, rgb]
     PublishedSchedule:
       type: object
       properties:
@@ -35,11 +48,29 @@ paths:
   /api/relays:
     get:
       responses:
-        '200': { description: Desired/reported relay states }
+        '200':
+          description: Desired/reported relay states
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  zoneColors:
+                    type: array
+                    items: { $ref: '#/components/schemas/ZoneColor' }
   /api/state:
     get:
       responses:
-        '200': { description: Full controller state }
+        '200':
+          description: Full controller state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  zoneColors:
+                    type: array
+                    items: { $ref: '#/components/schemas/ZoneColor' }
   /api/commands:
     post:
       requestBody:
@@ -228,7 +259,16 @@ paths:
       security:
         - basicAuth: []
       responses:
-        '200': { description: GUI dynamic state payload (relays, schedules, server time) }
+        '200':
+          description: GUI dynamic state payload (relays, schedules, server time)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  zoneColors:
+                    type: array
+                    items: { $ref: '#/components/schemas/ZoneColor' }
   /gui/relays/{channel}/on:
     post:
       security:

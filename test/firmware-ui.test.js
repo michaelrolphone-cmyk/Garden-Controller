@@ -22,11 +22,10 @@ describe('firmware local admin/mobile api integration', () => {
   });
 
   test('admin ui maps zone activity, color-codes map zones, and provides schedule CRUD inputs', () => {
-    expect(ino).toContain('zone-color-1');
-    expect(ino).toContain('zone-color-2');
-    expect(ino).toContain('zone-color-3');
-    expect(ino).toContain('zone-color-4');
-    expect(ino).toContain('zone-color-5');
+    expect(ino).toContain('function colorByChannel(zoneColors, ch)');
+    expect(ino).toContain('function toRgb(c)');
+    expect(ino).toContain('data-zone="1"');
+    expect(ino).toContain('s.zoneColors');
     expect(ino).toContain('zoneChannel(z)');
     expect(ino).toContain("d.zoneName||('Zone '+d.zone)");
     expect(ino).toContain('addScheduleRow(');
@@ -34,10 +33,14 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain("#adminSchedRows .actions");
     expect(ino).toContain('lastScheduleKey');
     expect(ino).toContain('scheduleEditorBusy()');
-    expect(ino).toContain("style='max-width:88px'");
+    expect(ino).toContain("style='max-width:70px'");
+    expect(ino).toContain("style='max-width:52px'");
     expect(ino).toContain("<button class='danger' onclick=\"this.parentElement.remove()\">Delete</button>");
     expect(ino).toContain('const shouldRedrawSchedules=forceScheduleRedraw||nextScheduleKey!==lastScheduleKey');
-    expect(ino).toContain('class=\"relay-card zone-color-${zoneChannel(z)}\"');
+    expect(ino).toContain('style="background:rgba(${rgb},0.08);border-color:rgba(${rgb},0.35)"');
+    expect(ino).toContain('doc.createNestedArray("zoneColors")');
+    expect(ino).toContain('updateZoneRgbLed()');
+    expect(ino).toContain('millis() / 1000UL');
   });
 
   test('firmware admin restores critical device settings and maintenance controls', () => {
@@ -72,7 +75,7 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain('class="actions header-actions"');
     expect(ino).toContain('Save WiFi Settings');
     expect(ino).toContain('grid-template-columns:90px 1fr');
-    expect(ino).toContain('timeline-block zone-color-${Number(r.channel||0)}');
+    expect(ino).toContain('renderTimeline(buildTimelineRows(schedules), s.zoneColors||[])');
     expect(ino).not.toContain(">Test Buzzer<");
     expect(ino).toContain('flex-wrap:wrap');
     expect(ino).toContain("function hydrateConfig(s){document.getElementById('apSsid').value=s.apSsid||''");
