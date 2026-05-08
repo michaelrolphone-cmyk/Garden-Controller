@@ -105,6 +105,8 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
   - per-channel desired relay state and reported relay state
   - mismatch indicator when desired and reported differ
   - current server UTC time
+  - rapid auto-refresh (every 1 second) for near-real-time state visibility
+  - active zone highlighting on the garden map based on reported relay ON states
   - schedules list
   - per-relay explicit ON/OFF controls (based on reported state)
 - `POST /gui/relays/:channel/on` - queue an ON command from GUI and redirect to `/gui`.

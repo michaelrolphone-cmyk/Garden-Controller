@@ -366,6 +366,10 @@ function createApp(config = {}) {
   });
 
   app.get('/gui', requireGuiAuth, (_req, res) => {
+    const activeZoneIds = state.reportedRelayState
+      .filter((relay) => relay.state === 'on')
+      .map((relay) => `zone-${relay.channel}`);
+
     const relayMarkup = state.desiredRelayState
       .map((desiredRelay) => {
         const reportedRelay = state.reportedRelayState[desiredRelay.channel - 1] || { state: 'unknown' };
@@ -403,18 +407,20 @@ function createApp(config = {}) {
 <html>
   <head>
     <title>Garden Controller</title>
+    <meta http-equiv="refresh" content="1" />
     <style>
-      :root { color-scheme: dark; }
-      body { font-family: Inter, system-ui, sans-serif; margin: 0; color: #d8e6ff; background: radial-gradient(circle at top, #1b2f6e 0%, #040711 45%, #02040a 100%); }
+      :root { color-scheme: dark; --glow: 0 0 18px rgba(120,255,221,0.55); }
+      body { font-family: Inter, system-ui, sans-serif; margin: 0; color: #d8e6ff; background: radial-gradient(circle at top, #17331f 0%, #081628 38%, #03060f 100%); }
       .shell { max-width: 1200px; margin: 0 auto; padding: 24px; }
-      .panel { background: rgba(8, 15, 35, 0.72); border: 1px solid rgba(101, 173, 255, 0.3); border-radius: 18px; box-shadow: 0 0 30px rgba(0, 255, 255, 0.12); backdrop-filter: blur(8px); }
+      .panel { background: rgba(8, 20, 30, 0.74); border: 1px solid rgba(128, 255, 199, 0.35); border-radius: 18px; box-shadow: 0 0 30px rgba(98, 255, 210, 0.2); backdrop-filter: blur(8px); }
       h1,h2,h3 { color: #8fe8ff; letter-spacing: 0.03em; }
       .hero { padding: 20px; margin-bottom: 18px; }
       .timestamp { color: #93b9ff; }
       .layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; }
       .map-wrap { padding: 16px; }
       .map-wrap svg { width: 100%; height: auto; background: linear-gradient(160deg, #020617, #071a32); border-radius: 14px; }
-      .zone { fill: rgba(57, 255, 255, 0.1); stroke: #6af2ff; stroke-width: 2.2; }
+      .zone { fill: rgba(111, 255, 205, 0.09); stroke: #72ffcb; stroke-width: 2.2; transition: fill 120ms linear, filter 120ms linear, stroke 120ms linear; }
+      .zone-active { fill: rgba(104, 255, 140, 0.45); stroke: #c0ffd2; filter: drop-shadow(var(--glow)); }
       .linework { stroke: rgba(132, 163, 255, 0.6); }
       .relay-section { padding: 16px; }
       .relay-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
@@ -436,20 +442,21 @@ function createApp(config = {}) {
   <body>
     <div class="shell">
       <section class="panel hero">
-        <h1>ESP32-S3-Relay-6CH Controller</h1>
+        <h1>ESP32-S3-Relay-6CH Controller · Garden Fresh Futurism</h1>
         <p class="timestamp">Current server time (UTC): <strong>${new Date().toISOString()}</strong></p>
+        <p class="timestamp">Auto-refresh: every 1 second · Active zones glowing on map.</p>
       </section>
       <div class="layout">
         <section class="panel map-wrap">
           <h2>Garden Zone Map</h2>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 295.743 295.482" role="img" aria-label="Garden watering zones">
             <g class="linework"><polyline points="10,266.311 251.526,274.667"/><line x1="285.743" y1="285.482" x2="282.082" y2="191.277"/><polyline points="282.082,191.277 276.705,168.862 277.246,95.213 277.7,15.387"/><polyline points="13.295,258.387 35.211,10 37.872,11.914 276.96,14.582"/></g>
-            <polygon id="zone-1" class="zone" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/>
-            <polygon id="zone-2" class="zone" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/>
-            <polygon id="zone-3" class="zone" points="205.581,96.842 264.287,97.694 263.108,173.173 198.935,169.661 205.581,96.842"/>
-            <polygon id="zone-4" class="zone" points="32,46.388 46.493,52.635 95.676,139.247 128.342,140.128 127.534,159.189 22.68,152.017 32,46.388"/>
-            <polygon id="zone-5" class="zone" points="152.903,89.893 152.691,13.195 50.949,12.06 136.836,89.869 152.903,89.893"/>
-            <polygon id="zone-6" class="zone" points="249.304,90.041 249.095,14.271 152.691,13.195 152.903,89.893 249.304,90.041"/>
+            <polygon id="zone-1" class="zone ${activeZoneIds.includes('zone-1') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-1')}" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/>
+            <polygon id="zone-2" class="zone ${activeZoneIds.includes('zone-2') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-2')}" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/>
+            <polygon id="zone-3" class="zone ${activeZoneIds.includes('zone-3') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-3')}" points="205.581,96.842 264.287,97.694 263.108,173.173 198.935,169.661 205.581,96.842"/>
+            <polygon id="zone-4" class="zone ${activeZoneIds.includes('zone-4') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-4')}" points="32,46.388 46.493,52.635 95.676,139.247 128.342,140.128 127.534,159.189 22.68,152.017 32,46.388"/>
+            <polygon id="zone-5" class="zone ${activeZoneIds.includes('zone-5') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-5')}" points="152.903,89.893 152.691,13.195 50.949,12.06 136.836,89.869 152.903,89.893"/>
+            <polygon id="zone-6" class="zone ${activeZoneIds.includes('zone-6') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-6')}" points="249.304,90.041 249.095,14.271 152.691,13.195 152.903,89.893 249.304,90.041"/>
           </svg>
         </section>
         <section class="panel relay-section">

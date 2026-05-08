@@ -129,10 +129,28 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('Reported <strong>OFF</strong>');
     expect(guiRes.text).toContain('status-pill status-mismatch');
     expect(guiRes.text).toContain('Garden Zone Map');
+    expect(guiRes.text).toContain('<meta http-equiv="refresh" content="1" />');
+    expect(guiRes.text).toContain('Garden Fresh Futurism');
     expect(guiRes.text).toContain('id="zone-6"');
+    expect(guiRes.text).toContain('data-active="false"');
     expect(guiRes.text).toContain('/gui/relays/1/on');
     expect(guiRes.text).toContain('/gui/relays/1/off');
     expect(guiRes.text).not.toContain('/gui/relays/1/toggle');
+  });
+
+
+  test('gui map marks active zones from reported relay state', async () => {
+    const app = build();
+
+    await request(app)
+      .post('/api/microcontroller/relays/state')
+      .set('x-api-token', token)
+      .send({ relays: [{ channel: 2, state: 'on' }] });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('id="zone-2" class="zone zone-active" data-active="true"');
+    expect(guiRes.text).toContain('id="zone-1" class="zone " data-active="false"');
   });
 
   test('gui relay action endpoint only allows explicit on/off actions', async () => {
