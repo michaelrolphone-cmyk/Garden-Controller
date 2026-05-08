@@ -201,7 +201,8 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('Reported <strong>OFF</strong>');
     expect(guiRes.text).toContain('status-pill status-mismatch');
     expect(guiRes.text).toContain('Garden Zone Map');
-    expect(guiRes.text).toContain('<meta http-equiv="refresh" content="1" />');
+    expect(guiRes.text).not.toContain('<meta http-equiv="refresh" content="1" />');
+    expect(guiRes.text).toContain("setInterval(refreshState, 1000);");
     expect(guiRes.text).toContain('Castle Hills Garden Manager');
     expect(guiRes.text).toContain('grid-template-columns: 1fr 2fr');
     expect(guiRes.text).toContain('id="zone-6"');
@@ -261,6 +262,25 @@ describe('garden controller api', () => {
     const invalidRes = await request(app).post('/gui/relays/2/toggle').set('authorization', auth);
     expect(invalidRes.status).toBe(400);
   });
+  test('gui state endpoint returns only refreshable hardware state data', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/microcontroller/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [{ channel: 2, zone: 'Front Beds', startTime: '08:00', durationSeconds: 600 }] });
+    await request(app)
+      .post('/api/microcontroller/relays/state')
+      .set('x-api-token', token)
+      .send({ relays: [{ channel: 2, state: 'on' }] });
+
+    const stateRes = await request(app).get('/gui/state').set('authorization', auth);
+    expect(stateRes.status).toBe(200);
+    expect(stateRes.body.desiredRelays).toBeDefined();
+    expect(stateRes.body.reportedRelays).toBeDefined();
+    expect(stateRes.body.schedules).toHaveLength(1);
+    expect(stateRes.body.serverTime).toBeDefined();
+    expect(stateRes.body.radarEmbedUrl).toBeUndefined();
+  });
   test('openapi spec includes new endpoints', () => {
     const specPath = path.join(__dirname, '..', 'openapi.yaml');
     const spec = yaml.load(fs.readFileSync(specPath, 'utf8'));
@@ -271,5 +291,6 @@ describe('garden controller api', () => {
     expect(spec.paths['/api/queue/next'].get.parameters[0].name).toBe('wait');
     expect(spec.paths['/gui/relays/{channel}/on']).toBeDefined();
     expect(spec.paths['/gui/relays/{channel}/off']).toBeDefined();
+    expect(spec.paths['/gui/state']).toBeDefined();
   });
 });

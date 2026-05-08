@@ -126,7 +126,7 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
   - per-channel desired relay state and reported relay state
   - mismatch indicator when desired and reported differ
   - current server UTC time
-  - rapid auto-refresh (every 1 second) for near-real-time state visibility
+  - client-side state refresh every 1 second for near-real-time visibility without reloading the full page
   - active zone highlighting on the garden map based on reported relay ON states
   - schedules list
   - embedded environmental monitoring panels for weather radar and satellite imagery centered at `43.665288, -116.259186`
@@ -135,6 +135,7 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 - `POST /gui/relays/:channel/on` - queue an ON command from GUI and redirect to `/gui`.
 - `POST /gui/relays/:channel/off` - queue an OFF command from GUI and redirect to `/gui`.
 - `POST /gui/schedules` - submit a zone schedule from GUI and queue a schedule update command for the microcontroller.
+- `GET /gui/state` - basic-auth protected JSON state payload used by the GUI for 1-second incremental updates of relay/schedule/hardware status.
 
 Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are entered in Heroku with surrounding quotes, the app normalizes them automatically.
 
