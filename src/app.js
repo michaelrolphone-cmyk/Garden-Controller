@@ -20,10 +20,13 @@ function normalizeCredentialValue(value) {
 
 function createState() {
   return {
-    relayState: Array.from({ length: RELAY_CHANNELS }, (_, index) => ({ channel: index + 1, state: 'off' })),
+    desiredRelayState: Array.from({ length: RELAY_CHANNELS }, (_, index) => ({ channel: index + 1, state: 'off' })),
+    reportedRelayState: Array.from({ length: RELAY_CHANNELS }, (_, index) => ({ channel: index + 1, state: 'off' })),
     queue: [],
+    commandHistory: [],
     news: [],
-    schedules: []
+    schedules: [],
+    deviceTelemetry: null
   };
 }
 
@@ -33,7 +36,8 @@ function createCommand({ channel, action, requestedBy }) {
     channel,
     action,
     requestedBy: requestedBy || 'gui',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    status: 'queued'
   };
 }
 
@@ -97,13 +101,15 @@ function createApp(config = {}) {
   });
 
   app.get('/api/relays', requireApiToken, (_req, res) => {
-    res.json({ relays: state.relayState });
+    res.json({ desiredRelays: state.desiredRelayState, reportedRelays: state.reportedRelayState });
   });
 
   app.get('/api/state', requireApiToken, (_req, res) => {
     res.json({
-      relays: state.relayState,
-      queueDepth: state.queue.length,
+      desiredRelays: state.desiredRelayState,
+      reportedRelays: state.reportedRelayState,
+      queueDepth: state.queue.filter((command) => command.status === 'queued').length,
+      commandHistory: state.commandHistory,
       serverTime: new Date().toISOString(),
       schedules: state.schedules
     });
@@ -127,14 +133,14 @@ function createApp(config = {}) {
       return res.status(400).json({ error: 'Invalid relay state payload' });
     }
 
-    const nextRelayState = state.relayState.map((relay) => ({ ...relay }));
+    const nextRelayState = state.reportedRelayState.map((relay) => ({ ...relay }));
     relays.forEach((incomingRelay) => {
       const relay = nextRelayState[incomingRelay.channel - 1];
       relay.state = incomingRelay.state;
     });
-    state.relayState = nextRelayState;
+    state.reportedRelayState = nextRelayState;
 
-    return res.json({ relays: state.relayState });
+    return res.json({ relays: state.reportedRelayState });
   });
 
   app.post('/api/microcontroller/schedules', requireApiToken, (req, res) => {
@@ -215,30 +221,61 @@ function createApp(config = {}) {
 
     const command = createCommand({ channel, action, requestedBy });
 
+    const desiredRelay = state.desiredRelayState[channel - 1];
+    desiredRelay.state = action === 'toggle' ? (desiredRelay.state === 'on' ? 'off' : 'on') : action;
     state.queue.push(command);
     res.status(201).json({ command });
   });
 
   app.get('/api/queue/next', requireApiToken, (_req, res) => {
-    const command = state.queue.shift();
+    const command = state.queue.find((queuedCommand) => queuedCommand.status === 'queued');
     if (!command) {
       return res.status(204).send();
     }
 
-    if (command.type === 'schedule_update') {
-      return res.json({ command });
-    }
+    command.status = 'delivered';
+    command.deliveredAt = new Date().toISOString();
 
-    const relay = state.relayState[command.channel - 1];
-    if (command.action === 'toggle') {
-      relay.state = relay.state === 'on' ? 'off' : 'on';
-    } else {
-      relay.state = command.action;
-    }
-
-    return res.json({ command, relay: { ...relay } });
+    return res.json({ command });
   });
 
+
+  app.post('/api/microcontroller/state', requireApiToken, (req, res) => {
+    const { deviceId, firmwareVersion, clockValid, relays, schedules, currentRun, lastCommandId } = req.body;
+    if (!deviceId || !firmwareVersion || !Array.isArray(relays) || !Array.isArray(schedules)) {
+      return res.status(400).json({ error: 'Invalid state payload' });
+    }
+
+    const validRelayPayload = relays.every((relay) => relay && Number.isInteger(relay.channel) && relay.channel >= 1 && relay.channel <= RELAY_CHANNELS && (relay.state === 'on' || relay.state === 'off'));
+    if (!validRelayPayload) {
+      return res.status(400).json({ error: 'Invalid state payload' });
+    }
+
+    state.reportedRelayState = state.reportedRelayState.map((relay) => ({ ...relay }));
+    relays.forEach((incomingRelay) => {
+      state.reportedRelayState[incomingRelay.channel - 1].state = incomingRelay.state;
+    });
+    state.schedules = schedules.map((schedule) => ({ ...schedule }));
+    state.deviceTelemetry = { deviceId, firmwareVersion, clockValid: Boolean(clockValid), relays: state.reportedRelayState, schedules: state.schedules, currentRun: currentRun || null, lastCommandId: lastCommandId || null, lastSeenAt: new Date().toISOString() };
+    return res.json({ telemetry: state.deviceTelemetry });
+  });
+
+  app.post('/api/microcontroller/commands/:id/ack', requireApiToken, (req, res) => {
+    const command = state.queue.find((item) => item.id === req.params.id);
+    if (!command) {
+      return res.status(404).json({ error: 'Command not found' });
+    }
+
+    const status = req.body.status === 'failed' ? 'failed' : 'applied';
+    if (command.status !== 'delivered') {
+      return res.status(409).json({ error: 'Command must be delivered before acknowledgement' });
+    }
+
+    command.status = status;
+    command.acknowledgedAt = new Date().toISOString();
+    state.commandHistory.unshift({ ...command });
+    return res.json({ command });
+  });
   app.get('/api/news', requireApiToken, (_req, res) => {
     res.json({ news: state.news });
   });
@@ -261,7 +298,7 @@ function createApp(config = {}) {
   });
 
   app.get('/gui', requireGuiAuth, (_req, res) => {
-    const relayMarkup = state.relayState
+    const relayMarkup = state.desiredRelayState
       .map(
         (relay) => `<li>
             Channel ${relay.channel}: <strong>${relay.state.toUpperCase()}</strong>
@@ -306,7 +343,10 @@ function createApp(config = {}) {
       return res.status(400).send('Invalid relay channel');
     }
 
-    state.queue.push(createCommand({ channel, action: 'toggle', requestedBy: 'gui-web' }));
+    const command = createCommand({ channel, action: 'toggle', requestedBy: 'gui-web' });
+    const desiredRelay = state.desiredRelayState[channel - 1];
+    desiredRelay.state = desiredRelay.state === 'on' ? 'off' : 'on';
+    state.queue.push(command);
     return res.redirect(303, '/gui');
   });
 
@@ -335,7 +375,8 @@ function createApp(config = {}) {
       type: 'schedule_update',
       schedules: [schedule],
       requestedBy: 'gui-web',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      status: 'queued'
     });
     return res.redirect(303, '/gui');
   });

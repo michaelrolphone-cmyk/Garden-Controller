@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Garden Controller API
-  version: 1.0.0
+  version: 1.1.0
 servers:
   - url: /
 components:
@@ -13,284 +13,99 @@ components:
     Relay:
       type: object
       properties:
-        channel:
-          type: integer
-          minimum: 1
-          maximum: 6
-        state:
-          type: string
-          enum: [on, off]
+        channel: { type: integer, minimum: 1, maximum: 6 }
+        state: { type: string, enum: [on, off] }
       required: [channel, state]
-    ControllerState:
-      type: object
-      properties:
-        relays:
-          type: array
-          items:
-            $ref: '#/components/schemas/Relay'
-        queueDepth:
-          type: integer
-          minimum: 0
-        serverTime:
-          type: string
-          format: date-time
-        schedules:
-          type: array
-          items:
-            oneOf:
-              - type: string
-              - $ref: '#/components/schemas/PublishedSchedule'
-      required: [relays, queueDepth, serverTime, schedules]
-    RelayStatePublish:
-      type: object
-      properties:
-        relays:
-          type: array
-          items:
-            $ref: '#/components/schemas/Relay'
-      required: [relays]
     PublishedSchedule:
       type: object
       properties:
-        channel:
-          type: integer
-          minimum: 1
-          maximum: 6
-        startTime:
-          type: string
-          description: Controller-local schedule start time label from the microcontroller.
-        zone:
-          type: string
-          description: Human-readable garden zone name.
-        durationSeconds:
-          type: integer
-          minimum: 1
+        channel: { type: integer, minimum: 1, maximum: 6 }
+        zone: { type: string }
+        startTime: { type: string }
+        durationSeconds: { type: integer, minimum: 1 }
       required: [channel, zone, startTime, durationSeconds]
-    SchedulePublish:
-      type: object
-      properties:
-        schedules:
-          type: array
-          items:
-            $ref: '#/components/schemas/PublishedSchedule'
-      required: [schedules]
-    CommandCreate:
-      type: object
-      properties:
-        channel:
-          type: integer
-          minimum: 1
-          maximum: 6
-        action:
-          type: string
-          enum: [on, off, toggle]
-        requestedBy:
-          type: string
-      required: [channel, action]
-    RelayCommand:
-      type: object
-      properties:
-        id:
-          type: string
-        channel:
-          type: integer
-          minimum: 1
-          maximum: 6
-        action:
-          type: string
-          enum: [on, off, toggle]
-        requestedBy:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-      required: [id, channel, action, requestedBy, createdAt]
-    ScheduleUpdateCommand:
-      type: object
-      properties:
-        id:
-          type: string
-        type:
-          type: string
-          enum: [schedule_update]
-        schedules:
-          type: array
-          items:
-            $ref: '#/components/schemas/PublishedSchedule'
-        requestedBy:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-      required: [id, type, schedules, requestedBy, createdAt]
-    QueueNextRelayResponse:
-      type: object
-      properties:
-        command:
-          $ref: '#/components/schemas/RelayCommand'
-        relay:
-          $ref: '#/components/schemas/Relay'
-      required: [command, relay]
-    QueueNextScheduleResponse:
-      type: object
-      properties:
-        command:
-          $ref: '#/components/schemas/ScheduleUpdateCommand'
-      required: [command]
 paths:
   /health:
     get:
       responses:
-        '200':
-          description: OK
+        '200': { description: OK }
   /api/relays:
     get:
       responses:
-        '200':
-          description: Current relay states
+        '200': { description: Desired/reported relay states }
   /api/state:
     get:
       responses:
-        '200':
-          description: Full controller state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ControllerState'
+        '200': { description: Full controller state }
   /api/commands:
     post:
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CommandCreate'
       responses:
-        '201':
-          description: Command queued
-        '400':
-          description: Invalid payload
-  /api/microcontroller/relays/state:
-    post:
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RelayStatePublish'
-      responses:
-        '200':
-          description: Relay state accepted and persisted
-        '400':
-          description: Invalid payload
-  /api/microcontroller/schedules:
-    post:
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SchedulePublish'
-      responses:
-        '200':
-          description: Schedules accepted and persisted
-        '400':
-          description: Invalid payload
-  /api/schedules:
-    post:
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SchedulePublish'
-      responses:
-        '201':
-          description: Schedules stored and queued for microcontroller
-        '400':
-          description: Invalid payload
+        '201': { description: Command queued }
+        '400': { description: Invalid payload }
   /api/queue/next:
     get:
       responses:
-        '200':
-          description: Next command for microcontroller
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/QueueNextRelayResponse'
-                  - $ref: '#/components/schemas/QueueNextScheduleResponse'
-              examples:
-                relayCommand:
-                  value:
-                    command:
-                      id: '1715144970000-a1b2c3'
-                      channel: 1
-                      action: on
-                      requestedBy: gui-web
-                      createdAt: '2026-05-08T09:00:00.000Z'
-                    relay:
-                      channel: 1
-                      state: on
-                scheduleUpdate:
-                  value:
-                    command:
-                      id: '1715145000000-z9y8x7'
-                      type: schedule_update
-                      requestedBy: gui-web
-                      createdAt: '2026-05-08T09:00:30.000Z'
-                      schedules:
-                        - channel: 2
-                          zone: Patio
-                          startTime: '06:45'
-                          durationSeconds: 480
-        '204':
-          description: No pending command
+        '200': { description: Delivered command }
+        '204': { description: No pending command }
+  /api/microcontroller/commands/{id}/ack:
+    post:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Command acknowledged }
+        '404': { description: Command not found }
+        '409': { description: Command not yet delivered }
+  /api/microcontroller/state:
+    post:
+      responses:
+        '200': { description: Canonical telemetry persisted }
+        '400': { description: Invalid payload }
+  /api/microcontroller/relays/state:
+    post:
+      responses:
+        '200': { description: Relay state accepted and persisted }
+        '400': { description: Invalid payload }
+  /api/microcontroller/schedules:
+    post:
+      responses:
+        '200': { description: Schedules accepted and persisted }
+        '400': { description: Invalid payload }
+  /api/schedules:
+    post:
+      responses:
+        '201': { description: Schedules stored and queued }
+        '400': { description: Invalid payload }
   /api/news:
     get:
       responses:
-        '200':
-          description: News list
+        '200': { description: News list }
     post:
       responses:
-        '201':
-          description: News created
+        '201': { description: News created }
   /gui:
     get:
       security:
         - basicAuth: []
       responses:
-        '200':
-          description: Management GUI
-  /openapi.json:
-    get:
-      responses:
-        '200':
-          description: OpenAPI document as JSON
-
+        '200': { description: Management GUI }
   /gui/relays/{channel}/toggle:
     post:
       security:
         - basicAuth: []
-      parameters:
-        - name: channel
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 6
       responses:
-        '303':
-          description: Relay toggle command queued and redirected to /gui
-        '400':
-          description: Invalid relay channel
+        '303': { description: Relay toggle command queued }
+        '400': { description: Invalid relay channel }
   /gui/schedules:
     post:
       security:
         - basicAuth: []
       responses:
-        '303':
-          description: Schedule update queued and redirected to /gui
-        '400':
-          description: Invalid schedule payload
+        '303': { description: Schedule update queued }
+        '400': { description: Invalid schedule payload }
+  /openapi.json:
+    get:
+      responses:
+        '200': { description: OpenAPI document as JSON }

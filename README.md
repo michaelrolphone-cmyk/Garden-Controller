@@ -29,19 +29,22 @@ API_KEY=change-me GUI_USERNAME=admin GUI_PASSWORD=change-me npm start
 All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 
 - `GET /health` - health check.
-- `GET /api/relays` - current relay channel states.
+- `GET /api/relays` - desired vs reported relay states:
+  - `desiredRelays`: what API/GUI requested.
+  - `reportedRelays`: what firmware last published.
 - `GET /api/state` - current controller state payload:
-  - relay states
-  - command queue depth
+  - desired and reported relay states
+  - queued command depth (`status = queued`)
+  - command history (acknowledged commands)
   - server UTC time (`ISO-8601`)
   - schedules
-- `POST /api/commands` - queue relay command.
+- `POST /api/commands` - queue relay command and update desired relay state.
   - body:
     ```json
     { "channel": 1, "action": "on", "requestedBy": "gui" }
     ```
 - `GET /api/queue/next` - microcontroller polls next command; returns `204` when queue is empty.
-  - relay command response body (`200`):
+  - response body (`200`):
     ```json
     {
       "command": {
@@ -49,45 +52,34 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
         "channel": 1,
         "action": "on",
         "requestedBy": "gui-web",
-        "createdAt": "2026-05-08T09:00:00.000Z"
-      },
-      "relay": { "channel": 1, "state": "on" }
-    }
-    ```
-  - schedule update response body (`200`):
-    ```json
-    {
-      "command": {
-        "id": "1715145000000-z9y8x7",
-        "type": "schedule_update",
-        "requestedBy": "gui-web",
-        "createdAt": "2026-05-08T09:00:30.000Z",
-        "schedules": [
-          { "channel": 2, "zone": "Patio", "startTime": "06:45", "durationSeconds": 480 }
-        ]
+        "createdAt": "2026-05-08T09:00:00.000Z",
+        "status": "delivered",
+        "deliveredAt": "2026-05-08T09:00:01.100Z"
       }
     }
     ```
+- `POST /api/microcontroller/commands/:id/ack` - firmware acknowledges delivered command status.
+  - body:
+    ```json
+    { "status": "applied" }
+    ```
+  - valid status values: `applied`, `failed`.
+- `POST /api/microcontroller/state` - canonical full telemetry publish endpoint.
+  - body:
+    ```json
+    {
+      "deviceId": "garden-relay-6",
+      "firmwareVersion": "v12",
+      "clockValid": true,
+      "relays": [{ "channel": 1, "state": "on" }],
+      "schedules": [{ "channel": 2, "zone": "Patio", "startTime": "06:45", "durationSeconds": 480 }],
+      "currentRun": { "channel": 2, "remainingSeconds": 120 },
+      "lastCommandId": "1715144970000-a1b2c3"
+    }
+    ```
+  - server fills telemetry `lastSeenAt`.
 - `POST /api/microcontroller/relays/state` - microcontroller publishes current relay on/off states.
-  - body:
-    ```json
-    {
-      "relays": [
-        { "channel": 1, "state": "on" },
-        { "channel": 2, "state": "off" }
-      ]
-    }
-    ```
 - `POST /api/microcontroller/schedules` - microcontroller publishes current relay schedules.
-  - body:
-    ```json
-    {
-      "schedules": [
-        { "channel": 1, "zone": "Herbs", "startTime": "06:00", "durationSeconds": 900 },
-        { "channel": 2, "zone": "Tomatoes", "startTime": "06:20", "durationSeconds": 600 }
-      ]
-    }
-    ```
 - `POST /api/schedules` - operator/API publishes schedule updates and queues them for the microcontroller.
   - body:
     ```json
@@ -100,16 +92,12 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
     ```
 - `GET /api/news` - list news feed items.
 - `POST /api/news` - create a news feed item.
-  - body:
-    ```json
-    { "title": "Watering Window", "body": "Relays 1-3 active tonight." }
-    ```
 - `GET /openapi.json` - OpenAPI spec rendered as JSON from `openapi.yaml`.
 
 ## GUI endpoints
 
 - `GET /gui` - basic-auth protected management page showing:
-  - current relay state
+  - current desired relay state
   - current server UTC time
   - schedules list
   - per-relay toggle controls
@@ -118,14 +106,14 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 
 Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are entered in Heroku with surrounding quotes, the app normalizes them automatically.
 
-## Microcontroller polling flow
+## Microcontroller polling + acknowledgement flow
 
-1. GUI/API client queues a command using `POST /api/commands` or GUI toggle control.
+1. GUI/API client queues command using `POST /api/commands` or GUI toggle control (desired state updates immediately).
 2. ESP32 calls `GET /api/queue/next` on interval.
-3. API returns either a relay command payload (`command + relay`) or schedule update payload (`command.type = schedule_update`).
-4. ESP32 executes relay change locally.
-5. ESP32 publishes actual relay state to `POST /api/microcontroller/relays/state`.
-6. ESP32 publishes runtime schedule configuration to `POST /api/microcontroller/schedules`.
+3. API marks first queued command as `delivered` and returns it.
+4. ESP32 executes relay/schedule action locally.
+5. ESP32 calls `POST /api/microcontroller/commands/:id/ack` with `applied` or `failed`.
+6. ESP32 publishes reported relay and telemetry state via `POST /api/microcontroller/state` (or narrow endpoints).
 
 ## CLI commands
 
