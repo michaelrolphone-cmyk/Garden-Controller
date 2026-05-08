@@ -233,6 +233,7 @@ paths:
         '400': { description: Invalid relay channel }
   /gui/schedules:
     post:
+      description: Submit the full daily schedule list from the GUI (edited rows plus new time slots) so the queued schedule_update command always contains complete schedules.
       security:
         - basicAuth: []
       requestBody:

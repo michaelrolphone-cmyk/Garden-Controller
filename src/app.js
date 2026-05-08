@@ -877,14 +877,30 @@ function createApp(config = {}) {
         <p>Schedules may only use zones 1-5. Channel 6 is master valve/spigots.</p>
         <div id="schedule-timeline">${scheduleTimelineMarkup}</div><details class="raw-schedules"><summary>Raw schedule list</summary><div id="raw-schedules">${schedulesMarkup}</div></details>
         <h3>Update schedules</h3>
+        <p>Edit existing rows and add new time slots. The GUI submits the complete schedule list on save.</p>
         <form method="post" action="/gui/schedules">
-          <table class="schedule-table"><thead><tr><th>Enabled</th><th>Zone</th><th>Channel</th><th>Start Time</th><th>Duration Minutes</th></tr></thead><tbody>${defaultSchedules.map((schedule, index) => `<tr><td><input name="schedule[${index}][id]" type="hidden" value="${Number.isInteger(schedule.id) ? schedule.id : index}" /><input name="schedule[${index}][enabled]" type="checkbox" ${schedule.enabled === false ? '' : 'checked'} /></td><td><input name="schedule[${index}][zone]" value="${schedule.zone || `Zone ${schedule.channel}`}" required /></td><td><input name="schedule[${index}][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="${schedule.channel || 1}" required /></td><td><input name="schedule[${index}][startTime]" type="time" value="${schedule.startTime || '06:00'}" required /></td><td><input name="schedule[${index}][durationMinutes]" type="number" min="1" max="240" value="${Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60))}" required /></td></tr>`).join('')}</tbody></table>
+          <table class="schedule-table"><thead><tr><th>Enabled</th><th>Zone</th><th>Channel</th><th>Start Time</th><th>Duration Minutes</th></tr></thead><tbody id="schedule-form-body">${defaultSchedules.map((schedule, index) => `<tr><td><input name="schedule[${index}][id]" type="hidden" value="${Number.isInteger(schedule.id) ? schedule.id : index}" /><input name="schedule[${index}][enabled]" type="checkbox" ${schedule.enabled === false ? '' : 'checked'} /></td><td><input name="schedule[${index}][zone]" value="${schedule.zone || `Zone ${schedule.channel}`}" required /></td><td><input name="schedule[${index}][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="${schedule.channel || 1}" required /></td><td><input name="schedule[${index}][startTime]" type="time" value="${schedule.startTime || '06:00'}" required /></td><td><input name="schedule[${index}][durationMinutes]" type="number" min="1" max="240" value="${Math.max(1, Math.round((Number(schedule.durationSeconds) || 900) / 60))}" required /></td></tr>`).join('')}</tbody></table>
+          <button type="button" id="schedule-add-row">Add time slot</button>
           <button type="submit">Save schedules</button>
         </form>
       </section>
     </div>
     <script>
       const relayChannelCount = ${RELAY_CHANNELS};
+      const scheduleFormBody = document.getElementById('schedule-form-body');
+      const scheduleAddRowButton = document.getElementById('schedule-add-row');
+      if (scheduleFormBody && scheduleAddRowButton) {
+        scheduleAddRowButton.addEventListener('click', () => {
+          const nextIndex = scheduleFormBody.querySelectorAll('tr').length;
+          const row = document.createElement('tr');
+          row.innerHTML = '<td><input name="schedule[' + nextIndex + '][id]" type="hidden" value="' + nextIndex + '" /><input name="schedule[' + nextIndex + '][enabled]" type="checkbox" checked /></td>'
+            + '<td><input name="schedule[' + nextIndex + '][zone]" value="Zone 1" required /></td>'
+            + '<td><input name="schedule[' + nextIndex + '][channel]" type="number" min="1" max="${ZONE_CHANNELS}" value="1" required /></td>'
+            + '<td><input name="schedule[' + nextIndex + '][startTime]" type="time" value="06:00" required /></td>'
+            + '<td><input name="schedule[' + nextIndex + '][durationMinutes]" type="number" min="1" max="240" value="10" required /></td>';
+          scheduleFormBody.appendChild(row);
+        });
+      }
       const zoneShapeIdForChannel = (channel) => ({1:'zone-1',2:'zone-2',3:'zone-3',4:'zone-4a zone-4b',5:'zone-5'}[channel] || ('zone-' + channel));
       const zoneShapeIdsForChannel = (channel) => String(zoneShapeIdForChannel(channel)).split(' ');
       const formatScheduleLabel = (schedule) => typeof schedule === 'string'

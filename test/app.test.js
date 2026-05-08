@@ -447,6 +447,45 @@ describe('garden controller api', () => {
     expect(queuedRes.body.command.schedules[0].id).toBe(11);
   });
 
+  test('gui schedule form supports adding zone time slots and queues full schedule payload', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/microcontroller/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [{ id: 9, channel: 1, zone: 'Zone 1', enabled: true, startTime: '06:00', durationSeconds: 600 }] });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('id="schedule-add-row"');
+    expect(guiRes.text).toContain('submits the complete schedule list');
+
+    const postRes = await request(app)
+      .post('/gui/schedules')
+      .set('authorization', auth)
+      .send({
+        'schedule[0][id]': '9',
+        'schedule[0][enabled]': 'on',
+        'schedule[0][channel]': '1',
+        'schedule[0][zone]': 'Zone 1',
+        'schedule[0][startTime]': '06:00',
+        'schedule[0][durationMinutes]': '10',
+        'schedule[1][id]': '10',
+        'schedule[1][enabled]': 'on',
+        'schedule[1][channel]': '1',
+        'schedule[1][zone]': 'Zone 1',
+        'schedule[1][startTime]': '15:30',
+        'schedule[1][durationMinutes]': '7'
+      });
+    expect(postRes.status).toBe(303);
+
+    const queuedRes = await request(app).get('/api/queue/next').set('x-api-token', token);
+    expect(queuedRes.status).toBe(200);
+    expect(queuedRes.body.command.type).toBe('schedule_update');
+    expect(queuedRes.body.command.schedules).toHaveLength(2);
+    expect(queuedRes.body.command.schedules[0].id).toBe(9);
+    expect(queuedRes.body.command.schedules[1].startTime).toBe('15:30');
+  });
+
   test('gui map marks active zones from reported relay state', async () => {
     const app = build();
 
