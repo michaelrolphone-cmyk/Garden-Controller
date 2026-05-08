@@ -105,4 +105,14 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain('saveConfig();');
   });
 
+
+  test('uses WS2812B serial RGB status LED on pin 38', () => {
+    expect(ino).toContain('#include <Adafruit_NeoPixel.h>');
+    expect(ino).toContain('static const uint8_t RGB_LED_PIN = 38;');
+    expect(ino).toContain('Adafruit_NeoPixel statusPixel(RGB_LED_COUNT, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);');
+    expect(ino).toContain('statusPixel.setPixelColor(0, statusPixel.Color(r, g, b));');
+    expect(ino).not.toContain('RGB_LED_PIN_R');
+    expect(ino).not.toContain('configureRgbPwmChannel');
+  });
+
 });

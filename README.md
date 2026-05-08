@@ -28,6 +28,7 @@ API_KEY=change-me GUI_USERNAME=admin GUI_PASSWORD=change-me npm start
 
 - Channels 1-5 are scheduled irrigation zones.
 - Channel 6 is the master valve / spigot supply.
+- Status RGB LED is a single WS2812B (NeoPixel) on GPIO 38 (serial data), not discrete R/G/B GPIO pins.
 - The firmware automatically turns channel 6 on whenever a zone is running.
 - Spigots and manual zone runs use timed commands (default 15 minutes).
 - Schedules may only target channels 1-5.
