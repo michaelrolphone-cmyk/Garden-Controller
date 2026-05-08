@@ -62,13 +62,21 @@ describe('garden controller api', () => {
         clockValid: true,
         relays: [{ channel: 1, state: 'on' }],
         schedules: [{ channel: 1, zone: 'North', startTime: '06:00', durationSeconds: 300 }],
-        currentRun: { channel: 1 },
+        currentRun: { active: true, activeZoneCount: 2 },
+        zoneRuns: [
+          { zone: 1, channel: 1, active: true, remainingSeconds: 500 },
+          { zone: 2, channel: 2, active: true, remainingSeconds: 300 }
+        ],
         lastCommandId: 'abc'
       });
 
     expect(res.status).toBe(200);
     expect(res.body.telemetry.deviceId).toBe('garden-relay-6');
     expect(res.body.telemetry.lastSeenAt).toBeDefined();
+    expect(res.body.telemetry.zoneRuns).toEqual([
+      { zone: 1, channel: 1, active: true, remainingSeconds: 500 },
+      { zone: 2, channel: 2, active: true, remainingSeconds: 300 }
+    ]);
   });
 
 
@@ -454,7 +462,11 @@ describe('garden controller api', () => {
         clockValid: true,
         relays: [{ channel: 1, state: 'on' }],
         schedules: [{ channel: 1, zone: 'North', startTime: '06:00', durationSeconds: 300 }],
-        currentRun: { channel: 1, remainingSeconds: 120 },
+        currentRun: { active: true, activeZoneCount: 2 },
+        zoneRuns: [
+          { zone: 1, channel: 1, active: true, remainingSeconds: 500 },
+          { zone: 2, channel: 2, active: true, remainingSeconds: 300 }
+        ],
         lastCommandId: 'cmd-123',
         targetLocation: { lat: 43.665288, lon: -116.259186, label: 'garden' },
         sensorData: [{ source: 'relay-hardware', type: 'temperature_c', value: 20.1, unit: 'C' }]
