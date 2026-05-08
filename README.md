@@ -108,6 +108,8 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
   - rapid auto-refresh (every 1 second) for near-real-time state visibility
   - active zone highlighting on the garden map based on reported relay ON states
   - schedules list
+  - embedded environmental monitoring panels for weather radar and satellite imagery centered at `43.665288, -116.259186`
+  - lidar/elevation quick link to USGS National Map (3DEP) centered at the garden coordinates
   - per-relay explicit ON/OFF controls (based on reported state)
 - `POST /gui/relays/:channel/on` - queue an ON command from GUI and redirect to `/gui`.
 - `POST /gui/relays/:channel/off` - queue an OFF command from GUI and redirect to `/gui`.

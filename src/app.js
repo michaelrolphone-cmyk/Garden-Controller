@@ -5,6 +5,20 @@ const yaml = require('js-yaml');
 
 const RELAY_CHANNELS = 6;
 
+
+const GARDEN_LOCATION = { latitude: 43.665288, longitude: -116.259186 };
+
+function buildEnvironmentalFeeds() {
+  const { latitude, longitude } = GARDEN_LOCATION;
+  return {
+    radarEmbedUrl: `https://embed.windy.com/embed2.html?lat=${latitude}&lon=${longitude}&zoom=8&level=surface&overlay=radar&product=radar`,
+    satelliteEmbedUrl: `https://embed.windy.com/embed2.html?lat=${latitude}&lon=${longitude}&zoom=6&level=surface&overlay=satellite&product=ecmwf`,
+    lidarMapUrl: `https://apps.nationalmap.gov/viewer/?basemap=3&ll=${longitude},${latitude}&zoom=13`,
+    nsslRadarUrl: `https://mrms.nssl.noaa.gov/qvs/product_viewer/?lat=${latitude}&lon=${longitude}&prod=radaronly`,
+    noaaSatelliteUrl: `https://www.star.nesdis.noaa.gov/GOES/sector_band.php?sat=G17&sector=pnw&band=GEOCOLOR&length=24`
+  };
+}
+
 function normalizeCredentialValue(value) {
   if (typeof value !== 'string') {
     return value;
@@ -397,6 +411,7 @@ function createApp(config = {}) {
       })
       .join('');
 
+    const envFeeds = buildEnvironmentalFeeds();
     const parsedSchedules = state.schedules.filter((schedule) => typeof schedule === 'object' && schedule).map((schedule) => ({ ...schedule }));
     const scheduleTimelineMarkup = parsedSchedules.length
       ? `<div class="timeline">${parsedSchedules
@@ -436,6 +451,7 @@ function createApp(config = {}) {
       .relay-states { font-size: 0.88rem; color: #476070; margin: 8px 0 12px; }
       .status-pill { font-size: 0.7rem; padding: 4px 8px; border-radius: 999px; font-weight: 700; } .status-mismatch { background: #ffe4ea; color: #b42345; } .status-synced { background: #dff8ea; color: #18794e; }
       button { border: 1px solid #9cc3da; color: #123; background: #f3f9ff; padding: 7px 11px; border-radius: 10px; cursor: pointer; } button:disabled { opacity: 0.4; cursor: not-allowed; }
+      .env-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px;} .env-card{border:1px solid #d9e5ee;border-radius:12px;padding:12px;background:#fcfeff;} .env-card iframe{width:100%;height:260px;border:0;border-radius:10px;} .env-links{margin:8px 0 0;padding-left:18px;}
       .schedule { margin-top: 14px; padding: 16px; } .timeline{display:grid;gap:8px;margin:12px 0 16px;} .timeline-row{display:grid;grid-template-columns:170px 1fr;align-items:center;gap:10px;} .timeline-zone{font-weight:600;color:#204055;}
       .timeline-track{height:28px;background:repeating-linear-gradient(to right,#edf2f7,#edf2f7 7.6%,#f8fafc 7.6%,#f8fafc 8.33%);border:1px solid #d8e3eb;border-radius:999px;position:relative;overflow:hidden;} .timeline-block{position:absolute;top:2px;height:22px;border-radius:999px;background:linear-gradient(90deg,#16a34a,#22c55e);color:white;font-size:.75rem;display:flex;align-items:center;padding:0 10px;white-space:nowrap;}
       .schedule form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; } label { display: flex; flex-direction: column; font-size: 0.85rem; color: #395267; }
@@ -468,6 +484,26 @@ function createApp(config = {}) {
           <ul class="relay-grid">${relayMarkup}</ul>
         </section>
       </div>
+      <section class="panel schedule">
+        <h2>Environmental Monitoring (${GARDEN_LOCATION.latitude}, ${GARDEN_LOCATION.longitude})</h2>
+        <div class="env-grid">
+          <article class="env-card">
+            <h3>Weather Radar</h3>
+            <iframe title="Weather radar near the garden" src="${envFeeds.radarEmbedUrl}"></iframe>
+            <ul class="env-links"><li><a href="${envFeeds.nsslRadarUrl}" target="_blank" rel="noreferrer">NOAA MRMS radar product viewer</a></li></ul>
+          </article>
+          <article class="env-card">
+            <h3>Satellite</h3>
+            <iframe title="Satellite imagery near the garden" src="${envFeeds.satelliteEmbedUrl}"></iframe>
+            <ul class="env-links"><li><a href="${envFeeds.noaaSatelliteUrl}" target="_blank" rel="noreferrer">NOAA GOES-17 Pacific Northwest imagery</a></li></ul>
+          </article>
+          <article class="env-card">
+            <h3>Lidar / Elevation</h3>
+            <p>Open the USGS National Map viewer centered on the garden location for 3DEP elevation and lidar-derived layers.</p>
+            <ul class="env-links"><li><a href="${envFeeds.lidarMapUrl}" target="_blank" rel="noreferrer">USGS National Map (3DEP)</a></li></ul>
+          </article>
+        </div>
+      </section>
       <section class="panel schedule">
         <h2>Schedules</h2>
         ${scheduleTimelineMarkup}<details class="raw-schedules"><summary>Raw schedule list</summary>${schedulesMarkup}</details>
