@@ -264,6 +264,20 @@ paths:
       responses:
         '303': { description: Schedule update queued }
         '400': { description: Invalid schedule payload }
+  /gui/schedules/{id}/delete:
+    post:
+      description: Delete one schedule row by id from the GUI and queue a full replacement schedule_update command.
+      security:
+        - basicAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '303': { description: Schedule removed and redirected to GUI }
+        '400': { description: Invalid schedule id }
+        '404': { description: Schedule not found }
   /gui/spigots/run:
     post:
       security:
