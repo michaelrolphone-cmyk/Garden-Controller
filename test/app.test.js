@@ -77,6 +77,38 @@ describe('garden controller api', () => {
     expect(authorized.text).toContain('ESP32-S3-Relay-6CH Controller');
   });
 
+
+  test('gui auth supports colons in password from env-style credentials', async () => {
+    const app = createApp({ apiToken: token, guiUsername: 'admin', guiPassword: 'pa:ss:word' }).app;
+    const colonPasswordAuth = `Basic ${Buffer.from('admin:pa:ss:word').toString('base64')}`;
+
+    const authorized = await request(app).get('/gui').set('authorization', colonPasswordAuth);
+    expect(authorized.status).toBe(200);
+  });
+
+
+
+  test('reads GUI credentials from process.env when config is not provided', async () => {
+    process.env.GUI_USERNAME = 'test';
+    process.env.GUI_PASSWORD = 'test';
+
+    const app = createApp({ apiToken: token }).app;
+    const envAuth = `Basic ${Buffer.from('test:test').toString('base64')}`;
+    const authorized = await request(app).get('/gui').set('authorization', envAuth);
+
+    expect(authorized.status).toBe(200);
+
+    delete process.env.GUI_USERNAME;
+    delete process.env.GUI_PASSWORD;
+  });
+
+  test('accepts lowercase basic auth scheme', async () => {
+    const app = build();
+    const lowercaseSchemeAuth = `basic ${Buffer.from('admin:password').toString('base64')}`;
+
+    const authorized = await request(app).get('/gui').set('authorization', lowercaseSchemeAuth);
+    expect(authorized.status).toBe(200);
+  });
   test('openapi spec includes implemented endpoints', () => {
     const specPath = path.join(__dirname, '..', 'openapi.yaml');
     const spec = yaml.load(fs.readFileSync(specPath, 'utf8'));

@@ -5,6 +5,10 @@ const yaml = require('js-yaml');
 
 const RELAY_CHANNELS = 6;
 
+function normalizeCredentialValue(value) {
+  return typeof value === 'string' ? value.trim() : value;
+}
+
 function createState() {
   return {
     relayState: Array.from({ length: RELAY_CHANNELS }, (_, index) => ({ channel: index + 1, state: 'off' })),
@@ -18,9 +22,9 @@ function createApp(config = {}) {
   app.use(express.json());
 
   const state = config.state || createState();
-  const guiUsername = config.guiUsername || process.env.GUI_USERNAME;
-  const guiPassword = config.guiPassword || process.env.GUI_PASSWORD;
-  const apiToken = config.apiToken || process.env.API_TOKEN;
+  const guiUsername = normalizeCredentialValue(config.guiUsername ?? process.env.GUI_USERNAME);
+  const guiPassword = normalizeCredentialValue(config.guiPassword ?? process.env.GUI_PASSWORD);
+  const apiToken = config.apiToken ?? process.env.API_TOKEN;
 
   function requireApiToken(req, res, next) {
     const provided = req.get('x-api-token');
@@ -32,13 +36,24 @@ function createApp(config = {}) {
 
   function requireGuiAuth(req, res, next) {
     const auth = req.get('authorization');
-    if (!auth || !auth.startsWith('Basic ')) {
+    if (!auth || !/^Basic\s+/i.test(auth)) {
       res.set('WWW-Authenticate', 'Basic realm="Garden Controller"');
       return res.status(401).send('Authentication required');
     }
 
-    const decoded = Buffer.from(auth.replace('Basic ', ''), 'base64').toString('utf8');
-    const [username, password] = decoded.split(':');
+    const encodedCredentials = auth.replace(/^Basic\s+/i, '');
+
+    let decoded;
+    try {
+      decoded = Buffer.from(encodedCredentials, 'base64').toString('utf8');
+    } catch (_error) {
+      res.set('WWW-Authenticate', 'Basic realm="Garden Controller"');
+      return res.status(401).send('Invalid credentials');
+    }
+
+    const separatorIndex = decoded.indexOf(':');
+    const username = separatorIndex >= 0 ? decoded.slice(0, separatorIndex) : '';
+    const password = separatorIndex >= 0 ? decoded.slice(separatorIndex + 1) : '';
 
     if (!guiUsername || !guiPassword || username !== guiUsername || password !== guiPassword) {
       res.set('WWW-Authenticate', 'Basic realm="Garden Controller"');
