@@ -206,6 +206,8 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('Castle Hills Garden Manager');
     expect(guiRes.text).toContain('grid-template-columns: 1fr 2fr');
     expect(guiRes.text).toContain('id="zone-6"');
+    expect(guiRes.text).toContain('zone-theme-1');
+    expect(guiRes.text).toContain('zone-theme-6');
     expect(guiRes.text).toContain('.linework { stroke: rgba(29, 78, 216, 0.35); fill: none;');
     expect(guiRes.text).toContain('data-active="false"');
     expect(guiRes.text).toContain('/gui/relays/1/on');
@@ -245,8 +247,8 @@ describe('garden controller api', () => {
 
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
-    expect(guiRes.text).toContain('id="zone-2" class="zone zone-active" data-active="true"');
-    expect(guiRes.text).toContain('id="zone-1" class="zone " data-active="false"');
+    expect(guiRes.text).toContain('id="zone-2" class="zone zone-theme-2 zone-active" data-active="true"');
+    expect(guiRes.text).toContain('id="zone-1" class="zone zone-theme-1 " data-active="false"');
   });
 
   test('gui relay action endpoint only allows explicit on/off actions', async () => {
