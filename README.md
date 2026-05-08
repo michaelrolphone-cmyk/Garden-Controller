@@ -41,6 +41,63 @@ All `/api/*` endpoints require header: `x-api-token: <API_TOKEN>`.
     { "channel": 1, "action": "on", "requestedBy": "gui" }
     ```
 - `GET /api/queue/next` - microcontroller polls next command; returns `204` when queue is empty.
+  - relay command response body (`200`):
+    ```json
+    {
+      "command": {
+        "id": "1715144970000-a1b2c3",
+        "channel": 1,
+        "action": "on",
+        "requestedBy": "gui-web",
+        "createdAt": "2026-05-08T09:00:00.000Z"
+      },
+      "relay": { "channel": 1, "state": "on" }
+    }
+    ```
+  - schedule update response body (`200`):
+    ```json
+    {
+      "command": {
+        "id": "1715145000000-z9y8x7",
+        "type": "schedule_update",
+        "requestedBy": "gui-web",
+        "createdAt": "2026-05-08T09:00:30.000Z",
+        "schedules": [
+          { "channel": 2, "zone": "Patio", "startTime": "06:45", "durationSeconds": 480 }
+        ]
+      }
+    }
+    ```
+- `POST /api/microcontroller/relays/state` - microcontroller publishes current relay on/off states.
+  - body:
+    ```json
+    {
+      "relays": [
+        { "channel": 1, "state": "on" },
+        { "channel": 2, "state": "off" }
+      ]
+    }
+    ```
+- `POST /api/microcontroller/schedules` - microcontroller publishes current relay schedules.
+  - body:
+    ```json
+    {
+      "schedules": [
+        { "channel": 1, "zone": "Herbs", "startTime": "06:00", "durationSeconds": 900 },
+        { "channel": 2, "zone": "Tomatoes", "startTime": "06:20", "durationSeconds": 600 }
+      ]
+    }
+    ```
+- `POST /api/schedules` - operator/API publishes schedule updates and queues them for the microcontroller.
+  - body:
+    ```json
+    {
+      "schedules": [
+        { "channel": 4, "zone": "Greenhouse", "startTime": "07:00", "durationSeconds": 300 }
+      ],
+      "requestedBy": "operator"
+    }
+    ```
 - `GET /api/news` - list news feed items.
 - `POST /api/news` - create a news feed item.
   - body:
@@ -57,6 +114,7 @@ All `/api/*` endpoints require header: `x-api-token: <API_TOKEN>`.
   - schedules list
   - per-relay toggle controls
 - `POST /gui/relays/:channel/toggle` - queue a toggle command from GUI and redirect to `/gui`.
+- `POST /gui/schedules` - submit a zone schedule from GUI and queue a schedule update command for the microcontroller.
 
 Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are entered in Heroku with surrounding quotes, the app normalizes them automatically.
 
@@ -64,8 +122,10 @@ Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are e
 
 1. GUI/API client queues a command using `POST /api/commands` or GUI toggle control.
 2. ESP32 calls `GET /api/queue/next` on interval.
-3. API returns next command and updates internal relay state.
+3. API returns either a relay command payload (`command + relay`) or schedule update payload (`command.type = schedule_update`).
 4. ESP32 executes relay change locally.
+5. ESP32 publishes actual relay state to `POST /api/microcontroller/relays/state`.
+6. ESP32 publishes runtime schedule configuration to `POST /api/microcontroller/schedules`.
 
 ## CLI commands
 

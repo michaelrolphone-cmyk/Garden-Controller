@@ -37,6 +37,14 @@ function createCommand({ channel, action, requestedBy }) {
   };
 }
 
+function formatScheduleLabel(schedule) {
+  if (typeof schedule === 'string') {
+    return schedule;
+  }
+
+  return `${schedule.zone} (relay ${schedule.channel}) at ${schedule.startTime} for ${schedule.durationSeconds}s`;
+}
+
 function createApp(config = {}) {
   const app = express();
   app.use(express.json());
@@ -101,6 +109,102 @@ function createApp(config = {}) {
     });
   });
 
+  app.post('/api/microcontroller/relays/state', requireApiToken, (req, res) => {
+    const { relays } = req.body;
+    const validRelayPayload =
+      Array.isArray(relays) &&
+      relays.length > 0 &&
+      relays.every(
+        (relay) =>
+          relay &&
+          Number.isInteger(relay.channel) &&
+          relay.channel >= 1 &&
+          relay.channel <= RELAY_CHANNELS &&
+          (relay.state === 'on' || relay.state === 'off')
+      );
+
+    if (!validRelayPayload) {
+      return res.status(400).json({ error: 'Invalid relay state payload' });
+    }
+
+    const nextRelayState = state.relayState.map((relay) => ({ ...relay }));
+    relays.forEach((incomingRelay) => {
+      const relay = nextRelayState[incomingRelay.channel - 1];
+      relay.state = incomingRelay.state;
+    });
+    state.relayState = nextRelayState;
+
+    return res.json({ relays: state.relayState });
+  });
+
+  app.post('/api/microcontroller/schedules', requireApiToken, (req, res) => {
+    const { schedules } = req.body;
+    const validSchedulesPayload =
+      Array.isArray(schedules) &&
+      schedules.every(
+        (schedule) =>
+          schedule &&
+          Number.isInteger(schedule.channel) &&
+          schedule.channel >= 1 &&
+          schedule.channel <= RELAY_CHANNELS &&
+          typeof schedule.zone === 'string' &&
+          schedule.zone.trim().length > 0 &&
+          typeof schedule.startTime === 'string' &&
+          schedule.startTime.trim().length > 0 &&
+          Number.isInteger(schedule.durationSeconds) &&
+          schedule.durationSeconds > 0
+      );
+
+    if (!validSchedulesPayload) {
+      return res.status(400).json({ error: 'Invalid schedule payload' });
+    }
+
+    state.schedules = schedules.map((schedule) => ({ ...schedule }));
+    return res.json({ schedules: state.schedules });
+  });
+
+  app.post('/api/schedules', requireApiToken, (req, res) => {
+    const { schedules } = req.body;
+    const validSchedulesPayload =
+      Array.isArray(schedules) &&
+      schedules.length > 0 &&
+      schedules.every(
+        (schedule) =>
+          schedule &&
+          Number.isInteger(schedule.channel) &&
+          schedule.channel >= 1 &&
+          schedule.channel <= RELAY_CHANNELS &&
+          typeof schedule.zone === 'string' &&
+          schedule.zone.trim().length > 0 &&
+          typeof schedule.startTime === 'string' &&
+          schedule.startTime.trim().length > 0 &&
+          Number.isInteger(schedule.durationSeconds) &&
+          schedule.durationSeconds > 0
+      );
+
+    if (!validSchedulesPayload) {
+      return res.status(400).json({ error: 'Invalid schedule payload' });
+    }
+
+    const normalizedSchedules = schedules.map((schedule) => ({
+      channel: schedule.channel,
+      zone: schedule.zone.trim(),
+      startTime: schedule.startTime.trim(),
+      durationSeconds: schedule.durationSeconds
+    }));
+
+    state.schedules = normalizedSchedules;
+    const command = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'schedule_update',
+      schedules: normalizedSchedules,
+      requestedBy: req.body.requestedBy || 'api',
+      createdAt: new Date().toISOString()
+    };
+    state.queue.push(command);
+    return res.status(201).json({ schedules: state.schedules, command });
+  });
+
   app.post('/api/commands', requireApiToken, (req, res) => {
     const { channel, action, requestedBy } = req.body;
     const validAction = action === 'on' || action === 'off' || action === 'toggle';
@@ -119,6 +223,10 @@ function createApp(config = {}) {
     const command = state.queue.shift();
     if (!command) {
       return res.status(204).send();
+    }
+
+    if (command.type === 'schedule_update') {
+      return res.json({ command });
     }
 
     const relay = state.relayState[command.channel - 1];
@@ -165,8 +273,10 @@ function createApp(config = {}) {
       .join('');
 
     const schedulesMarkup = state.schedules.length
-      ? `<ul>${state.schedules.map((schedule) => `<li>${schedule}</li>`).join('')}</ul>`
+      ? `<ul>${state.schedules.map((schedule) => `<li>${formatScheduleLabel(schedule)}</li>`).join('')}</ul>`
       : '<p>No schedules configured.</p>';
+
+    const defaultSchedule = state.schedules.find((schedule) => typeof schedule === 'object') || {};
 
     res.type('html').send(`<!doctype html>
 <html>
@@ -178,6 +288,14 @@ function createApp(config = {}) {
     <ul>${relayMarkup}</ul>
     <h2>Schedules</h2>
     ${schedulesMarkup}
+    <h3>Update schedules</h3>
+    <form method="post" action="/gui/schedules">
+      <label>Zone <input name="zone" value="${defaultSchedule.zone || ''}" required /></label>
+      <label>Channel <input name="channel" type="number" min="1" max="${RELAY_CHANNELS}" value="${defaultSchedule.channel || 1}" required /></label>
+      <label>Start Time <input name="startTime" value="${defaultSchedule.startTime || '06:00'}" required /></label>
+      <label>Duration (seconds) <input name="durationSeconds" type="number" min="1" value="${defaultSchedule.durationSeconds || 900}" required /></label>
+      <button type="submit">Save schedule</button>
+    </form>
   </body>
 </html>`);
   });
@@ -189,6 +307,36 @@ function createApp(config = {}) {
     }
 
     state.queue.push(createCommand({ channel, action: 'toggle', requestedBy: 'gui-web' }));
+    return res.redirect(303, '/gui');
+  });
+
+  app.post('/gui/schedules', requireGuiAuth, (req, res) => {
+    const channel = Number.parseInt(req.body.channel, 10);
+    const durationSeconds = Number.parseInt(req.body.durationSeconds, 10);
+    const zone = typeof req.body.zone === 'string' ? req.body.zone.trim() : '';
+    const startTime = typeof req.body.startTime === 'string' ? req.body.startTime.trim() : '';
+
+    if (
+      !Number.isInteger(channel) ||
+      channel < 1 ||
+      channel > RELAY_CHANNELS ||
+      !Number.isInteger(durationSeconds) ||
+      durationSeconds <= 0 ||
+      !zone ||
+      !startTime
+    ) {
+      return res.status(400).send('Invalid schedule payload');
+    }
+
+    const schedule = { channel, zone, startTime, durationSeconds };
+    state.schedules = [schedule];
+    state.queue.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'schedule_update',
+      schedules: [schedule],
+      requestedBy: 'gui-web',
+      createdAt: new Date().toISOString()
+    });
     return res.redirect(303, '/gui');
   });
 
