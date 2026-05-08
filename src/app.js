@@ -136,7 +136,7 @@ function createRelayCommand({ channel, action, requestedBy }) {
 function zoneShapeIdForChannel(channel) {
   const mapping = {
     1: 'zone-3',
-    2: 'zone-6',
+    2: 'zone-2',
     3: 'zone-5',
     4: 'zone-1 zone-2',
     5: 'zone-4'
@@ -716,7 +716,7 @@ function createApp(config = {}) {
   app.get('/gui', requireGuiAuth, (_req, res) => {
     const activeZoneIds = state.reportedRelayState
       .filter((relay) => relay.state === 'on')
-      .map((relay) => zoneShapeIdForChannel(relay.channel));
+      .flatMap((relay) => zoneShapeIdsForChannel(relay.channel));
 
     const relayMarkup = state.desiredRelayState
       .filter((relay) => relay.channel <= ZONE_CHANNELS)
@@ -780,7 +780,7 @@ function createApp(config = {}) {
       .layout { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; }
       .map-wrap { padding: 16px; } .map-wrap p,.relay-section p{color:#4f6474;}
       .map-wrap svg { width: 100%; height: auto; background: linear-gradient(160deg, #dbeafe, #eff6ff); border-radius: 14px; }
-      .zone { fill: rgba(var(--zone-color-rgb, 62, 184, 255), 0.2); stroke: rgba(var(--zone-color-rgb, 62, 184, 255), 0.95); stroke-width: 2; transition: fill .25s ease, stroke .25s ease, filter .25s ease; } .zone-active { fill: rgba(var(--zone-color-rgb, 62, 184, 255), 0.38); stroke: rgba(var(--zone-color-rgb, 62, 184, 255), 1); filter: drop-shadow(0 0 16px rgba(var(--zone-color-rgb, 62, 184, 255), 0.55)); } .zone-theme-1{--zone-color-rgb:102,163,69;} .zone-theme-2{--zone-color-rgb:245,179,52;} .zone-theme-3{--zone-color-rgb:42,178,171;} .zone-theme-4{--zone-color-rgb:129,97,199;} .zone-theme-5{--zone-color-rgb:236,125,60;} .zone-theme-6{--zone-color-rgb:67,137,196;}
+      .zone { fill: rgba(var(--zone-color-rgb, 62, 184, 255), 0.15); stroke: rgba(var(--zone-color-rgb, 62, 184, 255), 0.82); stroke-width: 2; transition: fill .25s ease, stroke .25s ease, filter .25s ease; } .zone-active { fill: rgba(var(--zone-color-rgb, 62, 184, 255), 0.62); stroke: rgba(var(--zone-color-rgb, 62, 184, 255), 1); filter: saturate(1.4) brightness(1.15) drop-shadow(0 0 18px rgba(var(--zone-color-rgb, 62, 184, 255), 0.72)); } .zone-theme-1{--zone-color-rgb:102,163,69;} .zone-theme-2{--zone-color-rgb:245,179,52;} .zone-theme-3{--zone-color-rgb:42,178,171;} .zone-theme-4{--zone-color-rgb:129,97,199;} .zone-theme-5{--zone-color-rgb:236,125,60;} .zone-theme-6{--zone-color-rgb:67,137,196;}
       .linework { stroke: rgba(29, 78, 216, 0.35); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .relay-section { padding: 16px; }
       .relay-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
       .relay-card { border: 1px solid rgba(var(--zone-color-rgb, 62, 184, 255), 0.45); border-radius: 14px; padding: 12px; background: linear-gradient(145deg, rgba(var(--zone-color-rgb, 62, 184, 255), 0.12), #fcfeff 55%); box-shadow: inset 0 0 0 1px rgba(var(--zone-color-rgb, 62, 184, 255), 0.16); }
@@ -808,12 +808,11 @@ function createApp(config = {}) {
           <h2>Garden Zone Map</h2>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 295.743 295.482" role="img" aria-label="Garden watering zones">
             <g class="linework"><polyline points="10,266.311 251.526,274.667"/><line x1="285.743" y1="285.482" x2="282.082" y2="191.277"/><polyline points="282.082,191.277 276.705,168.862 277.246,95.213 277.7,15.387"/><polyline points="13.295,258.387 35.211,10 37.872,11.914 276.96,14.582"/></g>
-            <polygon id="zone-1" class="zone zone-theme-4 ${activeZoneIds.includes('zone-1 zone-2') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-1 zone-2')}" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/>
-            <polygon id="zone-2" class="zone zone-theme-4 ${activeZoneIds.includes('zone-1 zone-2') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-1 zone-2')}" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/>
+            <polygon id="zone-1" class="zone zone-theme-4 ${activeZoneIds.includes('zone-1') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-1')}" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/>
+            <polygon id="zone-2" class="zone zone-theme-4 ${activeZoneIds.includes('zone-2') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-2')}" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/>
             <polygon id="zone-3" class="zone zone-theme-1 ${activeZoneIds.includes('zone-3') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-3')}" points="205.581,96.842 264.287,97.694 263.108,173.173 198.935,169.661 205.581,96.842"/>
             <polygon id="zone-4" class="zone zone-theme-5 ${activeZoneIds.includes('zone-4') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-4')}" points="32,46.388 46.493,52.635 95.676,139.247 128.342,140.128 127.534,159.189 22.68,152.017 32,46.388"/>
             <polygon id="zone-5" class="zone zone-theme-3 ${activeZoneIds.includes('zone-5') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-5')}" points="152.903,89.893 152.691,13.195 50.949,12.06 136.836,89.869 152.903,89.893"/>
-            <polygon id="zone-6" class="zone zone-theme-2 ${activeZoneIds.includes('zone-6') ? 'zone-active' : ''}" data-active="${activeZoneIds.includes('zone-6')}" points="249.304,90.041 249.095,14.271 152.691,13.195 152.903,89.893 249.304,90.041"/>
           </svg>
         </section>
         <section class="panel relay-section">
@@ -875,7 +874,7 @@ function createApp(config = {}) {
     </div>
     <script>
       const relayChannelCount = ${RELAY_CHANNELS};
-      const zoneShapeIdForChannel = (channel) => ({1:'zone-3',2:'zone-6',3:'zone-5',4:'zone-1 zone-2',5:'zone-4'}[channel] || ('zone-' + channel));
+      const zoneShapeIdForChannel = (channel) => ({1:'zone-3',2:'zone-2',3:'zone-5',4:'zone-1 zone-2',5:'zone-4'}[channel] || ('zone-' + channel));
       const zoneShapeIdsForChannel = (channel) => String(zoneShapeIdForChannel(channel)).split(' ');
       const formatScheduleLabel = (schedule) => typeof schedule === 'string'
         ? schedule
