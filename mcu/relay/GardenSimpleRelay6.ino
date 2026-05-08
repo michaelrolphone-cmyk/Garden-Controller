@@ -32,6 +32,11 @@ static const uint8_t BUZZER_PIN = 21;
 static const uint8_t RGB_LED_PIN_R = 38;
 static const uint8_t RGB_LED_PIN_G = 39;
 static const uint8_t RGB_LED_PIN_B = 40;
+static const uint8_t RGB_LED_CHANNEL_R = 0;
+static const uint8_t RGB_LED_CHANNEL_G = 1;
+static const uint8_t RGB_LED_CHANNEL_B = 2;
+static const uint16_t RGB_LED_PWM_FREQ = 5000;
+static const uint8_t RGB_LED_PWM_BITS = 8;
 // Passive buzzer volume reduction by duty cycle.
 // Prior chirp used ~50% duty. 5% duty is roughly 1/10 of that drive time.
 static const uint8_t BUZZER_DUTY_PERCENT = 5;
@@ -279,9 +284,9 @@ const ZoneColor ZONE_COLORS[ZONE_COUNT] = {
 };
 
 void setRgbLed(uint8_t r, uint8_t g, uint8_t b) {
-  analogWrite(RGB_LED_PIN_R, r);
-  analogWrite(RGB_LED_PIN_G, g);
-  analogWrite(RGB_LED_PIN_B, b);
+  ledcWrite(RGB_LED_CHANNEL_R, r);
+  ledcWrite(RGB_LED_CHANNEL_G, g);
+  ledcWrite(RGB_LED_CHANNEL_B, b);
 }
 
 void updateZoneRgbLed() {
@@ -1598,7 +1603,7 @@ button,input,select{border:1px solid #c7d8e5;border-radius:8px;padding:7px} labe
 function zids(ch){if(ch===4)return ['zone-4a','zone-4b'];return ['zone-'+ch]}
 function zoneChannel(z){return Number(z&&((z.channel??z.zone))||0)}
 function colorByChannel(zoneColors, ch){return (zoneColors||[]).find(c=>Number(c.channel)===Number(ch))}
-function toRgb(c){if(!c||!c.rgb)return '0,0,0';return `${Number(c.rgb.r)||0},${Number(c.rgb.g)||0},${Number(c.rgb.b)||0}`}
+function toRgb(c){if(!c)return '0,0,0';const rgb=c.rgb||c;return `${Number(rgb.r)||0},${Number(rgb.g)||0},${Number(rgb.b)||0}`}
 function buildTimelineRows(s){const m={};(s||[]).forEach(x=>{const k=`${x.channel}:${x.zone}`;(m[k]=m[k]||{zone:x.zone,channel:x.channel,schedules:[]}).schedules.push(x)});return Object.values(m)}
 function renderTimeline(rows, zoneColors){if(!rows.length)return '<p>No schedules configured.</p>';return `<div class=timeline>${rows.map(r=>{const b=r.schedules.map(s=>{const p=String(s.startTime||'00:00').split(':');const l=((Number(p[0])*60+Number(p[1]))/1440)*100;const w=Math.max(2,Math.min(((Number(s.durationSeconds)||60)/86400)*100,100-l));const rgb=toRgb(colorByChannel(zoneColors, Number(r.channel||0)));return `<span class="timeline-block" style="left:${l}%;width:${w}%;background:rgb(${rgb})">${s.startTime} · ${Math.max(1,Math.round((Number(s.durationSeconds)||0)/60))} min</span>`}).join('');return `<div class=timeline-row><span>Zone ${r.channel}</span><div class=timeline-track>${b}</div></div>`}).join('')}</div>`}
 function addScheduleRow(v){const rows=document.getElementById('adminSchedRows');const row=document.createElement('div');row.className='actions';const z=Number(v&&v.zone||1);const t=(v&&v.timeValue)||'06:00';const m=Number(v&&v.runMinutes||10);const en=v&&v.enabled===false?'off':'on';row.innerHTML=`<input type=number min=1 max=5 value='${z}' title='Zone'><input type=time style='max-width:70px' value='${t}' title='Start'><input type=number min=1 max=240 style='max-width:52px' value='${m}' title='Minutes'><select title='Enabled'><option value='on'>On</option><option value='off'>Off</option></select><button class='danger' onclick="this.parentElement.remove()">Delete</button>`;row.querySelector('select').value=en;rows.appendChild(row)}
@@ -1819,6 +1824,12 @@ void setup() {
   pinMode(RGB_LED_PIN_R, OUTPUT);
   pinMode(RGB_LED_PIN_G, OUTPUT);
   pinMode(RGB_LED_PIN_B, OUTPUT);
+  ledcSetup(RGB_LED_CHANNEL_R, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
+  ledcSetup(RGB_LED_CHANNEL_G, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
+  ledcSetup(RGB_LED_CHANNEL_B, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
+  ledcAttachPin(RGB_LED_PIN_R, RGB_LED_CHANNEL_R);
+  ledcAttachPin(RGB_LED_PIN_G, RGB_LED_CHANNEL_G);
+  ledcAttachPin(RGB_LED_PIN_B, RGB_LED_CHANNEL_B);
   setRgbLed(0, 0, 0);
 
   for (uint8_t i = 0; i < RELAY_COUNT; i++) {

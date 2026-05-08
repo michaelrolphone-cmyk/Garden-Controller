@@ -40,6 +40,15 @@ describe('garden controller api', () => {
     expect(guiRes.body.zoneColors).toEqual(apiRes.body.zoneColors);
   });
 
+
+  test('gui uses API zoneColors for runtime styling instead of hard-coded zone theme classes', async () => {
+    const app = build();
+    const guiRes = await request(app).get('/gui').set('Authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.text).toContain('rgbForChannel(state.zoneColors, desiredRelay.channel)');
+    expect(guiRes.text).not.toContain('.zone-theme-1');
+    expect(guiRes.text).toContain('class="zone "');
+  });
   test('queue lifecycle delivered -> applied with ack endpoint', async () => {
     const app = build();
     const createRes = await request(app).post('/api/commands').set('x-api-token', token).send({ channel: 2, action: 'off' });
@@ -406,7 +415,7 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('Castle Hills Garden Manager');
     expect(guiRes.text).toContain('grid-template-columns: 1fr 2fr');
     expect(guiRes.text).toContain('id="zone-2"');
-    expect(guiRes.text).toContain('zone-theme-1');
+    expect(guiRes.text).toContain('style="--zone-color-rgb:59,130,246"');
     expect(guiRes.text).toContain('id="zone-4a"');
     expect(guiRes.text).toContain('id="zone-4b"');
     expect(guiRes.text).toContain("{1:'zone-1',2:'zone-2',3:'zone-3',4:'zone-4a zone-4b',5:'zone-5'}");
@@ -632,8 +641,8 @@ describe('garden controller api', () => {
 
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
-    expect(guiRes.text).toContain('id="zone-2" class="zone zone-theme-2 zone-active" data-active="true"');
-    expect(guiRes.text).toContain('id="zone-1" class="zone zone-theme-1 " data-active="false"');
+    expect(guiRes.text).toContain('id="zone-2" class="zone zone-active"');
+    expect(guiRes.text).toContain('id="zone-1" class="zone "');
     expect(guiRes.text).toContain('filter: saturate(1.4) brightness(1.15) drop-shadow(0 0 18px rgba(var(--zone-color-rgb, 62, 184, 255), 0.72));');
   });
 
@@ -648,8 +657,8 @@ describe('garden controller api', () => {
 
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
-    expect(guiRes.text).toContain('id="zone-4a" class="zone zone-theme-4 zone-active" data-active="true"');
-    expect(guiRes.text).toContain('id="zone-4b" class="zone zone-theme-4 zone-active" data-active="true"');
+    expect(guiRes.text).toContain('id="zone-4a" class="zone zone-active"');
+    expect(guiRes.text).toContain('id="zone-4b" class="zone zone-active"');
     expect(guiRes.text).toContain("flatMap((relay) => zoneShapeIdsForChannel(relay.channel))");
   });
 
