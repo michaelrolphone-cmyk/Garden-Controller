@@ -53,6 +53,55 @@ function createState() {
   };
 }
 
+
+function renderSensorDataMarkup(latestSensorData, deviceTelemetry) {
+  const telemetrySensorData = deviceTelemetry && Array.isArray(deviceTelemetry.sensorData) ? deviceTelemetry.sensorData : [];
+  const readings = latestSensorData && Array.isArray(latestSensorData.sensorData)
+    ? latestSensorData.sensorData
+    : telemetrySensorData;
+
+  if (!readings.length) {
+    return '<p id="sensor-empty">No microcontroller weather sensor data reported yet.</p>';
+  }
+
+  const rows = readings
+    .map((reading) => `<tr><td>${reading.type || 'unknown'}</td><td>${reading.value ?? 'n/a'}</td><td>${reading.unit || ''}</td><td>${reading.source || 'firmware'}</td></tr>`)
+    .join('');
+
+  return `<table class="sensor-table" id="sensor-table"><thead><tr><th>Metric</th><th>Value</th><th>Unit</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function formatTimeSince(lastSeenAt, now = Date.now()) {
+  if (!lastSeenAt) return 'never';
+  const timestamp = Date.parse(lastSeenAt);
+  if (Number.isNaN(timestamp)) return 'unknown';
+  const diffSeconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+  if (diffSeconds < 60) return `${diffSeconds}s ago`;
+  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m ago`;
+  if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)}h ago`;
+  return `${Math.floor(diffSeconds / 86400)}d ago`;
+}
+
+function renderTelemetryMarkup(deviceTelemetry) {
+  if (!deviceTelemetry) {
+    return '<p id="telemetry-empty">No device telemetry reported yet.</p>';
+  }
+
+  const telemetryPairs = [
+    ['Device ID', deviceTelemetry.deviceId || 'n/a'],
+    ['Firmware', deviceTelemetry.firmwareVersion || 'n/a'],
+    ['Clock Valid', String(Boolean(deviceTelemetry.clockValid))],
+    ['Last Command ID', deviceTelemetry.lastCommandId || 'n/a'],
+    ['Current Run', deviceTelemetry.currentRun ? JSON.stringify(deviceTelemetry.currentRun) : 'none'],
+    ['Target Location', deviceTelemetry.targetLocation ? JSON.stringify(deviceTelemetry.targetLocation) : 'n/a'],
+    ['Last Seen (UTC)', deviceTelemetry.lastSeenAt || 'n/a'],
+    ['Last Seen', formatTimeSince(deviceTelemetry.lastSeenAt)]
+  ];
+
+  const rows = telemetryPairs.map(([label, value]) => `<tr><th>${label}</th><td>${value}</td></tr>`).join('');
+  return `<table class="telemetry-table" id="telemetry-table"><tbody>${rows}</tbody></table>`;
+}
+
 function createCommand({ channel, action, requestedBy }) {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -248,9 +297,9 @@ function createApp(config = {}) {
       pendingPolls: pendingPolls.length,
       commandHistory: state.commandHistory,
       serverTime: new Date().toISOString(),
+      latestSensorData: state.latestSensorData,
       schedules: state.schedules,
       deviceTelemetry: state.deviceTelemetry,
-      latestSensorData: state.latestSensorData,
       sensorReadingCount: state.sensorReadings.length,
       weatherDatasets: state.weatherDatasets
     });
@@ -576,6 +625,8 @@ function createApp(config = {}) {
       : '<p>No schedules configured.</p>';
     const schedulesMarkup = state.schedules.length ? `<ul>${state.schedules.map((schedule) => `<li>${formatScheduleLabel(schedule)}</li>`).join('')}</ul>` : '';
     const defaultSchedule = state.schedules.find((schedule) => typeof schedule === 'object') || {};
+    const sensorDataMarkup = renderSensorDataMarkup(state.latestSensorData, state.deviceTelemetry);
+    const telemetryMarkup = renderTelemetryMarkup(state.deviceTelemetry);
 
     res.type('html').send(`<!doctype html>
 <html>
@@ -600,7 +651,7 @@ function createApp(config = {}) {
       .relay-states { font-size: 0.88rem; color: #476070; margin: 8px 0 12px; }
       .status-pill { font-size: 0.7rem; padding: 4px 8px; border-radius: 999px; font-weight: 700; } .status-mismatch { background: #ffe4ea; color: #b42345; } .status-synced { background: #dff8ea; color: #18794e; }
       button { border: 1px solid #9cc3da; color: #123; background: #f3f9ff; padding: 7px 11px; border-radius: 10px; cursor: pointer; } button:disabled { opacity: 0.4; cursor: not-allowed; }
-      .env-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px;} .env-card{border:1px solid #d9e5ee;border-radius:12px;padding:12px;background:#fcfeff;} .env-card iframe{width:100%;height:260px;border:0;border-radius:10px;} .env-links{margin:8px 0 0;padding-left:18px;}
+      .env-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px;} .env-card{border:1px solid #d9e5ee;border-radius:12px;padding:12px;background:#fcfeff;} .env-card iframe{width:100%;height:260px;border:0;border-radius:10px;} .env-links{margin:8px 0 0;padding-left:18px;} .sensor-table{width:100%;border-collapse:collapse;margin-top:8px;} .sensor-table th,.sensor-table td,.telemetry-table th,.telemetry-table td{border-bottom:1px solid #d9e5ee;padding:8px 6px;text-align:left;font-size:.85rem;color:#28455a;} .telemetry-table{width:100%;border-collapse:collapse;margin-top:8px;}
       .schedule { margin-top: 14px; padding: 16px; } .timeline{display:grid;gap:8px;margin:12px 0 16px;} .timeline-row{display:grid;grid-template-columns:170px 1fr;align-items:center;gap:10px;} .timeline-zone{font-weight:600;color:#204055;}
       .timeline-track{height:28px;background:repeating-linear-gradient(to right,#edf2f7,#edf2f7 7.6%,#f8fafc 7.6%,#f8fafc 8.33%);border:1px solid #d8e3eb;border-radius:999px;position:relative;overflow:hidden;} .timeline-block{position:absolute;top:2px;height:22px;border-radius:999px;background:linear-gradient(90deg,#16a34a,#22c55e);color:white;font-size:.75rem;display:flex;align-items:center;padding:0 10px;white-space:nowrap;}
       .schedule form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; } label { display: flex; flex-direction: column; font-size: 0.85rem; color: #395267; }
@@ -647,6 +698,14 @@ function createApp(config = {}) {
             <ul class="env-links"><li><a href="${envFeeds.noaaSatelliteUrl}" target="_blank" rel="noreferrer">NOAA GOES-17 Pacific Northwest imagery</a></li></ul>
           </article>
           <article class="env-card">
+            <h3>Microcontroller Weather Sensors</h3>
+            <div id="sensor-data">${sensorDataMarkup}</div>
+          </article>
+          <article class="env-card">
+            <h3>Device Telemetry</h3>
+            <div id="device-telemetry">${telemetryMarkup}</div>
+          </article>
+          <article class="env-card">
             <h3>Lidar / Elevation</h3>
             <p>Open the USGS National Map viewer centered on the garden location for 3DEP elevation and lidar-derived layers.</p>
             <ul class="env-links"><li><a href="${envFeeds.lidarMapUrl}" target="_blank" rel="noreferrer">USGS National Map (3DEP)</a></li></ul>
@@ -672,6 +731,16 @@ function createApp(config = {}) {
         ? schedule
         : \`\${schedule.zone} (relay \${schedule.channel}) at \${schedule.startTime} for \${schedule.durationSeconds}s\`;
       function renderFromState(state) {
+        const formatTimeSince = (lastSeenAt) => {
+          if (!lastSeenAt) return 'never';
+          const timestamp = Date.parse(lastSeenAt);
+          if (Number.isNaN(timestamp)) return 'unknown';
+          const diffSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+          if (diffSeconds < 60) return \`\${diffSeconds}s ago\`;
+          if (diffSeconds < 3600) return \`\${Math.floor(diffSeconds / 60)}m ago\`;
+          if (diffSeconds < 86400) return \`\${Math.floor(diffSeconds / 3600)}h ago\`;
+          return \`\${Math.floor(diffSeconds / 86400)}d ago\`;
+        };
         const activeZoneIds = new Set((state.reportedRelays || []).filter((relay) => relay.state === 'on').map((relay) => \`zone-\${relay.channel}\`));
         const relayGrid = document.getElementById('relay-grid');
         relayGrid.innerHTML = (state.desiredRelays || []).map((desiredRelay) => {
@@ -703,6 +772,37 @@ function createApp(config = {}) {
         }).join('')}</div>\` : '<p>No schedules configured.</p>';
         const rawSchedules = document.getElementById('raw-schedules');
         rawSchedules.innerHTML = schedules.length ? \`<ul>\${schedules.map((schedule) => \`<li>\${formatScheduleLabel(schedule)}</li>\`).join('')}</ul>\` : '';
+        const sensorContainer = document.getElementById('sensor-data');
+        const readings = state.latestSensorData && Array.isArray(state.latestSensorData.sensorData)
+          ? state.latestSensorData.sensorData
+          : ((state.deviceTelemetry && Array.isArray(state.deviceTelemetry.sensorData)) ? state.deviceTelemetry.sensorData : []);
+        if (sensorContainer) {
+          if (!readings.length) {
+            sensorContainer.innerHTML = '<p id="sensor-empty">No microcontroller weather sensor data reported yet.</p>';
+          } else {
+            const sensorRows = readings.map((reading) => \`<tr><td>\${reading.type || 'unknown'}</td><td>\${reading.value ?? 'n/a'}</td><td>\${reading.unit || ''}</td><td>\${reading.source || 'firmware'}</td></tr>\`).join('');
+            sensorContainer.innerHTML = \`<table class="sensor-table" id="sensor-table"><thead><tr><th>Metric</th><th>Value</th><th>Unit</th><th>Source</th></tr></thead><tbody>\${sensorRows}</tbody></table>\`;
+          }
+        }
+        const telemetryContainer = document.getElementById('device-telemetry');
+        const telemetry = state.deviceTelemetry;
+        if (telemetryContainer) {
+          if (!telemetry) {
+            telemetryContainer.innerHTML = '<p id="telemetry-empty">No device telemetry reported yet.</p>';
+          } else {
+            const pairs = [
+              ['Device ID', telemetry.deviceId || 'n/a'],
+              ['Firmware', telemetry.firmwareVersion || 'n/a'],
+              ['Clock Valid', String(Boolean(telemetry.clockValid))],
+              ['Last Command ID', telemetry.lastCommandId || 'n/a'],
+              ['Current Run', telemetry.currentRun ? JSON.stringify(telemetry.currentRun) : 'none'],
+              ['Target Location', telemetry.targetLocation ? JSON.stringify(telemetry.targetLocation) : 'n/a'],
+              ['Last Seen (UTC)', telemetry.lastSeenAt || 'n/a'],
+              ['Last Seen', formatTimeSince(telemetry.lastSeenAt)]
+            ];
+            telemetryContainer.innerHTML = \`<table class="telemetry-table" id="telemetry-table"><tbody>\${pairs.map(([label, value]) => \`<tr><th>\${label}</th><td>\${value}</td></tr>\`).join('')}</tbody></table>\`;
+          }
+        }
         const serverTime = document.getElementById('server-time');
         serverTime.textContent = state.serverTime || new Date().toISOString();
       }
@@ -723,7 +823,9 @@ function createApp(config = {}) {
       desiredRelays: state.desiredRelayState,
       reportedRelays: state.reportedRelayState,
       schedules: state.schedules,
-      serverTime: new Date().toISOString()
+      serverTime: new Date().toISOString(),
+      latestSensorData: state.latestSensorData,
+      deviceTelemetry: state.deviceTelemetry
     });
   });
 

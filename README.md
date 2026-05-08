@@ -130,12 +130,15 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
   - active zone highlighting on the garden map based on reported relay ON states
   - schedules list
   - embedded environmental monitoring panels for weather radar and satellite imagery centered at `43.665288, -116.259186`
+  - live microcontroller weather sensor table (latest firmware-reported `sensorData`)
+  - live device telemetry table with all canonical telemetry fields from `POST /api/microcontroller/state`
+  - `lastSeenAt` plus relative "time since last telemetry update" for monitor-at-a-glance status
   - lidar/elevation quick link to USGS National Map (3DEP) centered at the garden coordinates
   - per-relay explicit ON/OFF controls (based on reported state)
 - `POST /gui/relays/:channel/on` - queue an ON command from GUI and redirect to `/gui`.
 - `POST /gui/relays/:channel/off` - queue an OFF command from GUI and redirect to `/gui`.
 - `POST /gui/schedules` - submit a zone schedule from GUI and queue a schedule update command for the microcontroller.
-- `GET /gui/state` - basic-auth protected JSON state payload used by the GUI for 1-second incremental updates of relay/schedule/hardware status.
+- `GET /gui/state` - basic-auth protected JSON state payload used by the GUI for 1-second incremental updates of relay/schedule/hardware status, including `latestSensorData` and full `deviceTelemetry`.
 
 Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are entered in Heroku with surrounding quotes, the app normalizes them automatically.
 
