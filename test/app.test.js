@@ -95,9 +95,11 @@ describe('garden controller api', () => {
     const guiRes = await request(app).get('/gui').set('authorization', auth);
     expect(guiRes.status).toBe(200);
     expect(guiRes.text).toContain('Relay states (desired vs reported)');
-    expect(guiRes.text).toContain('desired <strong>ON</strong> /');
-    expect(guiRes.text).toContain('reported <strong>OFF</strong>');
-    expect(guiRes.text).toContain('MISMATCH');
+    expect(guiRes.text).toContain('Desired <strong>ON</strong>');
+    expect(guiRes.text).toContain('Reported <strong>OFF</strong>');
+    expect(guiRes.text).toContain('status-pill status-mismatch');
+    expect(guiRes.text).toContain('Garden Zone Map');
+    expect(guiRes.text).toContain('id="zone-6"');
     expect(guiRes.text).toContain('/gui/relays/1/on');
     expect(guiRes.text).toContain('/gui/relays/1/off');
     expect(guiRes.text).not.toContain('/gui/relays/1/toggle');

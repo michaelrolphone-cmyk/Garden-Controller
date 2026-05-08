@@ -302,18 +302,25 @@ function createApp(config = {}) {
       .map((desiredRelay) => {
         const reportedRelay = state.reportedRelayState[desiredRelay.channel - 1] || { state: 'unknown' };
         const hasMismatch = desiredRelay.state !== reportedRelay.state;
+        const statusClass = hasMismatch ? 'status-mismatch' : 'status-synced';
 
-        return `<li>
-            Channel ${desiredRelay.channel}:
-            desired <strong>${desiredRelay.state.toUpperCase()}</strong> /
-            reported <strong>${reportedRelay.state.toUpperCase()}</strong>
-            ${hasMismatch ? '<span style="color:#b00020; font-weight:bold; margin-left:8px;">MISMATCH</span>' : ''}
-            <form method="post" action="/gui/relays/${desiredRelay.channel}/on" style="display:inline; margin-left:8px;">
-              <button type="submit" ${reportedRelay.state === 'on' ? 'disabled' : ''}>Turn ON</button>
-            </form>
-            <form method="post" action="/gui/relays/${desiredRelay.channel}/off" style="display:inline; margin-left:4px;">
-              <button type="submit" ${reportedRelay.state === 'off' ? 'disabled' : ''}>Turn OFF</button>
-            </form>
+        return `<li class="relay-card">
+            <div class="relay-header">
+              <span class="relay-title">Zone ${desiredRelay.channel}</span>
+              <span class="status-pill ${statusClass}">${hasMismatch ? 'MISMATCH' : 'SYNCED'}</span>
+            </div>
+            <div class="relay-states">
+              <span>Desired <strong>${desiredRelay.state.toUpperCase()}</strong></span>
+              <span>Reported <strong>${reportedRelay.state.toUpperCase()}</strong></span>
+            </div>
+            <div class="relay-actions">
+              <form method="post" action="/gui/relays/${desiredRelay.channel}/on">
+                <button type="submit" ${reportedRelay.state === 'on' ? 'disabled' : ''}>Turn ON</button>
+              </form>
+              <form method="post" action="/gui/relays/${desiredRelay.channel}/off">
+                <button type="submit" ${reportedRelay.state === 'off' ? 'disabled' : ''}>Turn OFF</button>
+              </form>
+            </div>
           </li>`;
       })
       .join('');
@@ -326,24 +333,78 @@ function createApp(config = {}) {
 
     res.type('html').send(`<!doctype html>
 <html>
-  <head><title>Garden Controller</title></head>
+  <head>
+    <title>Garden Controller</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { font-family: Inter, system-ui, sans-serif; margin: 0; color: #d8e6ff; background: radial-gradient(circle at top, #1b2f6e 0%, #040711 45%, #02040a 100%); }
+      .shell { max-width: 1200px; margin: 0 auto; padding: 24px; }
+      .panel { background: rgba(8, 15, 35, 0.72); border: 1px solid rgba(101, 173, 255, 0.3); border-radius: 18px; box-shadow: 0 0 30px rgba(0, 255, 255, 0.12); backdrop-filter: blur(8px); }
+      h1,h2,h3 { color: #8fe8ff; letter-spacing: 0.03em; }
+      .hero { padding: 20px; margin-bottom: 18px; }
+      .timestamp { color: #93b9ff; }
+      .layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; }
+      .map-wrap { padding: 16px; }
+      .map-wrap svg { width: 100%; height: auto; background: linear-gradient(160deg, #020617, #071a32); border-radius: 14px; }
+      .zone { fill: rgba(57, 255, 255, 0.1); stroke: #6af2ff; stroke-width: 2.2; }
+      .linework { stroke: rgba(132, 163, 255, 0.6); }
+      .relay-section { padding: 16px; }
+      .relay-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+      .relay-card { border: 1px solid rgba(127, 188, 255, 0.35); border-radius: 14px; padding: 12px; background: rgba(7, 17, 42, 0.85); }
+      .relay-header, .relay-states, .relay-actions { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+      .relay-states { font-size: 0.88rem; color: #b6d2ff; margin: 8px 0 12px; }
+      .status-pill { font-size: 0.7rem; padding: 4px 8px; border-radius: 999px; font-weight: 700; }
+      .status-mismatch { background: rgba(255, 88, 132, 0.22); color: #ff8fb0; }
+      .status-synced { background: rgba(83, 255, 204, 0.18); color: #8bffd3; }
+      button { border: 1px solid rgba(113, 255, 250, 0.5); color: #bcf9ff; background: linear-gradient(180deg, #103a61, #0b203f); padding: 7px 11px; border-radius: 10px; cursor: pointer; }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      .schedule { margin-top: 18px; padding: 16px; }
+      .schedule form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+      label { display: flex; flex-direction: column; font-size: 0.85rem; color: #a9c4ff; }
+      input { margin-top: 6px; border-radius: 10px; border: 1px solid rgba(128, 173, 255, 0.35); background: #060d20; color: #d8e6ff; padding: 8px; }
+      @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .relay-grid, .schedule form { grid-template-columns: 1fr; } }
+    </style>
+  </head>
   <body>
-    <h1>ESP32-S3-Relay-6CH Controller</h1>
-    <p>Current server time (UTC): <strong>${new Date().toISOString()}</strong></p>
-    <h2>Relay states (desired vs reported)</h2>
-    <ul>${relayMarkup}</ul>
-    <h2>Schedules</h2>
-    ${schedulesMarkup}
-    <h3>Update schedules</h3>
-    <form method="post" action="/gui/schedules">
-      <label>Zone <input name="zone" value="${defaultSchedule.zone || ''}" required /></label>
-      <label>Channel <input name="channel" type="number" min="1" max="${RELAY_CHANNELS}" value="${defaultSchedule.channel || 1}" required /></label>
-      <label>Start Time <input name="startTime" value="${defaultSchedule.startTime || '06:00'}" required /></label>
-      <label>Duration (seconds) <input name="durationSeconds" type="number" min="1" value="${defaultSchedule.durationSeconds || 900}" required /></label>
-      <button type="submit">Save schedule</button>
-    </form>
+    <div class="shell">
+      <section class="panel hero">
+        <h1>ESP32-S3-Relay-6CH Controller</h1>
+        <p class="timestamp">Current server time (UTC): <strong>${new Date().toISOString()}</strong></p>
+      </section>
+      <div class="layout">
+        <section class="panel map-wrap">
+          <h2>Garden Zone Map</h2>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 295.743 295.482" role="img" aria-label="Garden watering zones">
+            <g class="linework"><polyline points="10,266.311 251.526,274.667"/><line x1="285.743" y1="285.482" x2="282.082" y2="191.277"/><polyline points="282.082,191.277 276.705,168.862 277.246,95.213 277.7,15.387"/><polyline points="13.295,258.387 35.211,10 37.872,11.914 276.96,14.582"/></g>
+            <polygon id="zone-1" class="zone" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/>
+            <polygon id="zone-2" class="zone" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/>
+            <polygon id="zone-3" class="zone" points="205.581,96.842 264.287,97.694 263.108,173.173 198.935,169.661 205.581,96.842"/>
+            <polygon id="zone-4" class="zone" points="32,46.388 46.493,52.635 95.676,139.247 128.342,140.128 127.534,159.189 22.68,152.017 32,46.388"/>
+            <polygon id="zone-5" class="zone" points="152.903,89.893 152.691,13.195 50.949,12.06 136.836,89.869 152.903,89.893"/>
+            <polygon id="zone-6" class="zone" points="249.304,90.041 249.095,14.271 152.691,13.195 152.903,89.893 249.304,90.041"/>
+          </svg>
+        </section>
+        <section class="panel relay-section">
+          <h2>Relay states (desired vs reported)</h2>
+          <ul class="relay-grid">${relayMarkup}</ul>
+        </section>
+      </div>
+      <section class="panel schedule">
+        <h2>Schedules</h2>
+        ${schedulesMarkup}
+        <h3>Update schedules</h3>
+        <form method="post" action="/gui/schedules">
+          <label>Zone <input name="zone" value="${defaultSchedule.zone || ''}" required /></label>
+          <label>Channel <input name="channel" type="number" min="1" max="${RELAY_CHANNELS}" value="${defaultSchedule.channel || 1}" required /></label>
+          <label>Start Time <input name="startTime" value="${defaultSchedule.startTime || '06:00'}" required /></label>
+          <label>Duration (seconds) <input name="durationSeconds" type="number" min="1" value="${defaultSchedule.durationSeconds || 900}" required /></label>
+          <button type="submit">Save schedule</button>
+        </form>
+      </section>
+    </div>
   </body>
 </html>`);
+;
   });
 
   app.post('/gui/relays/:channel/:action', requireGuiAuth, (req, res) => {
