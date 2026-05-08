@@ -2,6 +2,7 @@ openapi: 3.0.3
 info:
   title: Garden Controller API
   version: 1.1.0
+  description: Relay channels=6, zone channels=5, master valve channel=6.
 servers:
   - url: /
 components:
@@ -19,7 +20,7 @@ components:
     PublishedSchedule:
       type: object
       properties:
-        channel: { type: integer, minimum: 1, maximum: 6 }
+        channel: { type: integer, minimum: 1, maximum: 5 }
         zone: { type: string }
         startTime: { type: string }
         durationSeconds: { type: integer, minimum: 1 }
@@ -39,9 +40,30 @@ paths:
         '200': { description: Full controller state }
   /api/commands:
     post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel: { type: integer, minimum: 1, maximum: 6 }
+                action: { type: string, enum: [on, off, toggle] }
+                durationSeconds:
+                  type: integer
+                  minimum: 1
+                  description: Used for channel 6 spigot/master-valve timed runs.
       responses:
         '201': { description: Command queued }
         '400': { description: Invalid payload }
+  /api/spigots/run:
+    post:
+      responses:
+        '201': { description: Spigot run command queued }
+  /api/spigots/stop:
+    post:
+      responses:
+        '201': { description: Spigot stop command queued }
   /api/queue/next:
     get:
       parameters:
@@ -213,6 +235,18 @@ paths:
       responses:
         '303': { description: Schedule update queued }
         '400': { description: Invalid schedule payload }
+  /gui/spigots/run:
+    post:
+      security:
+        - basicAuth: []
+      responses:
+        '303': { description: Spigot run command queued }
+  /gui/spigots/stop:
+    post:
+      security:
+        - basicAuth: []
+      responses:
+        '303': { description: Spigot stop command queued }
   /openapi.json:
     get:
       responses:
