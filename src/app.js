@@ -431,7 +431,6 @@ function createApp(config = {}) {
 <html>
   <head>
     <title>Garden Controller</title>
-    <meta http-equiv="refresh" content="1" />
     <style>
       :root { color-scheme: dark; --glow: 0 0 18px rgba(120,255,221,0.55); }
       body { font-family: Inter, system-ui, sans-serif; margin: 0; color: #d8e6ff; background: #f1f5f9; }
@@ -463,8 +462,8 @@ function createApp(config = {}) {
     <div class="shell">
       <section class="panel hero">
         <h1>Castle Hills Garden Manager</h1>
-        <p class="timestamp">Current server time (UTC): <strong>${new Date().toISOString()}</strong></p>
-        <p class="timestamp">Auto-refresh: every 1 second · Active zones glowing on map.</p>
+        <p class="timestamp">Current server time (UTC): <strong id="server-time">${new Date().toISOString()}</strong></p>
+        <p class="timestamp">State data refresh: every 1 second · Active zones glowing on map.</p>
       </section>
       <div class="layout">
         <section class="panel map-wrap">
@@ -481,7 +480,7 @@ function createApp(config = {}) {
         </section>
         <section class="panel relay-section">
           <h2>Relay states (desired vs reported)</h2>
-          <ul class="relay-grid">${relayMarkup}</ul>
+          <ul id="relay-grid" class="relay-grid">${relayMarkup}</ul>
         </section>
       </div>
       <section class="panel schedule">
@@ -506,7 +505,7 @@ function createApp(config = {}) {
       </section>
       <section class="panel schedule">
         <h2>Schedules</h2>
-        ${scheduleTimelineMarkup}<details class="raw-schedules"><summary>Raw schedule list</summary>${schedulesMarkup}</details>
+        <div id="schedule-timeline">${scheduleTimelineMarkup}</div><details class="raw-schedules"><summary>Raw schedule list</summary><div id="raw-schedules">${schedulesMarkup}</div></details>
         <h3>Update schedules</h3>
         <form method="post" action="/gui/schedules">
           <label>Zone <input name="zone" value="${defaultSchedule.zone || ''}" required /></label>
@@ -517,9 +516,65 @@ function createApp(config = {}) {
         </form>
       </section>
     </div>
+    <script>
+      const relayChannelCount = ${RELAY_CHANNELS};
+      const formatScheduleLabel = (schedule) => typeof schedule === 'string'
+        ? schedule
+        : \`\${schedule.zone} (relay \${schedule.channel}) at \${schedule.startTime} for \${schedule.durationSeconds}s\`;
+      function renderFromState(state) {
+        const activeZoneIds = new Set((state.reportedRelays || []).filter((relay) => relay.state === 'on').map((relay) => \`zone-\${relay.channel}\`));
+        const relayGrid = document.getElementById('relay-grid');
+        relayGrid.innerHTML = (state.desiredRelays || []).map((desiredRelay) => {
+          const reportedRelay = (state.reportedRelays || [])[desiredRelay.channel - 1] || { state: 'unknown' };
+          const hasMismatch = desiredRelay.state !== reportedRelay.state;
+          const statusClass = hasMismatch ? 'status-mismatch' : 'status-synced';
+          return \`<li class="relay-card">
+            <div class="relay-header"><span class="relay-title">Zone \${desiredRelay.channel}</span><span class="status-pill \${statusClass}">\${hasMismatch ? 'MISMATCH' : 'SYNCED'}</span></div>
+            <div class="relay-states"><span>Desired <strong>\${desiredRelay.state.toUpperCase()}</strong></span><span>Reported <strong>\${reportedRelay.state.toUpperCase()}</strong></span></div>
+            <div class="relay-actions"><form method="post" action="/gui/relays/\${desiredRelay.channel}/on"><button type="submit" \${reportedRelay.state === 'on' ? 'disabled' : ''}>Turn ON</button></form><form method="post" action="/gui/relays/\${desiredRelay.channel}/off"><button type="submit" \${reportedRelay.state === 'off' ? 'disabled' : ''}>Turn OFF</button></form></div>
+          </li>\`;
+        }).join('');
+        for (let channel = 1; channel <= relayChannelCount; channel += 1) {
+          const zoneEl = document.getElementById(\`zone-\${channel}\`);
+          if (!zoneEl) continue;
+          const isActive = activeZoneIds.has(\`zone-\${channel}\`);
+          zoneEl.setAttribute('data-active', String(isActive));
+          zoneEl.setAttribute('class', \`zone \${isActive ? 'zone-active' : ''}\`);
+        }
+        const schedules = Array.isArray(state.schedules) ? state.schedules : [];
+        const parsedSchedules = schedules.filter((schedule) => typeof schedule === 'object' && schedule);
+        const scheduleTimeline = document.getElementById('schedule-timeline');
+        scheduleTimeline.innerHTML = parsedSchedules.length ? \`<div class="timeline">\${parsedSchedules.map((schedule) => {
+          const [hoursText = '0', minutesText = '0'] = String(schedule.startTime || '00:00').split(':');
+          const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
+          const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
+          const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
+          return \`<div class="timeline-row"><span class="timeline-zone">\${schedule.zone}</span><div class="timeline-track"><span class="timeline-block" style="left:\${leftPercent}%;width:\${widthPercent}%">\${schedule.startTime} · \${schedule.durationSeconds}s</span></div></div>\`;
+        }).join('')}</div>\` : '<p>No schedules configured.</p>';
+        const rawSchedules = document.getElementById('raw-schedules');
+        rawSchedules.innerHTML = schedules.length ? \`<ul>\${schedules.map((schedule) => \`<li>\${formatScheduleLabel(schedule)}</li>\`).join('')}</ul>\` : '';
+        const serverTime = document.getElementById('server-time');
+        serverTime.textContent = state.serverTime || new Date().toISOString();
+      }
+      async function refreshState() {
+        const response = await fetch('/gui/state', { cache: 'no-store' });
+        if (!response.ok) return;
+        renderFromState(await response.json());
+      }
+      setInterval(refreshState, 1000);
+    </script>
   </body>
 </html>`);
 ;
+  });
+
+  app.get('/gui/state', requireGuiAuth, (_req, res) => {
+    res.json({
+      desiredRelays: state.desiredRelayState,
+      reportedRelays: state.reportedRelayState,
+      schedules: state.schedules,
+      serverTime: new Date().toISOString()
+    });
   });
 
   app.post('/gui/relays/:channel/:action', requireGuiAuth, (req, res) => {

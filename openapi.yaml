@@ -100,6 +100,12 @@ paths:
         - basicAuth: []
       responses:
         '200': { description: Management GUI }
+  /gui/state:
+    get:
+      security:
+        - basicAuth: []
+      responses:
+        '200': { description: GUI dynamic state payload (relays, schedules, server time) }
   /gui/relays/{channel}/on:
     post:
       security:
