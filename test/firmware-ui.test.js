@@ -27,7 +27,7 @@ describe('firmware local admin/mobile api integration', () => {
 
   test('admin ui maps zone activity, color-codes map zones, and provides schedule CRUD inputs', () => {
     expect(ino).toContain('function colorByChannel(zoneColors, ch)');
-    expect(ino).toContain('function toRgb(c)');
+    expect(ino).toContain("function toRgb(c){if(!c)return '0,0,0';const rgb=c.rgb||c;");
     expect(ino).toContain('data-zone="1"');
     expect(ino).toContain('s.zoneColors');
     expect(ino).toContain('zoneChannel(z)');
