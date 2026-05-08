@@ -49,6 +49,15 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
     expect(ino).toContain('drawScreen();');
   });
 
+
+  test('supports queue and ledger maintenance endpoints', () => {
+    expect(ino).toContain('server.on("/queue/clear", HTTP_GET, handleQueueClear);');
+    expect(ino).toContain('server.on("/queue/stop-clear", HTTP_GET, handleQueueStopClear);');
+    expect(ino).toContain('server.on("/ledger/reset", HTTP_GET, handleLedgerReset);');
+    expect(ino).toContain('doc["queueState"] = queueStopped ? "stopped" : "running";');
+    expect(ino).toContain('JsonArray ledger = doc.createNestedArray("soilLedger")');
+  });
+
   test('consumes relay weather and time fields and updates runtime meter with partial refresh', () => {
     expect(ino).toContain('fetchRelayJson("/weather", wdoc)');
     expect(ino).toContain('state.weather.precipitationChancePct');

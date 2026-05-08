@@ -232,6 +232,9 @@ E-paper controller APIs:
 - `GET /history.csv`
 - `GET /clearHistory`
 - `GET /display?mode=auto|schedule|news|graph`
+- `GET /queue/clear`
+- `GET /queue/stop-clear`
+- `GET /ledger/reset`
 - `GET /api/config`
 - `POST /api/config`
 
@@ -239,6 +242,9 @@ Relay APIs consumed by e-paper firmware:
 - `GET /time` (`epoch`, `synced`)
 - `GET /weather` (`summary`, `condition`, `temperatureF`, `rainIn`, `windMph`, `windDeg`, `windDirection`, `humidityPct`, `dewPointF`, `precipitationChancePct`, `sunlightHours`, `sunriseEpoch`, `sunsetEpoch`, `weatherCode`, `lastWeatherMs`)
 - `GET /status` (running state) with fallback to `GET /api/state`
+
+State payload additions:
+- `/state` includes `queueState`, `queueDepth`, and `soilLedger` metrics for dashboard/admin visibility.
 
 Display behavior:
 - Main schedule screen title: `Castle Hills Garden Watering Schedule`.

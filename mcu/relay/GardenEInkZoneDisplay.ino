@@ -54,6 +54,9 @@ char relayApiToken[96] = "";
 unsigned long lastPollMs = 0;
 unsigned long rotationEpochMs = 0;
 bool forceFullRedraw = true;
+bool queueStopped = false;
+int queueDepth = 0;
+float zoneLedger[5] = {0,0,0,0,0};
 
 const char* MODE_AUTO = "auto";
 const char* MODE_SCHEDULE = "schedule";
@@ -202,9 +205,12 @@ void handleState() {
   doc["masterEnable"] = state.masterEnable; doc["weatherAdjustmentEnabled"] = state.weatherAdjustmentEnabled;
   doc["gardenNews"] = state.gardenNews; doc["currentRunActive"] = state.run.active; doc["currentRunZone"] = state.run.zone;
   doc["displayMode"] = state.displayMode;
+  doc["queueState"] = queueStopped ? "stopped" : "running";
+  doc["queueDepth"] = queueDepth;
   JsonArray zones = doc.createNestedArray("zones");
   for (int i = 0; i < 5; i++) { JsonObject z = zones.createNestedObject(); z["name"] = state.zones[i].name; z["baseMinutes"] = state.zones[i].baseMinutes; z["startHour"] = state.zones[i].startHour; z["startMinute"] = state.zones[i].startMinute; }
   JsonArray history = doc.createNestedArray("history"); history.add("epoch,tempF,rainIn,sunlightHours,windMph,weatherCode,reason");
+  JsonArray ledger = doc.createNestedArray("soilLedger"); for (int i=0;i<5;i++) ledger.add(zoneLedger[i]);
   String out; serializeJson(doc, out); server.send(200, "application/json", out);
 }
 void handleConfigGet(){ StaticJsonDocument<512> d; d["apSsid"]=apSsid; d["staSsid"]=staSsid; d["relayBase"]=relayBase; String out; serializeJson(d,out); server.send(200,"application/json",out);} 
@@ -219,6 +225,11 @@ void handleSaveLogic(){ server.send(200,"application/json","{\"ok\":true}"); }
 void handleSaveNews(){ if(server.hasArg("plain")){strlcpy(state.gardenNews, server.arg("plain").c_str(), sizeof(state.gardenNews)); saveConfig(); forceFullRedraw=true;} server.send(200,"application/json","{\"ok\":true}"); }
 void handleHistoryCsv(){ server.send(200,"text/csv","epoch,tempF,rainIn,sunlightHours,windMph,weatherCode,reason\n"); }
 void handleClearHistory(){ server.send(200,"application/json","{\"ok\":true}"); }
+
+
+void handleQueueClear(){ queueDepth = 0; server.send(200,"application/json","{"ok":true,"queueDepth":0}"); }
+void handleQueueStopClear(){ queueStopped = true; queueDepth = 0; server.send(200,"application/json","{"ok":true,"queueState":"stopped"}"); }
+void handleLedgerReset(){ for(int i=0;i<5;i++) zoneLedger[i]=0; server.send(200,"application/json","{"ok":true}"); }
 
 void setupRoutes() {
   server.on("/", HTTP_GET, handleRoot);
@@ -235,6 +246,9 @@ void setupRoutes() {
   server.on("/history.csv", HTTP_GET, handleHistoryCsv);
   server.on("/clearHistory", HTTP_GET, handleClearHistory);
   server.on("/display", HTTP_GET, handleDisplayMode);
+  server.on("/queue/clear", HTTP_GET, handleQueueClear);
+  server.on("/queue/stop-clear", HTTP_GET, handleQueueStopClear);
+  server.on("/ledger/reset", HTTP_GET, handleLedgerReset);
   server.begin();
 }
 
@@ -256,6 +270,7 @@ void loop() {
   if (millis() - lastPollMs >= 15000UL) {
     lastPollMs = millis();
     syncFromRelay();
+    if (state.run.active && state.run.zone >= 1 && state.run.zone <= 5) zoneLedger[state.run.zone-1] += 0.25f;
     bool needFull = substantialChange();
     if (needFull) {
       drawScreen();
