@@ -32,7 +32,10 @@ describe('garden controller api', () => {
         relayState: [{ channel: 1, state: 'on' }, { channel: 2, state: 'off' }],
         queue: [{ id: '1', channel: 1, action: 'toggle', requestedBy: 'gui', createdAt: '2026-01-01T00:00:00.000Z' }],
         news: [],
-        schedules: ['06:00Z -> relay 1 on', '06:15Z -> relay 1 off']
+        schedules: [
+          { channel: 1, zone: 'North Bed', startTime: '06:00', durationSeconds: 900 },
+          { channel: 2, zone: 'South Bed', startTime: '06:15', durationSeconds: 600 }
+        ]
       }
     }).app;
 
@@ -40,7 +43,10 @@ describe('garden controller api', () => {
     expect(res.status).toBe(200);
     expect(res.body.relays).toEqual([{ channel: 1, state: 'on' }, { channel: 2, state: 'off' }]);
     expect(res.body.queueDepth).toBe(1);
-    expect(res.body.schedules).toEqual(['06:00Z -> relay 1 on', '06:15Z -> relay 1 off']);
+    expect(res.body.schedules).toEqual([
+      { channel: 1, zone: 'North Bed', startTime: '06:00', durationSeconds: 900 },
+      { channel: 2, zone: 'South Bed', startTime: '06:15', durationSeconds: 600 }
+    ]);
     expect(new Date(res.body.serverTime).toString()).not.toBe('Invalid Date');
   });
 
@@ -63,6 +69,102 @@ describe('garden controller api', () => {
       .get('/api/queue/next')
       .set('x-api-token', token);
     expect(empty.status).toBe(204);
+  });
+
+  test('microcontroller can publish current relay states', async () => {
+    const app = build();
+
+    const publishRes = await request(app)
+      .post('/api/microcontroller/relays/state')
+      .set('x-api-token', token)
+      .send({
+        relays: [
+          { channel: 1, state: 'on' },
+          { channel: 3, state: 'on' },
+          { channel: 6, state: 'off' }
+        ]
+      });
+
+    expect(publishRes.status).toBe(200);
+    expect(publishRes.body.relays).toEqual([
+      { channel: 1, state: 'on' },
+      { channel: 2, state: 'off' },
+      { channel: 3, state: 'on' },
+      { channel: 4, state: 'off' },
+      { channel: 5, state: 'off' },
+      { channel: 6, state: 'off' }
+    ]);
+  });
+
+  test('microcontroller relay state publish validates payload', async () => {
+    const app = build();
+
+    const publishRes = await request(app)
+      .post('/api/microcontroller/relays/state')
+      .set('x-api-token', token)
+      .send({ relays: [{ channel: 0, state: 'on' }] });
+
+    expect(publishRes.status).toBe(400);
+  });
+
+  test('microcontroller can publish relay schedules', async () => {
+    const app = build();
+
+    const publishRes = await request(app)
+      .post('/api/microcontroller/schedules')
+      .set('x-api-token', token)
+      .send({
+        schedules: [
+          { channel: 1, zone: 'Herbs', startTime: '06:00', durationSeconds: 900 },
+          { channel: 2, zone: 'Tomatoes', startTime: '06:20', durationSeconds: 600 }
+        ]
+      });
+
+    expect(publishRes.status).toBe(200);
+    expect(publishRes.body.schedules).toEqual([
+      { channel: 1, zone: 'Herbs', startTime: '06:00', durationSeconds: 900 },
+      { channel: 2, zone: 'Tomatoes', startTime: '06:20', durationSeconds: 600 }
+    ]);
+
+    const stateRes = await request(app).get('/api/state').set('x-api-token', token);
+    expect(stateRes.status).toBe(200);
+    expect(stateRes.body.schedules).toEqual([
+      { channel: 1, zone: 'Herbs', startTime: '06:00', durationSeconds: 900 },
+      { channel: 2, zone: 'Tomatoes', startTime: '06:20', durationSeconds: 600 }
+    ]);
+  });
+
+  test('microcontroller schedule publish validates payload', async () => {
+    const app = build();
+
+    const publishRes = await request(app)
+      .post('/api/microcontroller/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [{ channel: 2, startTime: '', durationSeconds: 0 }] });
+
+    expect(publishRes.status).toBe(400);
+  });
+
+  test('api can set schedules for microcontroller queue', async () => {
+    const app = build();
+    const res = await request(app)
+      .post('/api/schedules')
+      .set('x-api-token', token)
+      .send({
+        schedules: [{ channel: 4, zone: 'Greenhouse', startTime: '07:00', durationSeconds: 300 }],
+        requestedBy: 'operator'
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.schedules).toEqual([
+      { channel: 4, zone: 'Greenhouse', startTime: '07:00', durationSeconds: 300 }
+    ]);
+
+    const nextRes = await request(app).get('/api/queue/next').set('x-api-token', token);
+    expect(nextRes.status).toBe(200);
+    expect(nextRes.body.command.type).toBe('schedule_update');
+    expect(nextRes.body.command.schedules).toEqual([
+      { channel: 4, zone: 'Greenhouse', startTime: '07:00', durationSeconds: 300 }
+    ]);
   });
 
   test('validates command payload', async () => {
@@ -98,6 +200,7 @@ describe('garden controller api', () => {
     expect(authorized.text).toContain('ESP32-S3-Relay-6CH Controller');
     expect(authorized.text).toContain('Current server time (UTC)');
     expect(authorized.text).toContain('Toggle');
+    expect(authorized.text).toContain('Update schedules');
   });
 
   test('gui toggle control queues a command', async () => {
@@ -111,6 +214,21 @@ describe('garden controller api', () => {
     expect(res.status).toBe(303);
     expect(app.state.queue).toHaveLength(1);
     expect(app.state.queue[0]).toMatchObject({ channel: 1, action: 'toggle', requestedBy: 'gui-web' });
+  });
+
+  test('gui can save schedule and queue schedule update', async () => {
+    const app = createApp({ apiToken: token, guiUsername: 'admin', guiPassword: 'password' });
+
+    const res = await request(app.app)
+      .post('/gui/schedules')
+      .set('authorization', auth)
+      .type('form')
+      .send({ channel: '2', zone: 'Patio', startTime: '06:45', durationSeconds: '480' })
+      .redirects(0);
+
+    expect(res.status).toBe(303);
+    expect(app.state.schedules).toEqual([{ channel: 2, zone: 'Patio', startTime: '06:45', durationSeconds: 480 }]);
+    expect(app.state.queue[0].type).toBe('schedule_update');
   });
 
   test('gui auth supports colons in password from env-style credentials', async () => {
@@ -164,10 +282,14 @@ describe('garden controller api', () => {
     expect(spec.paths['/api/relays']).toBeDefined();
     expect(spec.paths['/api/state']).toBeDefined();
     expect(spec.paths['/api/commands']).toBeDefined();
+    expect(spec.paths['/api/schedules']).toBeDefined();
     expect(spec.paths['/api/queue/next']).toBeDefined();
+    expect(spec.paths['/api/microcontroller/relays/state']).toBeDefined();
+    expect(spec.paths['/api/microcontroller/schedules']).toBeDefined();
     expect(spec.paths['/api/news']).toBeDefined();
     expect(spec.paths['/gui']).toBeDefined();
     expect(spec.paths['/gui/relays/{channel}/toggle']).toBeDefined();
+    expect(spec.paths['/gui/schedules']).toBeDefined();
     expect(spec.paths['/openapi.json']).toBeDefined();
   });
 });

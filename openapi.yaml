@@ -41,8 +41,43 @@ components:
         schedules:
           type: array
           items:
-            type: string
+            oneOf:
+              - type: string
+              - $ref: '#/components/schemas/PublishedSchedule'
       required: [relays, queueDepth, serverTime, schedules]
+    RelayStatePublish:
+      type: object
+      properties:
+        relays:
+          type: array
+          items:
+            $ref: '#/components/schemas/Relay'
+      required: [relays]
+    PublishedSchedule:
+      type: object
+      properties:
+        channel:
+          type: integer
+          minimum: 1
+          maximum: 6
+        startTime:
+          type: string
+          description: Controller-local schedule start time label from the microcontroller.
+        zone:
+          type: string
+          description: Human-readable garden zone name.
+        durationSeconds:
+          type: integer
+          minimum: 1
+      required: [channel, zone, startTime, durationSeconds]
+    SchedulePublish:
+      type: object
+      properties:
+        schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublishedSchedule'
+      required: [schedules]
     CommandCreate:
       type: object
       properties:
@@ -93,6 +128,51 @@ paths:
       responses:
         '201':
           description: Command queued
+        '400':
+          description: Invalid payload
+  /api/microcontroller/relays/state:
+    post:
+      security:
+        - ApiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RelayStatePublish'
+      responses:
+        '200':
+          description: Relay state accepted and persisted
+        '400':
+          description: Invalid payload
+  /api/microcontroller/schedules:
+    post:
+      security:
+        - ApiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchedulePublish'
+      responses:
+        '200':
+          description: Schedules accepted and persisted
+        '400':
+          description: Invalid payload
+  /api/schedules:
+    post:
+      security:
+        - ApiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchedulePublish'
+      responses:
+        '201':
+          description: Schedules stored and queued for microcontroller
         '400':
           description: Invalid payload
   /api/queue/next:
@@ -147,3 +227,12 @@ paths:
           description: Relay toggle command queued and redirected to /gui
         '400':
           description: Invalid relay channel
+  /gui/schedules:
+    post:
+      security:
+        - basicAuth: []
+      responses:
+        '303':
+          description: Schedule update queued and redirected to /gui
+        '400':
+          description: Invalid schedule payload
