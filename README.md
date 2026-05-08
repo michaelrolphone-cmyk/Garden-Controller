@@ -35,15 +35,20 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 - `GET /api/state` - current controller state payload:
   - desired and reported relay states
   - queued command depth (`status = queued`)
+  - delivered command depth (`status = delivered`)
+  - active long polls currently waiting (`pendingPolls`)
   - command history (acknowledged commands)
   - server UTC time (`ISO-8601`)
   - schedules
+  - latest microcontroller telemetry snapshot
 - `POST /api/commands` - queue relay command and update desired relay state.
   - body:
     ```json
     { "channel": 1, "action": "on", "requestedBy": "gui" }
     ```
-- `GET /api/queue/next` - microcontroller polls next command; returns `204` when queue is empty.
+- `GET /api/queue/next` - microcontroller fetches next command.
+  - supports optional query param `wait` (seconds, max `25`) for long-polling: `GET /api/queue/next?wait=25`
+  - when queue is empty and `wait` is provided, server holds request until a command arrives or timeout returns `204`
   - response body (`200`):
     ```json
     {
@@ -111,11 +116,13 @@ Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are e
 ## Microcontroller polling + acknowledgement flow
 
 1. GUI/API client queues command using `POST /api/commands` or GUI explicit ON/OFF control (desired state updates immediately).
-2. ESP32 calls `GET /api/queue/next` on interval.
-3. API marks first queued command as `delivered` and returns it.
+2. ESP32 opens `GET /api/queue/next?wait=25`.
+3. API immediately returns the first queued command as `delivered`, or holds the request up to 25 seconds and returns `204` on timeout.
 4. ESP32 executes relay/schedule action locally.
-5. ESP32 calls `POST /api/microcontroller/commands/:id/ack` with `applied` or `failed`.
-6. ESP32 publishes reported relay and telemetry state via `POST /api/microcontroller/state` (or narrow endpoints).
+5. ESP32 immediately opens the next long-poll request.
+6. ESP32 calls `POST /api/microcontroller/commands/:id/ack` with `applied` or `failed`.
+7. Acknowledged commands are archived to `commandHistory` and removed from active queue.
+8. ESP32 publishes reported relay and telemetry state via `POST /api/microcontroller/state` (or narrow endpoints).
 
 ## CLI commands
 
