@@ -25,6 +25,19 @@ describe('garden controller api', () => {
     const relaysRes = await request(app).get('/api/relays').set('x-api-token', token);
     expect(relaysRes.body.desiredRelays[0].state).toBe('on');
     expect(relaysRes.body.reportedRelays[0].state).toBe('off');
+    expect(relaysRes.body.zoneColors).toHaveLength(5);
+    expect(relaysRes.body.zoneColors[0].hex).toBe('#3b82f6');
+  });
+
+  test('api and gui state expose uniform zone colors', async () => {
+    const app = build();
+    const apiRes = await request(app).get('/api/state').set('x-api-token', token);
+    expect(apiRes.status).toBe(200);
+    expect(apiRes.body.zoneColors[3].rgb).toEqual({ r: 168, g: 85, b: 247 });
+
+    const guiRes = await request(app).get('/gui/state').set('Authorization', auth);
+    expect(guiRes.status).toBe(200);
+    expect(guiRes.body.zoneColors).toEqual(apiRes.body.zoneColors);
   });
 
   test('queue lifecycle delivered -> applied with ack endpoint', async () => {

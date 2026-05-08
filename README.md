@@ -37,7 +37,7 @@ API_KEY=change-me GUI_USERNAME=admin GUI_PASSWORD=change-me npm start
 All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 
 - `GET /health` - health check.
-- `GET /api/relays` - desired vs reported relay states:
+- `GET /api/relays` - desired vs reported relay states and canonical `zoneColors` (hex + RGB) for zones 1-5:
   - `desiredRelays`: what API/GUI requested.
   - `reportedRelays`: what firmware last published.
 - `GET /api/state` - current controller state payload:
@@ -49,6 +49,7 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
   - server UTC time (`ISO-8601`)
   - schedules
   - latest microcontroller telemetry snapshot
+  - canonical `zoneColors` used by firmware RGB LED, firmware UI, and Node.js GUI
 - `POST /api/commands` - queue relay command and update desired relay state.
   - body:
     ```json
@@ -166,7 +167,7 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
 - `POST /gui/schedules/:id/delete` - delete a single schedule row by `id` directly from the update rows form and queue a replacement full schedule update for firmware.
 - `POST /gui/spigots/run` - queue a timed spigot run from GUI (`minutes`, default 15) and redirect to `/gui`.
 - `POST /gui/spigots/stop` - queue a spigot stop command from GUI and redirect to `/gui`.
-- `GET /gui/state` - basic-auth protected JSON state payload used by the GUI for 1-second incremental updates of relay/schedule/hardware status, including `latestSensorData` and full `deviceTelemetry`.
+- `GET /gui/state` - basic-auth protected JSON state payload used by the GUI for 1-second incremental updates of relay/schedule/hardware status, including `latestSensorData`, full `deviceTelemetry`, and canonical `zoneColors`.
 
 Use `GUI_USERNAME` and `GUI_PASSWORD` as HTTP Basic credentials. If values are entered in Heroku with surrounding quotes, the app normalizes them automatically.
 
