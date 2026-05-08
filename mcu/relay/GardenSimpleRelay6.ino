@@ -7,6 +7,7 @@
 #include <WiFiClientSecure.h>
 #include <time.h>
 #include <sys/time.h>
+#include <Adafruit_NeoPixel.h>
 
 // GardenSimpleRelay6.ino
 // Simple 6-zone relay watering controller for Waveshare Industrial ESP32-S3 6CH relay board.
@@ -29,22 +30,16 @@ static const uint8_t RELAY_OFF = LOW;
 
 static const bool ENABLE_BUZZER = true;
 static const uint8_t BUZZER_PIN = 21;
-static const uint8_t RGB_LED_PIN_R = 38;
-static const uint8_t RGB_LED_PIN_G = 39;
-static const uint8_t RGB_LED_PIN_B = 40;
-static const uint8_t RGB_LED_CHANNEL_R = 0;
-static const uint8_t RGB_LED_CHANNEL_G = 1;
-static const uint8_t RGB_LED_CHANNEL_B = 2;
-static const uint16_t RGB_LED_PWM_FREQ = 5000;
-static const uint8_t RGB_LED_PWM_BITS = 8;
+static const uint8_t RGB_LED_PIN = 38;
+static const uint8_t RGB_LED_COUNT = 1;
 // Passive buzzer volume reduction by duty cycle.
 // Prior chirp used ~50% duty. 5% duty is roughly 1/10 of that drive time.
 static const uint8_t BUZZER_DUTY_PERCENT = 5;
-static const uint8_t RGB_LED_PINS[3] = {RGB_LED_PIN_R, RGB_LED_PIN_G, RGB_LED_PIN_B};
 
 WebServer server(80);
 DNSServer dns;
 Preferences prefs;
+Adafruit_NeoPixel statusPixel(RGB_LED_COUNT, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 
 IPAddress apIp(192, 168, 4, 1);
 IPAddress apGw(192, 168, 4, 1);
@@ -171,28 +166,6 @@ bool parseStartTimeToZone(const char* startTime, uint8_t& hourOut, uint8_t& minu
 bool ackRemoteCommand(const char* commandId, const char* status);
 void remoteTask(void* param);
 
-static inline uint8_t rgbChannelToPin(uint8_t channel) {
-  return RGB_LED_PINS[channel];
-}
-
-static inline void configureRgbPwmChannel(uint8_t pin, uint8_t channel) {
-#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  (void)channel;
-  ledcAttach(pin, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
-#else
-  ledcSetup(channel, RGB_LED_PWM_FREQ, RGB_LED_PWM_BITS);
-  ledcAttachPin(pin, channel);
-#endif
-}
-
-static inline void writeRgbPwmDuty(uint8_t channel, uint8_t duty) {
-#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcWrite(rgbChannelToPin(channel), duty);
-#else
-  ledcWrite(channel, duty);
-#endif
-}
-
 String two(int v) {
   return v < 10 ? "0" + String(v) : String(v);
 }
@@ -307,9 +280,8 @@ const ZoneColor ZONE_COLORS[ZONE_COUNT] = {
 };
 
 void setRgbLed(uint8_t r, uint8_t g, uint8_t b) {
-  writeRgbPwmDuty(RGB_LED_CHANNEL_R, r);
-  writeRgbPwmDuty(RGB_LED_CHANNEL_G, g);
-  writeRgbPwmDuty(RGB_LED_CHANNEL_B, b);
+  statusPixel.setPixelColor(0, statusPixel.Color(r, g, b));
+  statusPixel.show();
 }
 
 void updateZoneRgbLed() {
@@ -1844,13 +1816,9 @@ void setup() {
 
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
-  pinMode(RGB_LED_PIN_R, OUTPUT);
-  pinMode(RGB_LED_PIN_G, OUTPUT);
-  pinMode(RGB_LED_PIN_B, OUTPUT);
-  configureRgbPwmChannel(RGB_LED_PIN_R, RGB_LED_CHANNEL_R);
-  configureRgbPwmChannel(RGB_LED_PIN_G, RGB_LED_CHANNEL_G);
-  configureRgbPwmChannel(RGB_LED_PIN_B, RGB_LED_CHANNEL_B);
-  setRgbLed(0, 0, 0);
+  statusPixel.begin();
+  statusPixel.clear();
+  statusPixel.show();
 
   for (uint8_t i = 0; i < RELAY_COUNT; i++) {
     pinMode(RELAY_PINS[i], OUTPUT);
