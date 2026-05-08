@@ -140,6 +140,10 @@ void handleSpigotRun();
 void handleAllOff();
 void handleBuzzerTest();
 void handleFactoryReset();
+void handleApiFeatures();
+void handleApiConfigGet();
+void handleApiConfigSet();
+void handleApiScheduleSet();
 void handleRemoteConfig();
 void handleRemoteTest();
 void publishRelayStateNow();
@@ -1348,6 +1352,64 @@ void handleFactoryReset() {
   ESP.restart();
 }
 
+
+void handleApiFeatures() {
+  StaticJsonDocument<1024> doc;
+  doc["ok"] = true;
+  doc["firmwareVersion"] = FIRMWARE_VERSION;
+  doc["zoneCount"] = ZONE_COUNT;
+  doc["relayCount"] = RELAY_COUNT;
+  doc["masterValveChannel"] = MASTER_RELAY_CHANNEL;
+  JsonArray telemetry = doc.createNestedArray("telemetry");
+  telemetry.add("clock"); telemetry.add("wifi"); telemetry.add("relays"); telemetry.add("schedules"); telemetry.add("currentRun"); telemetry.add("spigotRun"); telemetry.add("sensorData"); telemetry.add("targetLocation");
+  JsonArray controls = doc.createNestedArray("controls");
+  controls.add("syncTime"); controls.add("manualRun"); controls.add("spigotRun"); controls.add("setRelay"); controls.add("allOff"); controls.add("buzzerTest"); controls.add("factoryReset");
+  String out; serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+void handleApiConfigGet() {
+  StaticJsonDocument<2048> doc;
+  doc["ok"] = true;
+  JsonObject cfg = doc.createNestedObject("config");
+  cfg["apSsid"] = apSsid; cfg["apPass"] = apPass; cfg["staSsid"] = staSsid; cfg["staPass"] = staPass;
+  cfg["remoteEnabled"] = remoteEnabled; cfg["remoteApiBase"] = remoteApiBase; cfg["remoteDeviceId"] = remoteDeviceId; cfg["remoteApiKey"] = remoteApiKey;
+  cfg["remoteIntervalSeconds"] = remoteIntervalSeconds; cfg["gardenLatitude"] = gardenLatitude; cfg["gardenLongitude"] = gardenLongitude; cfg["gardenTimeZone"] = gardenTimeZone; cfg["gardenPosixTimeZone"] = gardenPosixTimeZone;
+  JsonArray z = cfg.createNestedArray("zones");
+  for (uint8_t i = 0; i < ZONE_COUNT; i++) { JsonObject o = z.createNestedObject(); o["zone"] = i + 1; o["enabled"] = zones[i].enabled; o["name"] = zones[i].name; }
+  String out; serializeJson(doc, out); server.send(200, "application/json", out);
+}
+
+void handleApiConfigSet() {
+  StaticJsonDocument<3072> doc;
+  if (!server.hasArg("plain") || deserializeJson(doc, server.arg("plain"))) { server.send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}"); return; }
+  if (doc["apSsid"].is<const char*>()) strlcpy(apSsid, doc["apSsid"], sizeof(apSsid));
+  if (doc["apPass"].is<const char*>()) { String p = doc["apPass"].as<String>(); if (p.length() == 0 || (p.length() >= 8 && p.length() <= 63)) strlcpy(apPass, p.c_str(), sizeof(apPass)); }
+  if (doc["staSsid"].is<const char*>()) strlcpy(staSsid, doc["staSsid"], sizeof(staSsid));
+  if (doc["staPass"].is<const char*>()) strlcpy(staPass, doc["staPass"], sizeof(staPass));
+  if (doc["remoteEnabled"].is<bool>()) remoteEnabled = doc["remoteEnabled"];
+  if (doc["remoteApiBase"].is<const char*>()) strlcpy(remoteApiBase, doc["remoteApiBase"], sizeof(remoteApiBase));
+  if (doc["remoteDeviceId"].is<const char*>()) strlcpy(remoteDeviceId, doc["remoteDeviceId"], sizeof(remoteDeviceId));
+  if (doc["remoteApiKey"].is<const char*>()) strlcpy(remoteApiKey, doc["remoteApiKey"], sizeof(remoteApiKey));
+  if (doc["remoteIntervalSeconds"].is<int>()) remoteIntervalSeconds = constrain((int)doc["remoteIntervalSeconds"], 15, 3600);
+  if (doc["gardenLatitude"].is<double>()) gardenLatitude = doc["gardenLatitude"];
+  if (doc["gardenLongitude"].is<double>()) gardenLongitude = doc["gardenLongitude"];
+  if (doc["gardenTimeZone"].is<const char*>()) strlcpy(gardenTimeZone, doc["gardenTimeZone"], sizeof(gardenTimeZone));
+  if (doc["gardenPosixTimeZone"].is<const char*>()) strlcpy(gardenPosixTimeZone, doc["gardenPosixTimeZone"], sizeof(gardenPosixTimeZone));
+  if (doc["zones"].is<JsonArray>()) { for (JsonObject z : doc["zones"].as<JsonArray>()) { int zone = z["zone"] | 0; if (zone < 1 || zone > ZONE_COUNT) continue; uint8_t i = zone - 1; if (z["enabled"].is<bool>()) zones[i].enabled = z["enabled"]; if (z["name"].is<const char*>()) strlcpy(zones[i].name, z["name"], sizeof(zones[i].name)); }}
+  setupGardenTimeZone(); saveConfig(); publishSchedulesNow(); publishFullStateNow(); if (strlen(staSsid) > 0) connectSta(false);
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void handleApiScheduleSet() {
+  if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"ok\":false,\"error\":\"expected json body\"}"); return; }
+  StaticJsonDocument<4096> doc;
+  if (deserializeJson(doc, server.arg("plain")) || !doc["schedules"].is<JsonArray>()) { server.send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}"); return; }
+  applyScheduleArray(doc["schedules"].as<JsonArray>());
+  publishFullStateNow();
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 const char MAIN_PAGE[] PROGMEM = R"rawliteral(
 <!doctype html>
 <html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Garden Relay 5 + Master</title>
@@ -1359,7 +1421,7 @@ const char MAIN_PAGE[] PROGMEM = R"rawliteral(
 <main><section class="card"><h2>Zone Map</h2><div id="map" class="map"></div></section><section class="card"><h2>Current Run</h2><div id="runText" class="muted">Idle</div><div class="meter"><div id="runFill" class="fill"></div></div></section><section class="card"><h2>Spigots / Master Valve</h2><div id="spigotText" class="muted">loading</div><button class="btn" onclick="spigots()">Run Spigots</button><button class="btn danger" onclick="api('/api/spigots-run?action=off')">Stop Spigots</button></section><section class="card"><h2>Schedule</h2><div id="schedule"></div></section></main>
 <script>
 function fmtRemain(ms){ms=Math.max(0,ms||0);return Math.floor(ms/60000)+'m '+(Math.floor(ms/1000)%60)+'s'}
-async function api(url){await fetch(url); refresh()}
+async function api(url,opt){await fetch(url,Object.assign({headers:{'Content-Type':'application/json'}},opt||{})); refresh()}
 async function allOff(){await api('/api/alloff')}
 async function syncTime(){await api('/api/time/set?epoch='+Math.floor(Date.now()/1000))}
 async function manual(zone){const m=prompt('Run Zone '+zone+' for how many minutes?','15');if(m)await api('/api/manual-run?zone='+zone+'&minutes='+encodeURIComponent(m))}
@@ -1422,7 +1484,11 @@ String adminPage() {
     h += "<div class='card'><h3>Zone " + String(i + 1) + "</h3>";
     h += "<label><input type='checkbox' name='" + p + "enabled' " + String(zones[i].enabled ? "checked" : "") + "> Enabled</label>";
     h += "<label>Name<input name='" + p + "name' value='" + htmlEscape(zones[i].name) + "'></label>";
-    h += "<button type='button' onclick=\"const m=prompt('Run Zone " + String(i + 1) + " for how many minutes?','15'); if(m) fetch('/api/manual-run?zone=" + String(i + 1) + "&minutes='+encodeURIComponent(m)).then(()=>location.reload())\">Run Now</button>";
+    h += "<div>";
+    h += "<button type='button' onclick=\"fetch('/api/relay?zone=" + String(i + 1) + "&state=1').then(()=>location.reload())\">Turn On</button>";
+    h += "<button type='button' onclick=\"fetch('/api/relay?zone=" + String(i + 1) + "&state=0').then(()=>location.reload())\">Turn Off</button>";
+    h += "<button type='button' onclick=\"const m=prompt('Run Zone " + String(i + 1) + " for how many minutes?','15'); if(m) fetch('/api/manual-run?zone=" + String(i + 1) + "&minutes='+encodeURIComponent(m)).then(()=>location.reload())\">Run Timed</button>";
+    h += "</div>";
     h += "</div>";
   }
   h += "</div></section>";
@@ -1434,6 +1500,14 @@ String adminPage() {
     h += "\n";
   }
   h += "</textarea></section><button>Save Settings</button></form>";
+  h += "<section class='card'><h2>API Schedule Manager</h2><p>Uses firmware API directly to set all schedule rows.</p><div id='apiSchedRows'></div><button type='button' onclick='addApiScheduleRow()'>Add Row</button><button type='button' onclick='applyApiSchedules()'>Apply Schedules via API</button></section>";
+  h += "<script>";
+  h += "async function loadApiState(){const r=await fetch('/api/state',{cache:'no-store'});return r.json()}";
+  h += "function addApiScheduleRow(v){const c=document.getElementById('apiSchedRows');const d=document.createElement('div');d.className='grid';d.innerHTML=`<input placeholder=Zone min=1 max=5 type=number value='${(v&&v.zone)||1}'/><input placeholder=HH:MM value='${(v&&v.timeValue)||\"06:00\"}'/><input placeholder=Minutes min=1 max=240 type=number value='${(v&&v.runMinutes)||10}'/><select><option value='on'>on</option><option value='off'>off</option></select><button type=button onclick='this.parentElement.remove()'>Delete</button>`;if(v&&v.enabled===false){d.querySelector('select').value='off';}c.appendChild(d)}";
+  h += "async function seedApiRows(){const s=await loadApiState();(s.dailySchedules||[]).forEach(addApiScheduleRow)}";
+  h += "async function applyApiSchedules(){const rows=[...document.querySelectorAll('#apiSchedRows .grid')];const schedules=rows.map(r=>({channel:Number(r.children[0].value),startTime:r.children[1].value,durationSeconds:Number(r.children[2].value)*60,enabled:r.children[3].value==='on'}));const res=await fetch('/api/schedules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedules})});if(!res.ok){alert('Failed to apply schedules');return;}alert('Schedules updated');location.reload()}";
+  h += "seedApiRows();";
+  h += "</script>";
   h += "<section class='card'><h2>Reset</h2><button class='danger' onclick=\"if(confirm('Factory reset settings?'))fetch('/api/factory-reset').then(r=>r.text()).then(alert)\">Factory Reset</button></section>";
   h += "</main></body></html>";
   return h;
@@ -1443,8 +1517,32 @@ void handleRoot() {
   server.send(200, "text/html", FPSTR(MAIN_PAGE));
 }
 
+const char ADMIN_PAGE[] PROGMEM = R"rawliteral(
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Garden Relay Admin</title>
+<style>
+body{font-family:Inter,Arial,sans-serif;margin:0;background:#f1f5f9;color:#123}.shell{max-width:1200px;margin:0 auto;padding:12px}.panel{background:#fff;border:1px solid #dbe7ef;border-radius:16px;padding:14px;margin-bottom:12px}
+.layout{display:grid;grid-template-columns:1fr 1.4fr;gap:12px}.relay-grid{list-style:none;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.relay-card{border:1px solid #d8e3eb;border-radius:12px;padding:10px}
+.zone{fill:rgba(62,184,255,.15);stroke:rgba(62,184,255,.82);stroke-width:2}.zone-active{fill:rgba(62,184,255,.62)} .status-mismatch{color:#b42345} .status-synced{color:#18794e}
+.timeline{display:grid;gap:8px}.timeline-row{display:grid;grid-template-columns:130px 1fr;gap:8px}.timeline-track{height:26px;background:#f3f7fb;border:1px solid #d8e3eb;border-radius:999px;position:relative}.timeline-block{position:absolute;top:2px;height:20px;border-radius:999px;background:#22c55e;color:#fff;font-size:.75rem;padding:0 8px;display:flex;align-items:center;white-space:nowrap}
+button,input{border:1px solid #c7d8e5;border-radius:8px;padding:7px} .actions{display:flex;gap:6px;align-items:center}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.relay-grid{grid-template-columns:1fr}}
+</style></head><body><div class="shell">
+<section class="panel"><h1>Castle Hills Garden Manager (Firmware Local)</h1><p id="meta">Loading state...</p><p><a href="/">Mobile View</a></p></section>
+<div class="layout"><section class="panel"><h2>Garden Zone Map</h2><svg viewBox="0 0 295.743 295.482"><polygon id="zone-4b" class="zone" points="127.534,159.189 124.128,239.478 15.618,232.055 22.68,152.017 127.534,159.189"/><polygon id="zone-4a" class="zone" points="146.876,95.99 134.762,166.15 198.935,169.661 205.581,96.842 146.876,95.99"/><polygon id="zone-1" class="zone" points="205.581,96.842 264.287,97.694 263.108,173.173 198.935,169.661 205.581,96.842"/><polygon id="zone-5" class="zone" points="32,46.388 46.493,52.635 95.676,139.247 128.342,140.128 127.534,159.189 22.68,152.017 32,46.388"/><polygon id="zone-3" class="zone" points="152.903,89.893 152.691,13.195 50.949,12.06 136.836,89.869 152.903,89.893"/><polygon id="zone-2" class="zone" points="249.304,90.041 249.095,14.271 152.691,13.195 152.903,89.893 249.304,90.041"/></svg></section>
+<section class="panel"><h2>Zones (scheduled irrigation)</h2><ul id="relay-grid" class="relay-grid"></ul><h3>Schedule Timeline</h3><div id="timeline"></div></section></div>
+</div>
+<script>
+function zids(ch){if(ch===4)return ['zone-4a','zone-4b'];return ['zone-'+ch]}
+function buildTimelineRows(s){const m={};(s||[]).forEach(x=>{const k=`${x.channel}:${x.zone}`;(m[k]=m[k]||{zone:x.zone,channel:x.channel,schedules:[]}).schedules.push(x)});return Object.values(m)}
+function renderTimeline(rows){if(!rows.length)return '<p>No schedules configured.</p>';return `<div class=timeline>${rows.map(r=>{const b=r.schedules.map(s=>{const p=String(s.startTime||'00:00').split(':');const l=((Number(p[0])*60+Number(p[1]))/1440)*100;const w=Math.max(2,Math.min(((Number(s.durationSeconds)||60)/86400)*100,100-l));return `<span class=timeline-block style="left:${l}%;width:${w}%">${s.startTime} · ${Math.max(1,Math.round((Number(s.durationSeconds)||0)/60))} min</span>`}).join('');return `<div class=timeline-row><span>Zone ${r.channel}</span><div class=timeline-track>${b}</div></div>`}).join('')}</div>`}
+async function cmd(url){await fetch(url);await refresh()}
+async function refresh(){const s=await (await fetch('/api/state',{cache:'no-store'})).json();meta.textContent=`${s.date} ${s.time} · WiFi ${s.homeWifiConnected?s.homeIp:s.homeWifiStatus} · Master ${s.masterValveOn?'ON':'OFF'}`;const rg=document.getElementById('relay-grid');rg.innerHTML=(s.zones||[]).map(z=>`<li class=relay-card><div><b>Zone ${z.zone}</b> <span class='${z.relayOn?'status-synced':'status-mismatch'}'>${z.relayOn?'ON':'OFF'}</span></div><div class=actions><button onclick="cmd('/api/relay?zone=${z.zone}&state=1')">Run</button><button onclick="cmd('/api/relay?zone=${z.zone}&state=0')">Stop</button><input id="m${z.zone}" type=number min=1 max=240 value=15><button onclick="cmd('/api/manual-run?zone=${z.zone}&minutes='+encodeURIComponent(document.getElementById('m${z.zone}').value))">Timed</button></div></li>`).join('');(s.zones||[]).forEach(z=>zids(z.channel).forEach(id=>{const e=document.getElementById(id);if(e)e.classList.toggle('zone-active',!!z.relayOn)}));document.getElementById('timeline').innerHTML=renderTimeline(buildTimelineRows((s.dailySchedules||[]).map(d=>({channel:d.channel,zone:d.name||('Zone '+d.zone),startTime:d.timeValue||'00:00',durationSeconds:(d.runMinutes||1)*60}))));}
+refresh();setInterval(refresh,1000);
+</script></body></html>
+)rawliteral";
+
 void handleAdmin() {
-  server.send(200, "text/html", adminPage());
+  server.send(200, "text/html", FPSTR(ADMIN_PAGE));
 }
 
 void handleSaveAdmin() {
@@ -1595,6 +1693,10 @@ void setupServer() {
   server.on("/admin/save", HTTP_POST, handleSaveAdmin);
 
   server.on("/api/state", HTTP_GET, sendStateJson);
+  server.on("/api/features", HTTP_GET, handleApiFeatures);
+  server.on("/api/config", HTTP_GET, handleApiConfigGet);
+  server.on("/api/config", HTTP_POST, handleApiConfigSet);
+  server.on("/api/schedules", HTTP_POST, handleApiScheduleSet);
   server.on("/api/time/set", HTTP_GET, handleSetTime);
   server.on("/api/relay", HTTP_GET, handleRelay);
   server.on("/api/manual-run", HTTP_GET, handleManualRun);
