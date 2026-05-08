@@ -138,6 +138,10 @@ describe('garden controller api', () => {
     expect(guiRes.text).toContain('/gui/relays/1/off');
     expect(guiRes.text).toContain('timeline-track');
     expect(guiRes.text).toContain('Raw schedule list');
+    expect(guiRes.text).toContain('Environmental Monitoring (43.665288, -116.259186)');
+    expect(guiRes.text).toContain('overlay=radar');
+    expect(guiRes.text).toContain('overlay=satellite');
+    expect(guiRes.text).toContain('USGS National Map (3DEP)');
     expect(guiRes.text).not.toContain('/gui/relays/1/toggle');
   });
 
