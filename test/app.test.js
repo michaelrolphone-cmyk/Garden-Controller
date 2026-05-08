@@ -241,6 +241,30 @@ describe('garden controller api', () => {
     expect(res.body.command.schedules).toEqual([]);
   });
 
+
+  test('gui timeline groups multiple daily runs for same zone into one row', async () => {
+    const app = build();
+    await request(app)
+      .post('/api/schedules')
+      .set('x-api-token', token)
+      .send({ schedules: [
+        { channel: 1, zone: 'Zone 1', enabled: true, startTime: '06:00', durationSeconds: 600 },
+        { channel: 1, zone: 'Zone 1', enabled: true, startTime: '15:30', durationSeconds: 420 },
+        { channel: 2, zone: 'Zone 2', enabled: true, startTime: '07:00', durationSeconds: 300 }
+      ] });
+
+    const guiRes = await request(app).get('/gui').set('authorization', auth);
+    expect(guiRes.status).toBe(200);
+
+    const zone1RowMatches = guiRes.text.match(/<div class="timeline-row"><span class="timeline-zone">Zone 1<\/span>/g) || [];
+    expect(zone1RowMatches).toHaveLength(1);
+
+    const zone1Row = guiRes.text.match(/<div class="timeline-row"><span class="timeline-zone">Zone 1<\/span><div class="timeline-track">([\s\S]*?)<\/div><\/div>/);
+    expect(zone1Row).not.toBeNull();
+    const zone1Blocks = (zone1Row[1].match(/class="timeline-block"/g) || []).length;
+    expect(zone1Blocks).toBe(2);
+  });
+
   test('gui does not prefill phantom 6:00 zone 1 schedule when no schedules are configured', async () => {
     const app = build();
     const guiRes = await request(app).get('/gui').set('authorization', auth);

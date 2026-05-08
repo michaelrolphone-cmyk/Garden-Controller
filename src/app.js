@@ -161,6 +161,38 @@ function createSpigotCommand({ action, durationSeconds, requestedBy }) {
   };
 }
 
+
+function buildTimelineRows(schedules) {
+  return schedules.reduce((rows, schedule) => {
+    const key = `${schedule.channel}:${schedule.zone}`;
+    const existingRow = rows.find((row) => row.key === key);
+    if (existingRow) {
+      existingRow.schedules.push(schedule);
+    } else {
+      rows.push({ key, channel: schedule.channel, zone: schedule.zone, schedules: [schedule] });
+    }
+    return rows;
+  }, []);
+}
+
+function renderTimelineMarkup(rows) {
+  if (!rows.length) return '<p>No schedules configured.</p>';
+  return `<div class="timeline">${rows
+    .map((row) => {
+      const blocksMarkup = row.schedules
+        .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)))
+        .map((schedule) => {
+          const [hoursText = '0', minutesText = '0'] = String(schedule.startTime || '00:00').split(':');
+          const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
+          const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
+          const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
+          return `<span class="timeline-block" style="left:${leftPercent}%;width:${widthPercent}%">${schedule.startTime} · ${Math.max(1, Math.round((Number(schedule.durationSeconds) || 0) / 60))} min</span>`;
+        })
+        .join('');
+      return `<div class="timeline-row"><span class="timeline-zone">${row.zone}</span><div class="timeline-track">${blocksMarkup}</div></div>`;
+    })
+    .join('')}</div>`;
+}
 function formatScheduleLabel(schedule) {
   if (typeof schedule === 'string') {
     return schedule;
@@ -792,33 +824,8 @@ function createApp(config = {}) {
       .filter((schedule) => typeof schedule === 'object' && schedule)
       .map((schedule, index) => ({ id: schedule.id ?? index, ...schedule }))
       .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
-    const timelineRows = parsedSchedules.reduce((rows, schedule) => {
-      const key = `${schedule.channel}:${schedule.zone}`;
-      const existingRow = rows.find((row) => row.key === key);
-      if (existingRow) {
-        existingRow.schedules.push(schedule);
-      } else {
-        rows.push({ key, channel: schedule.channel, zone: schedule.zone, schedules: [schedule] });
-      }
-      return rows;
-    }, []);
-    const scheduleTimelineMarkup = timelineRows.length
-      ? `<div class="timeline">${timelineRows
-          .map((row) => {
-            const blocksMarkup = row.schedules
-              .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)))
-              .map((schedule) => {
-                const [hoursText = '0', minutesText = '0'] = String(schedule.startTime || '00:00').split(':');
-                const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
-                const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
-                const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
-                return `<span class="timeline-block" style="left:${leftPercent}%;width:${widthPercent}%">${schedule.startTime} · ${Math.max(1, Math.round((Number(schedule.durationSeconds) || 0) / 60))} min</span>`;
-              })
-              .join('');
-            return `<div class="timeline-row"><span class="timeline-zone">${row.zone}</span><div class="timeline-track">${blocksMarkup}</div></div>`;
-          })
-          .join('')}</div>`
-      : '<p>No schedules configured.</p>';
+    const timelineRows = buildTimelineRows(parsedSchedules);
+    const scheduleTimelineMarkup = renderTimelineMarkup(timelineRows);
     const schedulesMarkup = state.schedules.length ? `<ul>${state.schedules.map((schedule) => `<li>${formatScheduleLabel(schedule)}</li>`).join('')}</ul>` : '';
     const defaultSchedules = parsedSchedules;
     const sensorDataMarkup = renderSensorDataMarkup(state.latestSensorData, state.deviceTelemetry);
@@ -993,13 +1000,26 @@ function createApp(config = {}) {
           .filter((schedule) => typeof schedule === 'object' && schedule)
           .map((schedule, index) => ({ id: schedule.id ?? index, ...schedule }))
           .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+        const timelineRows = parsedSchedules.reduce((rows, schedule) => {
+          const key = \`\${schedule.channel}:\${schedule.zone}\`;
+          const existingRow = rows.find((row) => row.key === key);
+          if (existingRow) {
+            existingRow.schedules.push(schedule);
+          } else {
+            rows.push({ key, channel: schedule.channel, zone: schedule.zone, schedules: [schedule] });
+          }
+          return rows;
+        }, []);
         const scheduleTimeline = document.getElementById('schedule-timeline');
-        scheduleTimeline.innerHTML = parsedSchedules.length ? \`<div class="timeline">\${parsedSchedules.map((schedule) => {
-          const [hoursText = '0', minutesText = '0'] = String(schedule.startTime || '00:00').split(':');
-          const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
-          const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
-          const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
-          return \`<div class="timeline-row"><span class="timeline-zone">\${schedule.zone}</span><div class="timeline-track"><span class="timeline-block" style="left:\${leftPercent}%;width:\${widthPercent}%">\${schedule.startTime} · \${Math.max(1, Math.round((Number(schedule.durationSeconds) || 0) / 60))} min</span></div></div>\`;
+        scheduleTimeline.innerHTML = timelineRows.length ? \`<div class="timeline">\${timelineRows.map((row) => {
+          const blocksMarkup = row.schedules.sort((a, b) => String(a.startTime).localeCompare(String(b.startTime))).map((schedule) => {
+            const [hoursText = '0', minutesText = '0'] = String(schedule.startTime || '00:00').split(':');
+            const startMinutes = Number.parseInt(hoursText, 10) * 60 + Number.parseInt(minutesText, 10);
+            const leftPercent = Math.max(0, Math.min((startMinutes / 1440) * 100, 100));
+            const widthPercent = Math.max(2, Math.min(((Number(schedule.durationSeconds) || 60) / 86400) * 100, 100 - leftPercent));
+            return \`<span class="timeline-block" style="left:\${leftPercent}%;width:\${widthPercent}%">\${schedule.startTime} · \${Math.max(1, Math.round((Number(schedule.durationSeconds) || 0) / 60))} min</span>\`;
+          }).join('');
+          return \`<div class="timeline-row"><span class="timeline-zone">\${row.zone}</span><div class="timeline-track">\${blocksMarkup}</div></div>\`;
         }).join('')}</div>\` : '<p>No schedules configured.</p>';
         const rawSchedules = document.getElementById('raw-schedules');
         rawSchedules.innerHTML = schedules.length ? \`<ul>\${schedules.map((schedule) => \`<li>\${formatScheduleLabel(schedule)}</li>\`).join('')}</ul>\` : '';
