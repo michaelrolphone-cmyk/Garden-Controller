@@ -8,7 +8,7 @@ describe('garden controller api', () => {
   const auth = `Basic ${Buffer.from('admin:password').toString('base64')}`;
 
   function build() {
-    return createApp({ guiUsername: 'admin', guiPassword: 'password' }).app;
+    return createApp({ apiKey: token, guiUsername: 'admin', guiPassword: 'password' }).app;
   }
 
   test('health check', async () => {
@@ -24,6 +24,7 @@ describe('garden controller api', () => {
 
   test('publishes full controller state', async () => {
     const app = createApp({
+      apiKey: token,
       guiUsername: 'admin',
       guiPassword: 'password',
       state: {
@@ -194,7 +195,7 @@ describe('garden controller api', () => {
   });
 
   test('gui toggle control queues a command', async () => {
-    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' });
+    const app = createApp({ apiKey: token, guiUsername: 'admin', guiPassword: 'password' });
 
     const res = await request(app.app)
       .post('/gui/relays/1/toggle')
@@ -207,7 +208,7 @@ describe('garden controller api', () => {
   });
 
   test('gui can save schedule and queue schedule update', async () => {
-    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' });
+    const app = createApp({ apiKey: token, guiUsername: 'admin', guiPassword: 'password' });
 
     const res = await request(app.app)
       .post('/gui/schedules')
@@ -222,7 +223,7 @@ describe('garden controller api', () => {
   });
 
   test('gui auth supports colons in password from env-style credentials', async () => {
-    const app = createApp({ guiUsername: 'admin', guiPassword: 'pa:ss:word' }).app;
+    const app = createApp({ apiKey: token, guiUsername: 'admin', guiPassword: 'pa:ss:word' }).app;
     const colonPasswordAuth = `Basic ${Buffer.from('admin:pa:ss:word').toString('base64')}`;
 
     const authorized = await request(app).get('/gui').set('authorization', colonPasswordAuth);
@@ -233,7 +234,7 @@ describe('garden controller api', () => {
     process.env.GUI_USERNAME = 'test';
     process.env.GUI_PASSWORD = 'test';
 
-    const app = createApp({}).app;
+    const app = createApp({ apiKey: token }).app;
     const envAuth = `Basic ${Buffer.from('test:test').toString('base64')}`;
     const authorized = await request(app).get('/gui').set('authorization', envAuth);
 
@@ -248,7 +249,7 @@ describe('garden controller api', () => {
     process.env.GUI_USERNAME = '"quoted-user"';
     process.env.GUI_PASSWORD = "'quoted-pass'";
 
-    const app = createApp({}).app;
+    const app = createApp({ apiKey: token }).app;
     const envAuth = `Basic ${Buffer.from('quoted-user:quoted-pass').toString('base64')}`;
     const authorized = await request(app).get('/gui').set('authorization', envAuth);
 
@@ -258,6 +259,28 @@ describe('garden controller api', () => {
     delete process.env.GUI_PASSWORD;
   });
 
+
+  test('reads quoted API token from process.env', async () => {
+    process.env.API_KEY = '"quoted-token"';
+
+    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' }).app;
+    const authorized = await request(app).get('/api/state').set('x-api-token', 'quoted-token');
+
+    expect(authorized.status).toBe(200);
+
+    delete process.env.API_KEY;
+  });
+
+  test('reads API token with surrounding whitespace from process.env', async () => {
+    process.env.API_KEY = '  spaced-token  ';
+
+    const app = createApp({ guiUsername: 'admin', guiPassword: 'password' }).app;
+    const authorized = await request(app).get('/api/state').set('x-api-token', 'spaced-token');
+
+    expect(authorized.status).toBe(200);
+
+    delete process.env.API_KEY;
+  });
 
   test('accepts lowercase basic auth scheme', async () => {
     const app = build();
