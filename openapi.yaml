@@ -25,6 +25,24 @@ components:
           type: string
           enum: [on, off]
       required: [channel, state]
+    ControllerState:
+      type: object
+      properties:
+        relays:
+          type: array
+          items:
+            $ref: '#/components/schemas/Relay'
+        queueDepth:
+          type: integer
+          minimum: 0
+        serverTime:
+          type: string
+          format: date-time
+        schedules:
+          type: array
+          items:
+            type: string
+      required: [relays, queueDepth, serverTime, schedules]
     CommandCreate:
       type: object
       properties:
@@ -51,6 +69,17 @@ paths:
       responses:
         '200':
           description: Current relay states
+  /api/state:
+    get:
+      security:
+        - ApiToken: []
+      responses:
+        '200':
+          description: Full controller state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllerState'
   /api/commands:
     post:
       security:
@@ -100,3 +129,21 @@ paths:
       responses:
         '200':
           description: OpenAPI document as JSON
+
+  /gui/relays/{channel}/toggle:
+    post:
+      security:
+        - basicAuth: []
+      parameters:
+        - name: channel
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 6
+      responses:
+        '303':
+          description: Relay toggle command queued and redirected to /gui
+        '400':
+          description: Invalid relay channel
