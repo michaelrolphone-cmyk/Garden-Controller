@@ -157,7 +157,7 @@ All `/api/*` endpoints require header: `x-api-token: <API_KEY>`.
   - per-relay explicit ON/OFF controls (based on reported state)
 - `POST /gui/relays/:channel/on` - queue a timed ON command from GUI (`minutes`, default 15) and redirect to `/gui`.
 - `POST /gui/relays/:channel/off` - queue an OFF command from GUI and redirect to `/gui`.
-- `POST /gui/schedules` - submit zone schedules from GUI (`durationMinutes`) and queue a schedule update command for the microcontroller; include `schedule[n][id]` to amend existing schedule entries instead of creating new identifiers.
+- `POST /gui/schedules` - submit zone schedules from GUI (`durationMinutes`) and queue a schedule update command for the microcontroller; include `schedule[n][id]` to amend existing schedule entries instead of creating new identifiers. The GUI always submits the full schedule list (existing rows + newly added time slots) so firmware receives complete daily schedules on each save.
 - `POST /gui/spigots/run` - queue a timed spigot run from GUI (`minutes`, default 15) and redirect to `/gui`.
 - `POST /gui/spigots/stop` - queue a spigot stop command from GUI and redirect to `/gui`.
 - `GET /gui/state` - basic-auth protected JSON state payload used by the GUI for 1-second incremental updates of relay/schedule/hardware status, including `latestSensorData` and full `deviceTelemetry`.
