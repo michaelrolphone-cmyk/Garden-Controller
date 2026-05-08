@@ -38,7 +38,8 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain('lastScheduleKey');
     expect(ino).toContain('scheduleEditorBusy()');
     expect(ino).toContain("style='max-width:70px'");
-    expect(ino).toContain("style='max-width:52px'");
+    expect(ino).toContain("style='max-width:62px'");
+    expect(ino).toContain("<input type='hidden' value='on' title='Enabled'>");
     expect(ino).toContain("<button class='danger' onclick=\"this.parentElement.remove()\">Delete</button>");
     expect(ino).toContain('const shouldRedrawSchedules=forceScheduleRedraw||nextScheduleKey!==lastScheduleKey');
     expect(ino).toContain('style="background:rgba(${rgb},0.08);border-color:rgba(${rgb},0.35)"');
