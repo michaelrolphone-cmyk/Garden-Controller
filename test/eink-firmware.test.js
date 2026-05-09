@@ -44,6 +44,8 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
   test('supports news/graph/schedule rotation and watering suppression', () => {
     expect(ino).toContain('Rotation period: 4 minutes');
     expect(ino).toContain('if (state.run.active) { strlcpy(state.displayMode, MODE_SCHEDULE, sizeof(state.displayMode)); return; }');
+    expect(ino).toContain('if (cycleMs < 45000UL)');
+    expect(ino).toContain('else if (cycleMs >= 120000UL && cycleMs < 165000UL)');
     expect(ino).toContain('Castle Hills Garden News');
     expect(ino).toContain('Current + Weekly Weather');
     expect(ino).toContain('drawScreen();');
@@ -113,19 +115,43 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
 
   test('runtime panel idle/running meter semantics match requirements', () => {
     expect(ino).toContain('drawRuntimePanel(432, 339, 360, 133);');
+    expect(ino).toContain('display.drawRect(x,y,w,h,GxEPD_BLACK);');
     expect(ino).toContain('display.print("Idle")');
+    expect(ino).toContain('display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK);');
     expect(ino).toContain('display.printf("Running Zone %u", state.run.zone);');
     expect(ino).toContain('display.fillRect(x+9,y+41,(int)((w-18)*r),18,GxEPD_BLACK);');
     expect(ino).toContain('display.printf("Remaining: %um %us", state.run.remainingSeconds/60, state.run.remainingSeconds%60);');
+    expect(ino).toContain('display.printf("Finished Zone %u", lastFinishedZone);');
+  });
+
+  test('tracks finished-zone state transition and keeps runtime panel dedicated', () => {
+    expect(ino).toContain('uint8_t lastFinishedZone = 0;');
+    expect(ino).toContain('if (previousRunActive && !state.run.active && previousRunZone > 0) lastFinishedZone = previousRunZone;');
+    expect(ino).toContain('if (state.run.active && state.run.zone > 0) { previousRunZone = state.run.zone; lastFinishedZone = 0; }');
+  });
+
+  test('admin ui exposes manual display controls and manual watering inputs', () => {
+    expect(ino).toContain('Show Schedule');
+    expect(ino).toContain('Show News');
+    expect(ino).toContain('Show Historic Weather');
+    expect(ino).toContain('Resume Auto Rotation');
+    expect(ino).toContain("Zone selector <select id='zone'>");
+    expect(ino).toContain("Minutes input <input id='minutes' type='number' min='1' max='240'");
+    expect(ino).toContain("fetch('/extra?zone='+encodeURIComponent(document.getElementById('zone').value)+'&minutes='+encodeURIComponent(document.getElementById('minutes').value))");
   });
 
   test('news screen wraps body text and keeps monochrome full-screen styling', () => {
+    expect(ino).toContain('display.setCursor(8,25); display.print("Castle Hills Garden News");');
+    expect(ino).toContain('display.fillScreen(GxEPD_WHITE);');
     expect(ino).toContain('drawWrappedTextBlock(16, 120, 760, 20, state.gardenNews);');
     expect(ino).toContain('display.drawLine(8,48,792,48,GxEPD_BLACK);');
     expect(ino).toContain('display.drawRect(8,58,784,404,GxEPD_BLACK);');
   });
 
   test('weather/history screen includes summary, forecast strips, and readable chart frames', () => {
+    expect(ino).toContain('display.setCursor(8,25); display.print("Current + Weekly Weather");');
+    expect(ino).toContain('display.setCursor(16,72); display.print(state.date);');
+    expect(ino).toContain('display.setCursor(680,72); display.print(state.time);');
     expect(ino).toContain('drawGraphFrame(8,285,784,60,"Temp F","90","70","50","Start","End");');
     expect(ino).toContain('drawGraphFrame(8,350,784,60,"Rain in","1.0","0.5","0.0","Start","End");');
     expect(ino).toContain('drawGraphFrame(8,415,784,50,"Sun hrs","12","6","0","Start","End");');

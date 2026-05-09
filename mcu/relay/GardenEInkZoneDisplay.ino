@@ -69,6 +69,7 @@ int queueDepth = 0;
 float zoneLedger[5] = {0,0,0,0,0};
 int pendingExtraZone = 0;
 int pendingExtraMinutes = 0;
+uint8_t lastFinishedZone = 0;
 
 const char* MODE_AUTO = "auto";
 const char* MODE_SCHEDULE = "schedule";
@@ -250,7 +251,7 @@ void drawWeatherWidget(int x, int y, int w, int h) {
   display.setCursor(x+282,y+158); display.print(sunsetTxt);
 }
 void drawSchedulePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); display.setCursor(x+8,y+18); display.print("Schedule"); for (int i=0;i<DISPLAY_ZONE_COUNT;i++){int row=i%3,col=i/3;int rx=x+8+col*170,ry=y+40+row*28;display.setCursor(rx,ry);display.printf("Zone %d %d:%02dam %dm", i+1, state.zones[i].startHour%12==0?12:state.zones[i].startHour%12, state.zones[i].startMinute, state.zones[i].baseMinutes);} }
-void drawRuntimePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); if (!state.run.active) { display.setCursor(x+8,y+20); display.print("Idle"); display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.setCursor(x+8,y+86); display.print("Idle"); return; } display.setCursor(x+8,y+20); display.printf("Running Zone %u", state.run.zone); float r=state.run.totalSeconds?((float)(state.run.totalSeconds-state.run.remainingSeconds)/(float)state.run.totalSeconds):0; if(r<0)r=0;if(r>1)r=1; display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.fillRect(x+9,y+41,(int)((w-18)*r),18,GxEPD_BLACK); display.setCursor(x+8,y+86); display.printf("Remaining: %um %us", state.run.remainingSeconds/60, state.run.remainingSeconds%60); }
+void drawRuntimePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); if (!state.run.active) { if (lastFinishedZone > 0) { display.setCursor(x+8,y+20); display.printf("Finished Zone %u", lastFinishedZone); } else { display.setCursor(x+8,y+20); display.print("Idle"); } display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.setCursor(x+8,y+86); display.print("Idle"); return; } display.setCursor(x+8,y+20); display.printf("Running Zone %u", state.run.zone); float r=state.run.totalSeconds?((float)(state.run.totalSeconds-state.run.remainingSeconds)/(float)state.run.totalSeconds):0; if(r<0)r=0;if(r>1)r=1; display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.fillRect(x+9,y+41,(int)((w-18)*r),18,GxEPD_BLACK); display.setCursor(x+8,y+86); display.printf("Remaining: %um %us", state.run.remainingSeconds/60, state.run.remainingSeconds%60); }
 
 void renderScheduleScreenFull() {
   display.setFullWindow();
@@ -424,7 +425,23 @@ bool substantialChange() {
   return false;
 }
 
-void handleRoot() { server.send(200, "text/html", "<html><body><h1>Garden E-Ink Admin</h1><p>Status / Garden Map / Zones / Full-Screen Garden News / Weather History</p></body></html>"); }
+void handleRoot() {
+  server.send(200, "text/html",
+    "<html><body><h1>Garden E-Ink Admin</h1>"
+    "<p>Status / Garden Map / Zones / Full-Screen Garden News / Weather History</p>"
+    "<h2>Display Mode</h2>"
+    "<button onclick=\"fetch('/display?mode=schedule').then(()=>location.reload())\">Show Schedule</button>"
+    "<button onclick=\"fetch('/display?mode=news').then(()=>location.reload())\">Show News</button>"
+    "<button onclick=\"fetch('/display?mode=graph').then(()=>location.reload())\">Show Historic Weather</button>"
+    "<button onclick=\"fetch('/display?mode=auto').then(()=>location.reload())\">Resume Auto Rotation</button>"
+    "<h2>Manual Extra Water</h2>"
+    "<label>Zone selector <select id='zone'>"
+    "<option value='1'>1</option><option value='2'>2</option><option value='3'>3</option><option value='4'>4</option><option value='5'>5</option>"
+    "</select></label>"
+    "<label>Minutes input <input id='minutes' type='number' min='1' max='240' value='10'></label>"
+    "<button onclick=\"fetch('/extra?zone='+encodeURIComponent(document.getElementById('zone').value)+'&minutes='+encodeURIComponent(document.getElementById('minutes').value)).then(()=>location.reload())\">Run Extra Water</button>"
+    "</body></html>");
+}
 void handleState() {
   StaticJsonDocument<8192> doc;
   doc["title"] = state.title; doc["date"] = state.date; doc["time"] = state.time;
@@ -520,6 +537,11 @@ void loop() {
   if (millis() - lastPollMs >= 15000UL) {
     lastPollMs = millis();
     syncFromRelay();
+    static bool previousRunActive = false;
+    static uint8_t previousRunZone = 0;
+    if (previousRunActive && !state.run.active && previousRunZone > 0) lastFinishedZone = previousRunZone;
+    if (state.run.active && state.run.zone > 0) { previousRunZone = state.run.zone; lastFinishedZone = 0; }
+    previousRunActive = state.run.active;
     if (state.run.active && state.run.zone >= 1 && state.run.zone <= 5) zoneLedger[state.run.zone-1] += 0.25f;
     bool needFull = substantialChange();
     if (needFull) {

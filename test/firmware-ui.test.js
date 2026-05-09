@@ -9,6 +9,55 @@ describe('firmware local admin/mobile api integration', () => {
     expect(ino).toContain('server.on("/api/config", HTTP_GET, handleApiConfigGet);');
     expect(ino).toContain('server.on("/api/config", HTTP_POST, handleApiConfigSet);');
     expect(ino).toContain('server.on("/api/schedules", HTTP_POST, handleApiScheduleSet);');
+    expect(ino).toContain('server.on("/time", HTTP_GET, handleTimeGet);');
+    expect(ino).toContain('server.on("/weather", HTTP_GET, handleWeatherGet);');
+  });
+
+  test('exposes relay time and weather payload fields required by e-ink controller', () => {
+    expect(ino).toContain('doc["epoch"] = (uint32_t)nowEpoch;');
+    expect(ino).toContain('doc["synced"] = nowEpoch > 1700000000;');
+    expect(ino).toContain('doc["summary"] = weatherSnapshot.summary;');
+    expect(ino).toContain('doc["condition"] = weatherSnapshot.condition;');
+    expect(ino).toContain('doc["temperatureF"] = weatherSnapshot.temperatureF;');
+    expect(ino).toContain('doc["rainIn"] = weatherSnapshot.rainIn;');
+    expect(ino).toContain('doc["windMph"] = weatherSnapshot.windMph;');
+    expect(ino).toContain('doc["windDeg"] = weatherSnapshot.windDeg;');
+    expect(ino).toContain('doc["windDirection"] = weatherSnapshot.windDirection;');
+    expect(ino).toContain('doc["humidityPct"] = weatherSnapshot.humidityPct;');
+    expect(ino).toContain('doc["dewPointF"] = weatherSnapshot.dewPointF;');
+    expect(ino).toContain('doc["precipitationChancePct"] = weatherSnapshot.precipitationChancePct;');
+    expect(ino).toContain('doc["sunlightHours"] = weatherSnapshot.sunlightHours;');
+    expect(ino).toContain('doc["predictedPrecipIn"] = weatherSnapshot.predictedPrecipIn;');
+    expect(ino).toContain('doc["sunriseEpoch"] = weatherSnapshot.sunriseEpoch;');
+    expect(ino).toContain('doc["sunsetEpoch"] = weatherSnapshot.sunsetEpoch;');
+    expect(ino).toContain('doc["weatherCode"] = weatherSnapshot.weatherCode;');
+    expect(ino).toContain('doc["lastWeatherMs"] = weatherSnapshot.lastWeatherMs;');
+    expect(ino).toContain('https://api.open-meteo.com/v1/forecast?latitude=');
+    expect(ino).toContain('current=temperature_2m,relative_humidity_2m,dew_point_2m,precipitation,rain,weather_code,wind_speed_10m,wind_direction_10m');
+    expect(ino).toContain('hourly=precipitation_probability,sunshine_duration');
+    expect(ino).toContain('daily=precipitation_sum,sunrise,sunset,precipitation_probability_max');
+    expect(ino).toContain('temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&timeformat=unixtime');
+    expect(ino).toContain('configTzTime(gardenPosixTimeZone, "pool.ntp.org", "time.nist.gov");');
+    expect(ino).toContain('char gardenPosixTimeZone[64] = "MST7MDT,M3.2.0,M11.1.0";');
+  });
+
+  test('status payload also exposes weather fields used by e-ink fallback parsing', () => {
+    expect(ino).toContain('doc["summary"] = weatherSnapshot.summary;');
+    expect(ino).toContain('doc["condition"] = weatherSnapshot.condition;');
+    expect(ino).toContain('doc["temperatureF"] = weatherSnapshot.temperatureF;');
+    expect(ino).toContain('doc["rainIn"] = weatherSnapshot.rainIn;');
+    expect(ino).toContain('doc["windMph"] = weatherSnapshot.windMph;');
+    expect(ino).toContain('doc["windDeg"] = weatherSnapshot.windDeg;');
+    expect(ino).toContain('doc["windDirection"] = weatherSnapshot.windDirection;');
+    expect(ino).toContain('doc["humidityPct"] = weatherSnapshot.humidityPct;');
+    expect(ino).toContain('doc["dewPointF"] = weatherSnapshot.dewPointF;');
+    expect(ino).toContain('doc["precipitationChancePct"] = weatherSnapshot.precipitationChancePct;');
+    expect(ino).toContain('doc["sunlightHours"] = weatherSnapshot.sunlightHours;');
+    expect(ino).toContain('doc["predictedPrecipIn"] = weatherSnapshot.predictedPrecipIn;');
+    expect(ino).toContain('doc["sunriseEpoch"] = weatherSnapshot.sunriseEpoch;');
+    expect(ino).toContain('doc["sunsetEpoch"] = weatherSnapshot.sunsetEpoch;');
+    expect(ino).toContain('doc["weatherCode"] = weatherSnapshot.weatherCode;');
+    expect(ino).toContain('doc["lastWeatherMs"] = weatherSnapshot.lastWeatherMs;');
   });
 
   test('admin ui includes direct relay on/off controls and api schedule manager', () => {
