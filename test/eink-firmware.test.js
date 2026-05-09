@@ -6,14 +6,14 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
 
   test('uses required 7.5" driver class and required pin mapping', () => {
     expect(ino).toContain('GxEPD2_750_GDEY075T7');
-    expect(ino).toContain('static const uint8_t EPD_MOSI_PIN = 23;');
-    expect(ino).toContain('static const uint8_t EPD_SCLK_PIN = 18;');
-    expect(ino).toContain('static const uint8_t EPD_CS_PIN = 27;');
-    expect(ino).toContain('static const uint8_t EPD_DC_PIN = 14;');
-    expect(ino).toContain('static const uint8_t EPD_RST_PIN = 33;');
-    expect(ino).toContain('static const uint8_t EPD_BUSY_PIN = 13;');
-    expect(ino).toContain('static const uint8_t SD_CS_PIN = 5;');
-    expect(ino).toContain('static const uint8_t SD_MISO_PIN = 12;');
+    expect(ino).toContain('static const uint8_t EPD_MOSI_PIN = 4;');
+    expect(ino).toContain('static const uint8_t EPD_SCLK_PIN = 5;');
+    expect(ino).toContain('static const uint8_t EPD_CS_PIN = 7;');
+    expect(ino).toContain('static const uint8_t EPD_DC_PIN = 3;');
+    expect(ino).toContain('static const uint8_t EPD_RST_PIN = 6;');
+    expect(ino).toContain('static const uint8_t EPD_BUSY_PIN = 2;');
+    expect(ino).toContain('static const uint8_t SD_CS_PIN = 20;');
+    expect(ino).toContain('static const uint8_t SD_MISO_PIN = 19;');
   });
 
   test('uses required schedule screen geometry and right column panels', () => {
@@ -26,6 +26,12 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
 
   test('implements required controller endpoints and state fields', () => {
     expect(ino).toContain('server.on("/state", HTTP_GET, handleState);');
+    expect(ino).toContain('server.on("/generate_204", HTTP_GET, handleCaptivePortal);');
+    expect(ino).toContain('server.on("/gen_204", HTTP_GET, handleCaptivePortal);');
+    expect(ino).toContain('server.on("/hotspot-detect.html", HTTP_GET, handleCaptivePortal);');
+    expect(ino).toContain('server.on("/ncsi.txt", HTTP_GET, handleCaptivePortal);');
+    expect(ino).toContain('server.on("/connecttest.txt", HTTP_GET, handleCaptivePortal);');
+    expect(ino).toContain('server.on("/fwlink", HTTP_GET, handleCaptivePortal);');
     expect(ino).toContain('server.on("/extra", HTTP_GET, handleExtra);');
     expect(ino).toContain('server.on("/stop", HTTP_GET, handleStop);');
     expect(ino).toContain('server.on("/sync", HTTP_GET, handleSync);');
@@ -175,6 +181,15 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
   });
 
 
+
+
+  test('captive portal routes redirect mobile wifi assistant traffic to admin ui root', () => {
+    expect(ino).toContain('void handleCaptivePortal() {');
+    expect(ino).toContain('server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);');
+    expect(ino).toContain('server.send(302, "text/plain", "");');
+    expect(ino).toContain('server.onNotFound(handleCaptivePortal);');
+  });
+
   test('admin ui includes required sections, controls, and news persistence action', () => {
     expect(ino).toContain('<h2>Status</h2>');
     expect(ino).toContain('<h2>Garden Map</h2>');
@@ -185,6 +200,10 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
     expect(ino).toContain('Sync Weather');
     expect(ino).toContain('Redraw E-Paper');
     expect(ino).toContain('Queue Extra Water');
+    expect(ino).toContain('Relay API Token');
+    expect(ino).toContain('saveConnectivity()');
+    expect(ino).toContain("fetch('/api/config',{method:'POST'");
+    expect(ino).toContain("document.getElementById('relayApiToken').value=c.relayApiToken||'';");
     expect(ino).toContain('Save Zone');
     expect(ino).toContain('Save Logic');
     expect(ino).toContain('Save News to SD');
@@ -216,6 +235,7 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
   });
 
   test('display redraw flags are raised for config and logic changes', () => {
+    expect(ino).toContain('d["relayApiToken"]=relayApiToken;');
     expect(ino).toContain('void handleConfigPost()');
     expect(ino).toContain('saveConfig(); forceFullRedraw = true;');
     expect(ino).toContain('void handleSaveLogic(){ forceFullRedraw = true;');

@@ -247,6 +247,7 @@ State payload additions:
 - `/state` includes `queueState`, `queueDepth`, `pendingExtraZone`, `pendingExtraMinutes`, and `soilLedger` metrics for dashboard/admin visibility.
 - `/state` also includes nested `weather` summary fields (`summary`, `condition`, `temperatureF`, `humidityPct`, `dewPointF`, `precipitationChancePct`, `windMph`, `windDeg`, `windDirection`, `rainIn`, `sunlightHours`, `sunriseEpoch`, `sunsetEpoch`).
 - `GET /` serves a mobile-friendly admin UI with sections (`Status`, `Garden Map`, `Zones`, `Full-Screen Garden News`, `Weather History`) and controls (`Stop / All Off`, `Sync Weather`, `Redraw E-Paper`, `Queue Extra Water`, `Save Zone`, `Save Logic`, `Save News to SD`, `Download CSV`, `Clear History`) backed by `/state`.
+- Captive portal compatibility routes (`/generate_204`, `/gen_204`, `/hotspot-detect.html`, `/ncsi.txt`, `/connecttest.txt`, `/fwlink`, and unknown paths via `onNotFound`) now HTTP 302 redirect to `/` so phone Wi-Fi sign-in assistants open the admin GUI instead of showing only API responses.
 - The admin UI is monochrome and compact (1px borders, no decorative backgrounds/color assumptions) to match simulator visual constraints and readability goals.
 
 Display behavior:
