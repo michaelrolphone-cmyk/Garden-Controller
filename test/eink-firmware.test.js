@@ -6,12 +6,12 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
 
   test('uses required 7.5" driver class and required pin mapping', () => {
     expect(ino).toContain('GxEPD2_750_GDEY075T7');
-    expect(ino).toContain('static const uint8_t EPD_MOSI_PIN = 14;');
-    expect(ino).toContain('static const uint8_t EPD_SCLK_PIN = 13;');
-    expect(ino).toContain('static const uint8_t EPD_CS_PIN = 15;');
-    expect(ino).toContain('static const uint8_t EPD_DC_PIN = 27;');
-    expect(ino).toContain('static const uint8_t EPD_RST_PIN = 26;');
-    expect(ino).toContain('static const uint8_t EPD_BUSY_PIN = 25;');
+    expect(ino).toContain('static const uint8_t EPD_MOSI_PIN = 23;');
+    expect(ino).toContain('static const uint8_t EPD_SCLK_PIN = 18;');
+    expect(ino).toContain('static const uint8_t EPD_CS_PIN = 27;');
+    expect(ino).toContain('static const uint8_t EPD_DC_PIN = 14;');
+    expect(ino).toContain('static const uint8_t EPD_RST_PIN = 33;');
+    expect(ino).toContain('static const uint8_t EPD_BUSY_PIN = 13;');
     expect(ino).toContain('static const uint8_t SD_CS_PIN = 5;');
     expect(ino).toContain('static const uint8_t SD_MISO_PIN = 12;');
   });
