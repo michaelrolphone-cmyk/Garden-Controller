@@ -59,9 +59,16 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
   });
 
   test('draws weather compass and sunrise/sunset strip in widget', () => {
+    expect(ino).toContain('char clippedCondition[20]; snprintf(clippedCondition, sizeof(clippedCondition), "%.18s", state.weather.condition);');
+    expect(ino).toContain('display.fillCircle(x+136,y+18,2,GxEPD_BLACK);');
     expect(ino).toContain('display.drawCircle(cx,cy,r,GxEPD_BLACK);');
     expect(ino).toContain('display.print("Sunrise")');
     expect(ino).toContain('display.print("Sunset")');
+    expect(ino).toContain('display.fillTriangle(cx,cy');
+    expect(ino).toContain('for (int hx = x+94; hx <= x+266; hx += 8) display.drawLine(hx, y+154, hx+4, y+154, GxEPD_BLACK);');
+    expect(ino).toContain('formatTimeLowerNoLeadingZero(state.weather.sunriseEpoch, sunriseTxt, sizeof(sunriseTxt));');
+    expect(ino).toContain('float windDeg = state.weather.windDeg == 0 && strcmp(state.weather.windDirection, "N") != 0 ? directionToDegrees(state.weather.windDirection) : (float)state.weather.windDeg;');
+    expect(ino).toContain('display.printf("Precip. chance %.0f%%", state.weather.precipitationChancePct);');
     expect(ino).toContain('state.weather.windDeg');
   });
 
@@ -88,6 +95,12 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
     expect(ino).toContain('z.baseMinutes = constrain(server.arg("baseMinutes").toInt(), 1, 240);');
     expect(ino).toContain('z.startHour = constrain(server.arg("startHour").toInt(), 0, 23);');
     expect(ino).toContain('z.startMinute = constrain(server.arg("startMinute").toInt(), 0, 59);');
+  });
+
+  test('renders schedule panel using five zones', () => {
+    expect(ino).toContain('static const uint8_t DISPLAY_ZONE_COUNT = 5;');
+    expect(ino).toContain('for (int i=0;i<DISPLAY_ZONE_COUNT;i++)');
+    expect(ino).toContain('int row=i%3,col=i/3;');
   });
 
   test('consumes relay weather and time fields and updates runtime meter with partial refresh', () => {
