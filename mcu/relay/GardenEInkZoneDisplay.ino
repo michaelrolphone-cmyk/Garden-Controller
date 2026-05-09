@@ -9,6 +9,7 @@
 #include <Fonts/FreeMonoBold12pt7b.h>
 #include <Fonts/FreeMono9pt7b.h>
 #include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSansBold9pt7b.h>
 #include <math.h>
 #include <time.h>
 #include <sys/time.h>
@@ -62,6 +63,13 @@ struct RunState {
   uint16_t totalSeconds;
 };
 
+struct ScheduleSlot {
+  bool loaded;
+  uint8_t startHour;
+  uint8_t startMinute;
+  uint16_t runMinutes;
+};
+
 struct Pt { int16_t x; int16_t y; };
 
 // Keep MapPt near the top of the .ino so Arduino's generated prototypes can see it.
@@ -80,7 +88,11 @@ struct DisplayState {
   char displayMode[16];
   ZoneCfg zones[DISPLAY_ZONE_COUNT];
   bool scheduleLoaded;
+  bool scheduleZoneLoaded[DISPLAY_ZONE_COUNT];
+  ScheduleSlot scheduleSlots[DISPLAY_ZONE_COUNT][2];
   bool activeZones[DISPLAY_ZONE_COUNT];
+  uint16_t activeRemainingSeconds[DISPLAY_ZONE_COUNT];
+  uint16_t activeTotalSeconds[DISPLAY_ZONE_COUNT];
   WeatherNow weather;
   RunState run;
 };
@@ -134,6 +146,9 @@ static const unsigned long RELAY_STATE_POLL_MS = 2000UL;
 static const unsigned long RELAY_FULL_SYNC_MS = 60000UL;
 static const unsigned long RELAY_RETRY_SYNC_MS = 10000UL;
 unsigned long lastFullSyncMs = 0;
+static const unsigned long RUNTIME_ZONE_ROTATE_MS = 8000UL;
+uint8_t lastRuntimeMeterZone = 0;
+String lastHeaderDateTimeDrawn = "";
 
 const char* MODE_AUTO = "auto";
 const char* MODE_SCHEDULE = "schedule";
@@ -177,6 +192,82 @@ String ordinalDay(int d) {
     else if (d % 10 == 3) s = "rd";
   }
   return String(d) + s;
+}
+
+bool updateHeaderClockFromSystem() {
+  time_t now;
+  time(&now);
+  if (now <= 1700000000UL) return false;
+
+  struct tm* tmv = localtime(&now);
+  if (!tmv) return false;
+
+  const char* weekdays[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+  const char* months[] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+
+  char newDate[sizeof(state.date)];
+  char newTime[sizeof(state.time)];
+  snprintf(newDate, sizeof(newDate), "%s, %s %s", weekdays[tmv->tm_wday], months[tmv->tm_mon], ordinalDay(tmv->tm_mday).c_str());
+
+  int h = tmv->tm_hour % 12;
+  if (h == 0) h = 12;
+  snprintf(newTime, sizeof(newTime), "%d:%02d %s", h, tmv->tm_min, tmv->tm_hour >= 12 ? "PM" : "AM");
+
+  bool changed = strcmp(state.date, newDate) != 0 || strcmp(state.time, newTime) != 0;
+  if (changed) {
+    strlcpy(state.date, newDate, sizeof(state.date));
+    strlcpy(state.time, newTime, sizeof(state.time));
+  }
+  return changed;
+}
+
+String currentHeaderDateTime() {
+  return String(state.date) + "  " + String(state.time);
+}
+
+void drawHeaderClockTextOnly() {
+  display.fillRect(420, 0, 372, 45, GxEPD_WHITE);
+  display.setTextColor(GxEPD_BLACK);
+  display.setFont(&FreeSans9pt7b);
+  String headerDateTime = currentHeaderDateTime();
+  int16_t tbx = 0;
+  int16_t tby = 0;
+  uint16_t tbw = 0;
+  uint16_t tbh = 0;
+  display.getTextBounds(headerDateTime, 0, 25, &tbx, &tby, &tbw, &tbh);
+  int16_t headerX = 792 - (int16_t)tbw;
+  if (headerX < 420) headerX = 420;
+  display.setCursor(headerX, 25);
+  display.print(headerDateTime);
+  lastHeaderDateTimeDrawn = headerDateTime;
+}
+
+void partialUpdateHeaderClock() {
+  display.setPartialWindow(420, 0, 372, 45);
+  display.firstPage();
+  do {
+    drawHeaderClockTextOnly();
+  } while (display.nextPage());
+}
+
+uint8_t activeZoneCount() {
+  uint8_t count = 0;
+  for (uint8_t i = 0; i < DISPLAY_ZONE_COUNT; i++) {
+    if (state.activeZones[i]) count++;
+  }
+  return count;
+}
+
+uint8_t runtimeMeterZone() {
+  uint8_t count = activeZoneCount();
+  if (count == 0) return 0;
+  uint8_t pick = (millis() / RUNTIME_ZONE_ROTATE_MS) % count;
+  for (uint8_t i = 0; i < DISPLAY_ZONE_COUNT; i++) {
+    if (!state.activeZones[i]) continue;
+    if (pick == 0) return i + 1;
+    pick--;
+  }
+  return state.run.zone;
 }
 
 void formatTimeLowerNoLeadingZero(unsigned long epoch, char* out, size_t outSize) {
@@ -235,6 +326,15 @@ void loadConfig() {
   const char* defaults[DISPLAY_ZONE_COUNT] = {"Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5"};
   for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
     state.activeZones[i] = false;
+    state.activeRemainingSeconds[i] = 0;
+    state.activeTotalSeconds[i] = 0;
+    state.scheduleZoneLoaded[i] = false;
+    for (int slot = 0; slot < 2; slot++) {
+      state.scheduleSlots[i][slot].loaded = false;
+      state.scheduleSlots[i][slot].startHour = 0;
+      state.scheduleSlots[i][slot].startMinute = 0;
+      state.scheduleSlots[i][slot].runMinutes = 0;
+    }
     if (state.zones[i].name[0] == '\0') strlcpy(state.zones[i].name, defaults[i], sizeof(state.zones[i].name));
     // These defaults are only internal placeholders. The paper schedule panel
     // will show "Not Loaded" until a relay schedule payload is received.
@@ -611,9 +711,10 @@ static bool extractScheduleFields(JsonObject src, uint8_t& zoneOut, uint8_t& hou
   else if (!src["zoneNumber"].isNull()) { rawZone = src["zoneNumber"].as<int>(); zoneIsZeroBased = false; }
   else if (!src["zone"].isNull()) {
     rawZone = src["zone"].as<int>();
-    // GardenSimpleRelay6 schedule objects use zoneIndex. If a future payload uses
-    // bare "zone", accept both: 0..4 means zero-based, 1..5 means one-based.
-    zoneIsZeroBased = (rawZone >= 0 && rawZone < DISPLAY_ZONE_COUNT);
+    // GardenSimpleRelay6 buildStateJson() emits dailySchedules[].zone as one-based.
+    // Treat bare schedule "zone" as display zone number here; using zero-based here
+    // shifts every schedule down one row (Zone 2 shows Zone 1's schedule).
+    zoneIsZeroBased = false;
   }
   if (rawZone == -999) return false;
   uint8_t z = normalizeDisplayZoneValue(rawZone, zoneIsZeroBased);
@@ -658,39 +759,59 @@ static bool extractScheduleFields(JsonObject src, uint8_t& zoneOut, uint8_t& hou
   return true;
 }
 
+static void clearScheduleSlots() {
+  state.scheduleLoaded = false;
+  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
+    state.scheduleZoneLoaded[i] = false;
+    for (int slot = 0; slot < 2; slot++) {
+      state.scheduleSlots[i][slot].loaded = false;
+      state.scheduleSlots[i][slot].startHour = 0;
+      state.scheduleSlots[i][slot].startMinute = 0;
+      state.scheduleSlots[i][slot].runMinutes = 0;
+    }
+  }
+}
+
+static bool addScheduleSlot(uint8_t displayZone, uint8_t h, uint8_t m, uint16_t mins) {
+  if (displayZone < 1 || displayZone > DISPLAY_ZONE_COUNT) return false;
+  uint8_t idx = displayZone - 1;
+  for (int slot = 0; slot < 2; slot++) {
+    if (!state.scheduleSlots[idx][slot].loaded) {
+      state.scheduleSlots[idx][slot].loaded = true;
+      state.scheduleSlots[idx][slot].startHour = h;
+      state.scheduleSlots[idx][slot].startMinute = m;
+      state.scheduleSlots[idx][slot].runMinutes = mins;
+      state.scheduleZoneLoaded[idx] = true;
+      state.scheduleLoaded = true;
+      if (slot == 0) {
+        state.zones[idx].startHour = h;
+        state.zones[idx].startMinute = m;
+        state.zones[idx].baseMinutes = mins;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool applySchedulesFromArray(JsonArray arr) {
   if (arr.isNull() || arr.size() == 0) return false;
 
   bool loadedAny = false;
-  bool zoneSet[DISPLAY_ZONE_COUNT] = {false, false, false, false, false};
-  ZoneCfg parsed[DISPLAY_ZONE_COUNT];
-  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) parsed[i] = state.zones[i];
-
   for (JsonObject item : arr) {
     if (item.isNull()) continue;
     if (!item["enabled"].isNull() && !jsonBool(item["enabled"], true)) continue;
     uint8_t z = 0, h = 0, m = 0;
     uint16_t mins = 0;
     if (!extractScheduleFields(item, z, h, m, mins)) continue;
-    uint8_t idx = z - 1;
-    // Use the first enabled schedule for each zone in the compact paper panel.
-    if (!zoneSet[idx]) {
-      parsed[idx].startHour = h;
-      parsed[idx].startMinute = m;
-      parsed[idx].baseMinutes = mins;
-      zoneSet[idx] = true;
-      loadedAny = true;
-    }
+    if (addScheduleSlot(z, h, m, mins)) loadedAny = true;
   }
 
-  if (loadedAny) {
-    for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) state.zones[i] = parsed[i];
-    state.scheduleLoaded = true;
-  }
   return loadedAny;
 }
 
 static bool applyScheduleFromRelayJson(JsonVariant root) {
+  clearScheduleSlots();
   bool loaded = false;
 
   JsonArray schedules = root["dailySchedules"].as<JsonArray>();
@@ -708,11 +829,7 @@ static bool applyScheduleFromRelayJson(JsonVariant root) {
       uint8_t z = 0, h = 0, m = 0;
       uint16_t mins = 0;
       if (extractScheduleFields(zobj, z, h, m, mins)) {
-        uint8_t idx = z - 1;
-        state.zones[idx].startHour = h;
-        state.zones[idx].startMinute = m;
-        state.zones[idx].baseMinutes = mins;
-        zonesHadSchedule = true;
+        if (addScheduleSlot(z, h, m, mins)) zonesHadSchedule = true;
       }
       i++;
     }
@@ -755,7 +872,11 @@ uint8_t normalizeRelayZoneFromRun(JsonObject run, JsonVariant root) {
 }
 
 void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
-  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) state.activeZones[i] = false;
+  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
+    state.activeZones[i] = false;
+    state.activeRemainingSeconds[i] = 0;
+    state.activeTotalSeconds[i] = 0;
+  }
 
   JsonVariant root = sdoc.as<JsonVariant>();
   applyScheduleFromRelayJson(root);
@@ -776,6 +897,8 @@ void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
       state.activeZones[z - 1] = true;
       primaryRemaining = remainingSecondsFromObject(run);
       primaryTotal = durationSecondsFromObject(run);
+      state.activeRemainingSeconds[z - 1] = (uint16_t)min(primaryRemaining, 65535UL);
+      state.activeTotalSeconds[z - 1] = (uint16_t)min(primaryTotal, 65535UL);
     }
   }
 
@@ -790,6 +913,9 @@ void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
           state.activeZones[displayZone - 1] = true;
           uint32_t zrRemaining = remainingSecondsFromObject(zr);
           uint32_t zrTotal = durationSecondsFromObject(zr);
+          finalizeRunTimer(true, displayZone, zrRemaining, zrTotal);
+          state.activeRemainingSeconds[displayZone - 1] = (uint16_t)min(zrRemaining, 65535UL);
+          state.activeTotalSeconds[displayZone - 1] = (uint16_t)min(zrTotal, 65535UL);
           if (primaryZone == 0 || zrRemaining > primaryRemaining) {
             primaryZone = displayZone;
             primaryRemaining = zrRemaining;
@@ -819,6 +945,10 @@ void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
   if (anyActive && primaryZone == 0) primaryZone = 1;
 
   finalizeRunTimer(anyActive, primaryZone, primaryRemaining, primaryTotal);
+  if (anyActive && primaryZone >= 1 && primaryZone <= DISPLAY_ZONE_COUNT && state.activeRemainingSeconds[primaryZone - 1] == 0) {
+    state.activeRemainingSeconds[primaryZone - 1] = (uint16_t)min(primaryRemaining, 65535UL);
+    state.activeTotalSeconds[primaryZone - 1] = (uint16_t)min(primaryTotal, 65535UL);
+  }
 
   state.run.active = anyActive;
   state.run.zone = anyActive ? primaryZone : 0;
@@ -864,14 +994,7 @@ bool syncFromRelay() {
   tv.tv_usec = 0;
   settimeofday(&tv, nullptr);
 
-  time_t now = (time_t)epoch;
-  struct tm* tmv = localtime(&now);
-  const char* weekdays[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-  const char* months[] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
-  snprintf(state.date, sizeof(state.date), "%s, %s %s", weekdays[tmv->tm_wday], months[tmv->tm_mon], ordinalDay(tmv->tm_mday).c_str());
-  int h = tmv->tm_hour % 12;
-  if (h == 0) h = 12;
-  snprintf(state.time, sizeof(state.time), "%d:%02d %s", h, tmv->tm_min, tmv->tm_hour >= 12 ? "PM" : "AM");
+  updateHeaderClockFromSystem();
 
   DynamicJsonDocument wdoc(4096);
   if (!fetchRelayJson("/weather", wdoc, "Relay weather")) return false;
@@ -978,11 +1101,31 @@ static bool pointInsideMapPoly(const MapPt* p, int n, float px, float py) {
   return inside;
 }
 
-static void drawScaledMapPolyOutline(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH) {
+static void drawScaledMapPolyOutlineColor(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH, uint16_t color) {
   for (int i = 0; i < n; i++) {
     int j = (i + 1) % n;
     display.drawLine(mapX(frameX, frameW, p[i].x), mapY(frameY, frameH, p[i].y),
-                     mapX(frameX, frameW, p[j].x), mapY(frameY, frameH, p[j].y), GxEPD_BLACK);
+                     mapX(frameX, frameW, p[j].x), mapY(frameY, frameH, p[j].y), color);
+  }
+}
+
+static void drawScaledMapPolyOutline(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH) {
+  drawScaledMapPolyOutlineColor(p, n, frameX, frameY, frameW, frameH, GxEPD_BLACK);
+}
+
+static void drawActiveZoneWhiteOutlines(int frameX, int frameY, int frameW, int frameH) {
+  // Active zones are solid black fills; redraw their polygon borders in white
+  // so the running zone remains clearly separated from adjacent map geometry.
+  for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
+    if (!state.activeZones[zone]) continue;
+    const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
+    for (uint8_t j = 0; j < g.count; j++) {
+      uint8_t polyIndex = g.polyIndexes[j];
+      if (polyIndex < MAP_POLY_COUNT) {
+        drawScaledMapPolyOutlineColor(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n,
+                                      frameX, frameY, frameW, frameH, GxEPD_WHITE);
+      }
+    }
   }
 }
 
@@ -1110,6 +1253,8 @@ void drawMap(int x, int y, int w, int h) {
     drawScaledMapPolyOutline(MAP_POLYS[i].p, MAP_POLYS[i].n, x, y, w, h);
   }
 
+  drawActiveZoneWhiteOutlines(x, y, w, h);
+
   for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
     const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
     for (uint8_t j = 0; j < g.count; j++) {
@@ -1183,15 +1328,15 @@ void drawWeatherWidget(int x, int y, int w, int h) {
   char sunriseTxt[16], sunsetTxt[16];
   formatTimeLowerNoLeadingZero(state.weather.sunriseEpoch, sunriseTxt, sizeof(sunriseTxt));
   formatTimeLowerNoLeadingZero(state.weather.sunsetEpoch, sunsetTxt, sizeof(sunsetTxt));
-  display.setCursor(x + 12, y + 142); display.print("Sunrise");
-  display.setCursor(x + 12, y + 157); display.print(sunriseTxt);
+  display.setCursor(x + 12, y + 137); display.print("Sunrise");
+  display.setCursor(x + 12, y + 152); display.print(sunriseTxt);
 
   // Draw only a compact upper sun arc inside the weather panel. The previous
   // full-circle trick extended below y+160 and visually invaded the schedule panel.
   const int arcX0 = x + 104;
   const int arcX1 = x + 258;
-  const int baseY = y + 154;
-  const int arcH = 25;
+  const int baseY = y + 149;
+  const int arcH = 24;
   display.drawLine(arcX0, baseY, arcX1, baseY, GxEPD_BLACK);
   int prevX = arcX0;
   int prevY = baseY;
@@ -1212,8 +1357,8 @@ void drawWeatherWidget(int x, int y, int w, int h) {
     int sy = baseY - (int)(sinf(pct * PI) * arcH);
     display.fillCircle(sx, sy, 4, GxEPD_BLACK);
   }
-  display.setCursor(x + 278, y + 142); display.print("Sunset");
-  display.setCursor(x + 282, y + 157); display.print(sunsetTxt);
+  display.setCursor(x + 278, y + 137); display.print("Sunset");
+  display.setCursor(x + 282, y + 152); display.print(sunsetTxt);
 }
 
 void drawSchedulePanel(int x, int y, int w, int h) {
@@ -1230,14 +1375,30 @@ void drawSchedulePanel(int x, int y, int w, int h) {
     return;
   }
   for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
-    int col = i < 3 ? 0 : 1;
-    int row = i % 3;
-    int sx = x + 10 + col * 175;
-    int sy = y + 52 + row * 25;
-    int hour = state.zones[i].startHour % 12;
+    int sy = y + 45 + i * 17;
+
+    display.setFont(&FreeSansBold9pt7b);
+    display.setCursor(x + 10, sy);
+    display.printf("Zone %d", i + 1);
+
+    display.setFont(&FreeSans9pt7b);
+    display.setCursor(x + 78, sy);
+    if (!state.scheduleZoneLoaded[i]) {
+      display.print("Not Loaded");
+      continue;
+    }
+
+    ScheduleSlot& a = state.scheduleSlots[i][0];
+    int hour = a.startHour % 12;
     if (hour == 0) hour = 12;
-    display.setCursor(sx, sy);
-    display.printf("Zone %d %d:%02d%s %um", i + 1, hour, state.zones[i].startMinute, state.zones[i].startHour >= 12 ? "pm" : "am", state.zones[i].baseMinutes);
+    display.printf("%d:%02d%s %um", hour, a.startMinute, a.startHour >= 12 ? "pm" : "am", a.runMinutes);
+
+    ScheduleSlot& b = state.scheduleSlots[i][1];
+    if (b.loaded) {
+      int hour2 = b.startHour % 12;
+      if (hour2 == 0) hour2 = 12;
+      display.printf(" & %d:%02d%s %um", hour2, b.startMinute, b.startHour >= 12 ? "pm" : "am", b.runMinutes);
+    }
   }
 }
 
@@ -1247,27 +1408,45 @@ void drawRuntimePanel(int x, int y, int w, int h) {
   display.setFont(&FreeMonoBold12pt7b);
   if (!state.run.active) {
     if (lastFinishedZone > 0) {
-      display.setCursor(x + 8, y + 25); display.printf("Finished Zone %u", lastFinishedZone);
+      display.setCursor(x + 8, y + 34); display.printf("Finished Zone %u", lastFinishedZone);
     } else {
-      display.setCursor(x + 8, y + 25); display.print("Idle");
+      display.setCursor(x + 8, y + 34); display.print("Idle");
     }
-    display.drawRect(x + 8, y + 42, w - 16, 20, GxEPD_BLACK);
+    display.drawRect(x + 8, y + 70, w - 16, 22, GxEPD_BLACK);
     display.setFont(&FreeSans9pt7b);
-    display.setCursor(x + 8, y + 88);
+    display.setCursor(x + 8, y + 116);
     if (!relayDataReady && relayLastError[0]) display.print("Relay error");
     else display.print("Idle");
+    lastRuntimeMeterZone = 0;
     return;
   }
 
-  display.setCursor(x + 8, y + 25);
-  display.printf("Running Zone %u", state.run.zone);
-  float r = state.run.totalSeconds ? ((float)(state.run.totalSeconds - state.run.remainingSeconds) / (float)state.run.totalSeconds) : 0;
+  uint8_t meterZone = runtimeMeterZone();
+  if (meterZone < 1 || meterZone > DISPLAY_ZONE_COUNT) meterZone = state.run.zone;
+  if (meterZone < 1 || meterZone > DISPLAY_ZONE_COUNT) meterZone = 1;
+  uint16_t remaining = state.activeRemainingSeconds[meterZone - 1];
+  uint16_t total = state.activeTotalSeconds[meterZone - 1];
+  if (remaining == 0 && meterZone == state.run.zone) remaining = state.run.remainingSeconds;
+  if (total == 0 && meterZone == state.run.zone) total = state.run.totalSeconds;
+
+  display.setCursor(x + 8, y + 39);
+  display.printf("Running Zone %u", meterZone);
+  display.setFont(&FreeMonoBold12pt7b);
+  display.setCursor(x + 225, y + 39);
+  display.printf("%um %us", remaining / 60, remaining % 60);
+
+  float r = total ? ((float)(total - remaining) / (float)total) : 0;
   r = constrain(r, 0.0f, 1.0f);
-  display.drawRect(x + 8, y + 42, w - 16, 20, GxEPD_BLACK);
-  display.fillRect(x + 9, y + 43, (int)((w - 18) * r), 18, GxEPD_BLACK);
+  display.drawRect(x + 8, y + 72, w - 16, 24, GxEPD_BLACK);
+  display.fillRect(x + 9, y + 73, (int)((w - 18) * r), 22, GxEPD_BLACK);
+
   display.setFont(&FreeSans9pt7b);
-  display.setCursor(x + 8, y + 88);
-  display.printf("Remaining: %um %us", state.run.remainingSeconds / 60, state.run.remainingSeconds % 60);
+  display.setCursor(x + 8, y + 119);
+  uint8_t runningCount = activeZoneCount();
+  if (runningCount > 1) display.printf("%u zones running - rotating meter", runningCount);
+  else display.print("Watering active");
+
+  lastRuntimeMeterZone = meterZone;
 }
 
 void drawWrappedTextBlock(int x, int y, int maxWidth, int lineHeight, const char* text) {
@@ -1347,17 +1526,7 @@ void renderScheduleScreenFull() {
     display.setCursor(8, 25);
     display.print("Castle Hills Garden Schedule");
 
-    display.setFont(&FreeSans9pt7b);
-    String headerDateTime = String(state.date) + "  " + String(state.time);
-    int16_t tbx = 0;
-    int16_t tby = 0;
-    uint16_t tbw = 0;
-    uint16_t tbh = 0;
-    display.getTextBounds(headerDateTime, 0, 25, &tbx, &tby, &tbw, &tbh);
-    int16_t headerX = 792 - (int16_t)tbw;
-    if (headerX < 430) headerX = 430;
-    display.setCursor(headerX, 25);
-    display.print(headerDateTime);
+    drawHeaderClockTextOnly();
 
     display.drawLine(8, 48, 792, 48, GxEPD_BLACK);
     drawMap(8, 48, 424, 424);
@@ -1498,7 +1667,15 @@ bool substantialChange() {
   if (strcmp(state.title, lastDrawn.title) != 0) return true;
   if (state.scheduleLoaded != lastDrawn.scheduleLoaded) return true;
   for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
+    if (state.scheduleZoneLoaded[i] != lastDrawn.scheduleZoneLoaded[i]) return true;
     if (state.activeZones[i] != lastDrawn.activeZones[i]) return true;
+    if (state.activeTotalSeconds[i] != lastDrawn.activeTotalSeconds[i]) return true;
+    for (int slot = 0; slot < 2; slot++) {
+      if (state.scheduleSlots[i][slot].loaded != lastDrawn.scheduleSlots[i][slot].loaded) return true;
+      if (state.scheduleSlots[i][slot].startHour != lastDrawn.scheduleSlots[i][slot].startHour) return true;
+      if (state.scheduleSlots[i][slot].startMinute != lastDrawn.scheduleSlots[i][slot].startMinute) return true;
+      if (state.scheduleSlots[i][slot].runMinutes != lastDrawn.scheduleSlots[i][slot].runMinutes) return true;
+    }
   }
   static bool lastRelayReadySeen = false;
   static bool lastDiagnosticSeen = true;
@@ -1710,6 +1887,7 @@ void handleState() {
     z["baseMinutes"] = state.zones[i].baseMinutes;
     z["startHour"] = state.zones[i].startHour;
     z["startMinute"] = state.zones[i].startMinute;
+    z["scheduleLoaded"] = state.scheduleZoneLoaded[i];
   }
 
   JsonArray ledger = doc.createNestedArray("soilLedger");
@@ -2026,6 +2204,14 @@ void loop() {
   server.handleClient();
 
   unsigned long nowMs = millis();
+  if (relayDataReady && updateHeaderClockFromSystem()) {
+    if (strstr(state.title, "Garden Schedule")) {
+      partialUpdateHeaderClock();
+      strlcpy(lastDrawn.date, state.date, sizeof(lastDrawn.date));
+      strlcpy(lastDrawn.time, state.time, sizeof(lastDrawn.time));
+    }
+  }
+
   bool didPoll = false;
   bool statePollOk = false;
 
@@ -2042,8 +2228,9 @@ void loop() {
     didPoll = true;
   }
 
-  if (!didPoll) return;
-  lastPollMs = nowMs;
+  bool runtimeZoneChanged = state.run.active && runtimeMeterZone() != lastRuntimeMeterZone;
+  if (!didPoll && !runtimeZoneChanged) return;
+  if (didPoll) lastPollMs = nowMs;
 
   static bool previousRunActive = false;
   static uint8_t previousRunZone = 0;
@@ -2063,7 +2250,7 @@ void loop() {
     drawScreen();
     lastDrawn = state;
     forceFullRedraw = false;
-  } else if (relayDataReady && state.run.active && state.run.remainingSeconds != lastDrawn.run.remainingSeconds) {
+  } else if (relayDataReady && state.run.active && (runtimeZoneChanged || state.run.remainingSeconds != lastDrawn.run.remainingSeconds || memcmp(state.activeRemainingSeconds, lastDrawn.activeRemainingSeconds, sizeof(state.activeRemainingSeconds)) != 0)) {
     display.setPartialWindow(432, 339, 360, 133);
     display.firstPage();
     do {
@@ -2073,5 +2260,7 @@ void loop() {
     lastDrawn.run.zone = state.run.zone;
     lastDrawn.run.active = state.run.active;
     lastDrawn.run.totalSeconds = state.run.totalSeconds;
+    memcpy(lastDrawn.activeRemainingSeconds, state.activeRemainingSeconds, sizeof(state.activeRemainingSeconds));
+    memcpy(lastDrawn.activeTotalSeconds, state.activeTotalSeconds, sizeof(state.activeTotalSeconds));
   }
 }
