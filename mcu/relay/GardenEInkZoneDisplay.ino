@@ -2379,7 +2379,7 @@ void loop() {
   } else if (runtimeSwitchFlashVisible) {
     uint8_t phase = runtimeZoneFlashPhase();
     if (phase != runtimeSwitchFlashLastPhase) {
-      runtimeSwitchFlashPhaseChanged = true;
+      runtimeFlashPhaseChanged = true;
       runtimeSwitchFlashLastPhase = phase;
     }
   }
