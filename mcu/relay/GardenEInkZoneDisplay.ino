@@ -39,6 +39,7 @@ struct WeatherNow {
   float sunlightHours; unsigned long sunriseEpoch; unsigned long sunsetEpoch;
 };
 struct RunState { bool active; uint8_t zone; uint16_t remainingSeconds; uint16_t totalSeconds; };
+struct Pt { int16_t x; int16_t y; };
 static const uint8_t DISPLAY_ZONE_COUNT = 5;
 struct DisplayState {
   char title[64]; char date[32]; char time[16]; bool masterEnable; bool weatherAdjustmentEnabled;
@@ -189,7 +190,6 @@ void syncFromRelay() {
 }
 
 
-struct Pt { int16_t x; int16_t y; };
 const Pt Z1[]={{24,80},{180,80},{190,150},{140,230},{32,220}};
 const Pt Z2[]={{192,82},{320,82},{330,180},{230,200}};
 const Pt Z3[]={{332,82},{420,82},{420,220},{332,220}};
