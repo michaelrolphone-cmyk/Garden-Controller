@@ -149,7 +149,7 @@ static const unsigned long RELAY_FULL_SYNC_MS = 60000UL;
 static const unsigned long RELAY_RETRY_SYNC_MS = 10000UL;
 unsigned long lastFullSyncMs = 0;
 static const unsigned long RUNTIME_ZONE_ROTATE_MS = 12000UL;
-static const unsigned long RUNTIME_ZONE_FLASH_MS = 300UL;
+static const unsigned long RUNTIME_ZONE_FLASH_MS = 500UL;
 uint8_t lastRuntimeMeterZone = 0;
 uint8_t runtimeSwitchFlashZone = 0;
 unsigned long runtimeSwitchFlashUntilMs = 0;
@@ -161,6 +161,11 @@ const char* MODE_AUTO = "auto";
 const char* MODE_SCHEDULE = "schedule";
 const char* MODE_NEWS = "news";
 const char* MODE_GRAPH = "graph";
+
+// Temporary field-test mode: keep the e-ink display on the schedule/runtime
+// screen only. News/weather full-screen rotation remains compiled in, but is
+// disabled until this flag is set false again.
+static const bool SCHEDULE_SCREEN_ONLY = true;
 
 String wifiStatusName(wl_status_t s) {
   switch (s) {
@@ -291,11 +296,11 @@ uint8_t runtimeZoneFlashPhase() {
   return phase > 3 ? 3 : phase;
 }
 
-bool isRuntimeZoneFlashOutlineInverted(uint8_t displayZone) {
+bool isRuntimeZoneFlashBadgeInverted(uint8_t displayZone) {
   if (!isRuntimeZoneFlashActive(displayZone)) return false;
   uint8_t phase = runtimeZoneFlashPhase();
-  // Two quick outline-only inversions during the flash window. The active
-  // polygon fill remains stable; only the border alternates white/black.
+  // Two quick badge inversions during the flash window. The active polygon
+  // fill and outline stay stable; only the zone-number badge blinks.
   return phase == 0 || phase == 2;
 }
 
@@ -347,6 +352,7 @@ void loadConfig() {
   prefs.end();
 
   if (state.displayMode[0] == '\0') strlcpy(state.displayMode, MODE_AUTO, sizeof(state.displayMode));
+  if (SCHEDULE_SCREEN_ONLY) strlcpy(state.displayMode, MODE_SCHEDULE, sizeof(state.displayMode));
   strlcpy(state.title, "Castle Hills Garden Schedule", sizeof(state.title));
   strlcpy(state.date, "No relay time", sizeof(state.date));
   strlcpy(state.time, "--:--", sizeof(state.time));
@@ -427,7 +433,15 @@ bool waitForStationWifi(uint32_t timeoutMs) {
 }
 
 void applyScreenRotationMode() {
-  if (state.run.active) {
+  if (SCHEDULE_SCREEN_ONLY) {
+    strlcpy(state.title, "Castle Hills Garden Schedule", sizeof(state.title));
+    return;
+  }
+
+  // Treat relay-6/spigot/master-valve activity like watering activity for
+  // display selection. Even if no map zone is running, the user needs the
+  // live schedule/runtime page instead of the news or weather rotation page.
+  if (state.run.active || state.spigotsOn) {
     strlcpy(state.title, "Castle Hills Garden Schedule", sizeof(state.title));
     return;
   }
@@ -1181,20 +1195,16 @@ static void drawScaledMapPolyOutline(const MapPt* p, int n, int frameX, int fram
 }
 
 static void drawActiveZoneWhiteOutlines(int frameX, int frameY, int frameW, int frameH) {
-  // Active zones are solid black fills. Normally their polygon borders redraw
-  // white. During the zone-switch cue, only the selected zone outline blinks
-  // black/white twice; the fill itself does not invert.
+  // Active zones are solid black fills. Their polygon borders stay stable and
+  // white; the zone-switch cue is now shown by flashing the badge only.
   for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
     if (!state.activeZones[zone]) continue;
-    bool flashing = isRuntimeZoneFlashActive(zone + 1);
-    uint16_t outlineColor = isRuntimeZoneFlashOutlineInverted(zone + 1) ? GxEPD_BLACK : GxEPD_WHITE;
-    uint8_t outlineThickness = flashing ? 2 : 1;
     const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
     for (uint8_t j = 0; j < g.count; j++) {
       uint8_t polyIndex = g.polyIndexes[j];
       if (polyIndex < MAP_POLY_COUNT) {
         drawScaledMapPolyOutlineColor(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n,
-                                      frameX, frameY, frameW, frameH, outlineColor, outlineThickness);
+                                      frameX, frameY, frameW, frameH, GxEPD_WHITE, 1);
       }
     }
   }
@@ -1271,9 +1281,10 @@ void drawZoneNumberBadge(int frameX, int frameY, int frameW, int frameH, int zon
 
   // Always use a filled badge, not an outlined/empty badge.
   // Inactive: black filled circle with white number.
-  // Active: inverted white filled circle with black number so it stays readable
-  // against the active zone fill.
-  if (active) {
+  // Active: white filled circle with black number. During the selected-zone
+  // switch cue, only this badge flashes back to black/white for 0.5 seconds.
+  bool flashInvert = active && isRuntimeZoneFlashBadgeInverted((uint8_t)zone);
+  if (active && !flashInvert) {
     display.fillCircle(cx, cy, r, GxEPD_WHITE);
     display.drawCircle(cx, cy, r, GxEPD_BLACK);
     display.setTextColor(GxEPD_BLACK);
@@ -1638,7 +1649,7 @@ void renderConnectionDiagnosticScreen() {
 void drawHeaderChurchCross(int x, int y) {
   // Small bold church-garden cross sized to the schedule title text height.
   // Drawn with filled rectangles so it stays crisp on e-paper.
-  const int w = 18;
+  const int w = 14;
   const int h = 18;
   const int t = 5;
   const int cx = x + (w - t) / 2;
@@ -1653,7 +1664,7 @@ void renderScheduleScreenFull() {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeMonoBold12pt7b);
-    drawHeaderChurchCross(8, 7);
+    drawHeaderChurchCross(10, 9);
     display.setCursor(34, 25);
     display.print("Castle Hills Garden Schedule");
 
@@ -1905,7 +1916,7 @@ void handleRoot() {
   page += htmlInput("relayApiToken", "Relay API Token", "", "password", "maxlength='95' placeholder='leave blank to keep existing / blank if unused'");
   page += F("<button type='submit'>Save Wi-Fi / Relay Settings</button></form></section>");
 
-  page += F("<section><h2>Display Mode</h2><button type='button' data-url='/display?mode=schedule'>Show Schedule</button><button type='button' data-url='/display?mode=news'>Show News</button><button type='button' data-url='/display?mode=weather'>Show Historic Weather</button><button type='button' class='secondary' data-url='/display?mode=auto'>Resume Auto Rotation</button></section>");
+  page += F("<section><h2>Display Mode</h2><p><b>Schedule screen only is temporarily enabled.</b> News and weather rotation are disabled for field testing.</p><button type='button' data-url='/display?mode=schedule'>Show Schedule</button></section>");
 
   page += F("<section><h2>Manual Extra Water</h2><form class='ajaxGet' method='get' action='/extra'><label>Zone</label><select name='zone'><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select><label>Minutes</label><input name='minutes' type='number' value='10' min='1' max='240'><button type='submit'>Queue Extra Water</button></form></section>");
 
@@ -2106,6 +2117,10 @@ void handleConfigPost() {
 void handleDisplayMode() {
   String m = server.arg("mode");
   m.toLowerCase();
+
+  if (SCHEDULE_SCREEN_ONLY) {
+    m = MODE_SCHEDULE;
+  }
 
   // The admin UI/user language may call the graph screen "weather".
   // Internally the firmware uses MODE_GRAPH for the full-screen weather/history page.
@@ -2407,7 +2422,7 @@ void loop() {
     forceFullRedraw = false;
   } else if (relayDataReady && state.run.active && (runtimeZoneChanged || runtimeFlashExpired || runtimeFlashPhaseChanged || state.run.remainingSeconds != lastDrawn.run.remainingSeconds || memcmp(state.activeRemainingSeconds, lastDrawn.activeRemainingSeconds, sizeof(state.activeRemainingSeconds)) != 0)) {
     // Update the meter/header first so the newly selected zone is visible,
-    // then blink only that zone's outline as the cue.
+    // then blink only that zone's badge as the cue.
     partialUpdateRuntimePanel();
     if (runtimeZoneChanged || runtimeFlashExpired || runtimeFlashPhaseChanged) {
       partialUpdateMapPanel();
