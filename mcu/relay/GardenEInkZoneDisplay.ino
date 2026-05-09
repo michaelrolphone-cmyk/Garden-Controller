@@ -14,13 +14,15 @@
 #include <sys/time.h>
 
 // Required hardware target: 7.5-inch 800x480 GDEY075T7 black/white panel.
-// Verified sample pinout: EPD MOSI=23, SCLK=18, CS=27, DC=14, RST=33, BUSY=13.
-static const uint8_t EPD_MOSI_PIN = 23;
-static const uint8_t EPD_SCLK_PIN = 18;
-static const uint8_t EPD_CS_PIN   = 27;
-static const uint8_t EPD_DC_PIN   = 14;
-static const uint8_t EPD_RST_PIN  = 33;
-static const uint8_t EPD_BUSY_PIN = 13;
+// Target board pinout supplied for this hardware build.
+static const uint8_t EPD_MOSI_PIN = 4;
+static const uint8_t EPD_SCLK_PIN = 5;
+static const uint8_t EPD_CS_PIN   = 7;
+static const uint8_t EPD_DC_PIN   = 3;
+static const uint8_t EPD_RST_PIN  = 6;
+static const uint8_t EPD_BUSY_PIN = 2;
+static const uint8_t SD_CS_PIN    = 20;
+static const uint8_t SD_MISO_PIN  = 19;
 
 GxEPD2_BW<GxEPD2_750_GDEY075T7, GxEPD2_750_GDEY075T7::HEIGHT> display(
   GxEPD2_750_GDEY075T7(EPD_CS_PIN, EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN)
@@ -231,6 +233,11 @@ void setupWifi() {
   WiFi.softAPdisconnect(true);
   delay(100);
 
+  IPAddress einkApIp(192, 168, 5, 1);
+  IPAddress einkApGateway(192, 168, 5, 1);
+  IPAddress einkApSubnet(255, 255, 255, 0);
+  bool apConfigOk = WiFi.softAPConfig(einkApIp, einkApGateway, einkApSubnet);
+
   bool apOk = false;
   if (strlen(apPass) >= 8) apOk = WiFi.softAP(apSsid, apPass);
   else apOk = WiFi.softAP(apSsid);
@@ -240,6 +247,7 @@ void setupWifi() {
   dns.start(53, "*", apIp);
 
   String msg = String("Admin AP ") + (apOk ? "started" : "failed") + ": " + apSsid + " at " + apIp.toString();
+  if (!apConfigOk) msg += " (softAPConfig failed; expected 192.168.5.1)";
   setBootStatus(msg.c_str());
 
   WiFi.disconnect(false, false);
@@ -345,9 +353,61 @@ bool fetchRelayJson(const String& path, DynamicJsonDocument& out, const char* st
   return true;
 }
 
+bool relayGetText(const String& path, const char* stage, String& bodyOut) {
+  bodyOut = "";
+
+  if (strlen(relayBase) == 0) {
+    setRelayStatus(stage, "Relay base URL is blank. Save relay settings in the admin interface.", false);
+    return false;
+  }
+
+  if (!waitForStationWifi(3000)) {
+    setRelayStatus(stage, String("Cannot call ") + path + ": station Wi-Fi is not connected. WiFi.status=" + wifiStatusName(WiFi.status()), false);
+    return false;
+  }
+
+  String url = String(relayBase) + path;
+  HTTPClient http;
+  http.setTimeout(6000);
+
+  if (!http.begin(url)) {
+    setRelayStatus(stage, String("HTTP begin failed for ") + url + ". Check relayBase URL format.", false);
+    return false;
+  }
+
+  if (strlen(relayApiToken) > 0) {
+    http.addHeader("x-api-token", relayApiToken);
+  }
+
+  int code = http.GET();
+  bodyOut = http.getString();
+
+  if (code <= 0) {
+    String msg = String("HTTP request failed for ") + url + ": " + http.errorToString(code);
+    http.end();
+    setRelayStatus(stage, msg, false);
+    return false;
+  }
+
+  if (code != 200) {
+    String excerpt = bodyOut.substring(0, 120);
+    String msg = String("Relay returned HTTP ") + code + " for " + path + ". Body: " + excerpt;
+    http.end();
+    setRelayStatus(stage, msg, false);
+    return false;
+  }
+
+  http.end();
+  setRelayStatus(stage, String("OK: ") + path, true);
+  return true;
+}
+
 bool fetchRunState(DynamicJsonDocument& sdoc) {
+  // Relay firmware route table exposes the canonical state endpoint at /api/state.
+  // /status exists as an alias on the relay, but the display should prefer /api/state
+  // so all relay API calls are consistently namespaced except /time and /weather.
   DynamicJsonDocument first(8192);
-  if (fetchRelayJson("/status", first, "Relay status /status")) {
+  if (fetchRelayJson("/api/state", first, "Relay state /api/state")) {
     sdoc.clear();
     sdoc.set(first.as<JsonVariant>());
     return true;
@@ -357,13 +417,13 @@ bool fetchRunState(DynamicJsonDocument& sdoc) {
   strlcpy(firstError, relayLastError, sizeof(firstError));
 
   DynamicJsonDocument second(8192);
-  if (fetchRelayJson("/api/state", second, "Relay status /api/state")) {
+  if (fetchRelayJson("/status", second, "Relay state /status fallback")) {
     sdoc.clear();
     sdoc.set(second.as<JsonVariant>());
     return true;
   }
 
-  setRelayStatus("Relay status", String("Both status endpoints failed. /status: ") + firstError + " /api/state: " + relayLastError, false);
+  setRelayStatus("Relay status", String("Both state endpoints failed. /api/state: ") + firstError + " /status: " + relayLastError, false);
   return false;
 }
 
@@ -884,13 +944,34 @@ String htmlInput(const char* id, const char* label, const String& value, const c
   return out;
 }
 
+
+String portalUrl() {
+  return String("http://") + WiFi.softAPIP().toString() + "/";
+}
+
+void redirectToPortal() {
+  server.sendHeader("Location", portalUrl(), true);
+  server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  server.send(302, "text/plain", "Redirecting to Garden E-Ink Admin");
+}
+
+void handleCaptivePortalProbe() {
+  redirectToPortal();
+}
+
+void handleNotFound() {
+  // DNS redirects all hostnames to the e-ink AP. Any unknown HTTP path should
+  // land on the admin page instead of showing a 404 or an OS probe response.
+  redirectToPortal();
+}
+
 void handleRoot() {
   String page;
   page.reserve(11000);
   page += F("<!doctype html><html><head><meta charset='utf-8'>");
   page += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
   page += F("<title>Garden E-Ink Admin</title><style>");
-  page += F("body{font-family:Arial,sans-serif;margin:0;background:#f4f1e8;color:#111}header{background:#111;color:#fff;padding:14px 16px}h1{font-size:20px;margin:0}main{padding:12px;max-width:900px;margin:auto}section{background:#fff;border:1px solid #222;margin:12px 0;padding:12px;box-shadow:2px 2px 0 #222}h2{font-size:17px;margin:0 0 10px}label{display:block;margin:8px 0 3px;font-weight:700}input,textarea,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid #333;background:#fff;font-size:15px}button,.btn{display:inline-block;margin:6px 6px 6px 0;padding:10px 12px;border:1px solid #111;background:#111;color:#fff;font-weight:700;text-decoration:none}.secondary{background:#fff;color:#111}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.status{white-space:pre-wrap;border:1px solid #333;padding:10px;background:#fafafa}.small{font-size:13px;color:#333}.ok{font-weight:700}.bad{font-weight:700;color:#8a0000}@media(max-width:650px){.grid{grid-template-columns:1fr}}");
+  page += F("body{font-family:Arial,sans-serif;margin:0;background:#f4f1e8;color:#111}header{background:#111;color:#fff;padding:14px 16px}h1{font-size:20px;margin:0}main{padding:12px;max-width:900px;margin:auto}section{background:#fff;border:1px solid #222;margin:12px 0;padding:12px;box-shadow:2px 2px 0 #222}h2{font-size:17px;margin:0 0 10px}label{display:block;margin:8px 0 3px;font-weight:700}input,textarea,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid #333;background:#fff;font-size:15px}button,.btn{display:inline-block;margin:6px 6px 6px 0;padding:10px 12px;border:1px solid #111;background:#111;color:#fff;font-weight:700;text-decoration:none;cursor:pointer}.secondary{background:#fff;color:#111}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.status{white-space:pre-wrap;border:1px solid #333;padding:10px;background:#fafafa}.small{font-size:13px;color:#333}.ok{font-weight:700}.bad{font-weight:700;color:#8a0000}@media(max-width:650px){.grid{grid-template-columns:1fr}}");
   page += F("</style></head><body><header><h1>Garden E-Ink Admin</h1></header><main>");
 
   page += F("<section><h2>Status</h2><div class='status'>");
@@ -902,7 +983,7 @@ void handleRoot() {
   page += F("Relay: "); page += htmlEscape(relayBase); page += F("\n");
   page += F("Stage: "); page += htmlEscape(relayLastStage); page += F("\n");
   page += F("Message: "); page += htmlEscape(relayStatus);
-  page += F("</div><a class='btn' href='/sync'>Sync Relay</a><a class='btn' href='/redraw'>Redraw E-Paper</a><a class='btn' href='/stop'>Stop / All Off</a></section>");
+  page += F("</div><button type='button' data-url='/sync'>Sync Relay</button><button type='button' data-url='/redraw'>Redraw E-Paper</button><button type='button' data-url='/stop'>Stop / All Off</button><pre id='ajaxResult' class='status'>Ready.</pre></section>");
 
   page += F("<section><h2>Wi-Fi + Relay Token Settings</h2><p class='small'>Saving these settings reboots the display so Wi-Fi can restart cleanly. Reconnect to the admin AP after it comes back up.</p>");
   page += F("<form method='get' action='/saveConnectivity'><div class='grid'><div>");
@@ -916,11 +997,11 @@ void handleRoot() {
   page += htmlInput("relayApiToken", "Relay API Token", "", "password", "maxlength='95' placeholder='leave blank to keep existing / blank if unused'");
   page += F("<button type='submit'>Save Wi-Fi / Relay Settings</button></form></section>");
 
-  page += F("<section><h2>Display Mode</h2><a class='btn' href='/display?mode=schedule'>Show Schedule</a><a class='btn' href='/display?mode=news'>Show News</a><a class='btn' href='/display?mode=graph'>Show Historic Weather</a><a class='btn secondary' href='/display?mode=auto'>Resume Auto Rotation</a></section>");
+  page += F("<section><h2>Display Mode</h2><button type='button' data-url='/display?mode=schedule'>Show Schedule</button><button type='button' data-url='/display?mode=news'>Show News</button><button type='button' data-url='/display?mode=graph'>Show Historic Weather</button><button type='button' class='secondary' data-url='/display?mode=auto'>Resume Auto Rotation</button></section>");
 
-  page += F("<section><h2>Manual Extra Water</h2><form method='get' action='/extra'><label>Zone</label><select name='zone'><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select><label>Minutes</label><input name='minutes' type='number' value='10' min='1' max='240'><button type='submit'>Queue Extra Water</button></form></section>");
+  page += F("<section><h2>Manual Extra Water</h2><form class='ajaxGet' method='get' action='/extra'><label>Zone</label><select name='zone'><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select><label>Minutes</label><input name='minutes' type='number' value='10' min='1' max='240'><button type='submit'>Queue Extra Water</button></form></section>");
 
-  page += F("<section><h2>Zones</h2><form method='get' action='/saveZone'><div class='grid'><div><label>Zone</label><select name='zone'><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>");
+  page += F("<section><h2>Zones</h2><form class='ajaxGet' method='get' action='/saveZone'><div class='grid'><div><label>Zone</label><select name='zone'><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>");
   page += htmlInput("name", "Name", state.zones[0].name, "text", "maxlength='23'");
   page += htmlInput("baseMinutes", "Base Minutes", String(state.zones[0].baseMinutes), "number", "min='1' max='240'");
   page += F("</div><div>");
@@ -928,11 +1009,12 @@ void handleRoot() {
   page += htmlInput("startMinute", "Start Minute 0-59", String(state.zones[0].startMinute), "number", "min='0' max='59'");
   page += F("<button type='submit'>Save Zone</button><p class='small'>This no-JavaScript form preloads Zone 1 values. Select another zone and enter its values manually.</p></div></div></form></section>");
 
-  page += F("<section><h2>Full-Screen Garden News</h2><form method='get' action='/saveNewsForm'><textarea name='news' rows='5'>");
+  page += F("<section><h2>Full-Screen Garden News</h2><form class='ajaxGet' method='get' action='/saveNewsForm'><textarea name='news' rows='5'>");
   page += htmlEscape(state.gardenNews);
   page += F("</textarea><button type='submit'>Save News to Display</button></form></section>");
 
-  page += F("<section><h2>Weather History</h2><a class='btn' href='/history.csv'>Download CSV</a><a class='btn secondary' href='/clearHistory'>Clear History</a></section>");
+  page += F("<section><h2>Weather History</h2><a class='btn' href='/history.csv'>Download CSV</a><button type='button' class='secondary' data-url='/clearHistory'>Clear History</button></section>");
+  page += F("<script>function setResult(t){var e=document.getElementById('ajaxResult');if(e){e.textContent=t;}}function apiCall(u){setResult('Sending '+u+' ...');fetch(u,{cache:'no-store'}).then(function(r){return r.text().then(function(t){setResult('HTTP '+r.status+' '+u+'\n'+t);});}).catch(function(e){setResult('ERROR '+u+'\n'+e);});}document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('[data-url]').forEach(function(b){b.addEventListener('click',function(){apiCall(b.getAttribute('data-url'));});});document.querySelectorAll('form.ajaxGet').forEach(function(f){f.addEventListener('submit',function(ev){ev.preventDefault();var qs=new URLSearchParams(new FormData(f)).toString();apiCall(f.getAttribute('action')+(qs?'?'+qs:''));});});});</script>");
   page += F("</main></body></html>");
   server.send(200, "text/html", page);
 }
@@ -1134,6 +1216,30 @@ void handleSync() {
   server.send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"Relay sync failed; see /state for relayStatus\"}");
 }
 
+
+String jsonString(const String& value) {
+  String out = "\"";
+  for (size_t i = 0; i < value.length(); i++) {
+    char c = value.charAt(i);
+    if (c == '\\' || c == '"') {
+      out += '\\';
+      out += c;
+    } else if (c == '\n') {
+      out += "\\n";
+    } else if (c == '\r') {
+      out += "\\r";
+    } else if (c == '\t') {
+      out += "\\t";
+    } else if ((uint8_t)c < 32) {
+      out += ' ';
+    } else {
+      out += c;
+    }
+  }
+  out += "\"";
+  return out;
+}
+
 void handleExtra() {
   int zone = server.hasArg("zone") ? server.arg("zone").toInt() : 0;
   int minutes = server.hasArg("minutes") ? server.arg("minutes").toInt() : 0;
@@ -1141,19 +1247,47 @@ void handleExtra() {
     server.send(400, "application/json", "{\"ok\":false,\"error\":\"zone must be 1-5 and minutes 1-240\"}");
     return;
   }
-  if (!queueStopped) queueDepth++;
-  pendingExtraZone = zone;
-  pendingExtraMinutes = minutes;
-  server.send(200, "application/json", "{\"ok\":true,\"queued\":true}");
+
+  String relayBody;
+  String relayPath = String("/api/manual-run?zone=") + zone + "&minutes=" + minutes;
+  bool relayOk = relayGetText(relayPath, "Relay manual run /api/manual-run", relayBody);
+
+  if (relayOk) {
+    queueStopped = false;
+    if (queueDepth < 250) queueDepth++;
+    pendingExtraZone = zone;
+    pendingExtraMinutes = minutes;
+    syncFromRelay();
+    forceFullRedraw = true;
+    server.send(200, "application/json", String("{\"ok\":true,\"relayForwarded\":true,\"relayBody\":") + jsonString(relayBody) + "}");
+  } else {
+    forceFullRedraw = true;
+    drawScreen();
+    server.send(502, "application/json", String("{\"ok\":false,\"error\":") + jsonString(relayStatus) + "}");
+  }
 }
 
 void handleStop() {
+  String relayBody;
+  bool relayOk = relayGetText("/api/alloff", "Relay all off /api/alloff", relayBody);
+
   queueStopped = true;
+  queueDepth = 0;
   state.run.active = false;
+  state.run.zone = 0;
+  state.run.remainingSeconds = 0;
+  state.run.totalSeconds = 0;
   pendingExtraZone = 0;
   pendingExtraMinutes = 0;
   forceFullRedraw = true;
-  server.send(200, "application/json", "{\"ok\":true,\"stopped\":true}");
+
+  if (relayOk) {
+    syncFromRelay();
+    server.send(200, "application/json", String("{\"ok\":true,\"stopped\":true,\"relayForwarded\":true,\"relayBody\":") + jsonString(relayBody) + "}");
+  } else {
+    drawScreen();
+    server.send(502, "application/json", String("{\"ok\":false,\"stoppedLocal\":true,\"error\":") + jsonString(relayStatus) + "}");
+  }
 }
 
 void handleSaveZone() {
@@ -1195,12 +1329,15 @@ void handleLedgerReset() { for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) zoneLedg
 void setupRoutes() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/state", HTTP_GET, handleState);
+  server.on("/api/state", HTTP_GET, handleState);
   server.on("/api/config", HTTP_GET, handleConfigGet);
   server.on("/api/config", HTTP_POST, handleConfigPost);
   server.on("/saveConnectivity", HTTP_GET, handleSaveConnectivity);
   server.on("/saveNewsForm", HTTP_GET, handleSaveNewsForm);
   server.on("/extra", HTTP_GET, handleExtra);
+  server.on("/api/manual-run", HTTP_GET, handleExtra);
   server.on("/stop", HTTP_GET, handleStop);
+  server.on("/api/alloff", HTTP_GET, handleStop);
   server.on("/sync", HTTP_GET, handleSync);
   server.on("/redraw", HTTP_GET, handleRedraw);
   server.on("/saveZone", HTTP_GET, handleSaveZone);
@@ -1212,6 +1349,20 @@ void setupRoutes() {
   server.on("/queue/clear", HTTP_GET, handleQueueClear);
   server.on("/queue/stop-clear", HTTP_GET, handleQueueStopClear);
   server.on("/ledger/reset", HTTP_GET, handleLedgerReset);
+
+  // Captive portal detection endpoints used by common clients. Redirecting
+  // these makes phones/laptops open the Garden E-Ink Admin page after joining
+  // the AP instead of showing a blank/success probe page.
+  server.on("/generate_204", HTTP_GET, handleCaptivePortalProbe);
+  server.on("/gen_204", HTTP_GET, handleCaptivePortalProbe);
+  server.on("/hotspot-detect.html", HTTP_GET, handleCaptivePortalProbe);
+  server.on("/library/test/success.html", HTTP_GET, handleCaptivePortalProbe);
+  server.on("/connecttest.txt", HTTP_GET, handleCaptivePortalProbe);
+  server.on("/ncsi.txt", HTTP_GET, handleCaptivePortalProbe);
+  server.on("/fwlink", HTTP_GET, handleCaptivePortalProbe);
+  server.on("/success.txt", HTTP_GET, handleCaptivePortalProbe);
+  server.onNotFound(handleNotFound);
+
   server.begin();
 }
 
@@ -1221,8 +1372,8 @@ void setup() {
   Serial.println();
   Serial.println("Garden E-Ink Zone Display booting...");
 
-  // E-paper display does not need MISO. Do not put GPIO12 into display SPI startup.
-  SPI.begin(EPD_SCLK_PIN, -1, EPD_MOSI_PIN, EPD_CS_PIN);
+  // Shared SPI bus using the verified target-board pinout.
+  SPI.begin(EPD_SCLK_PIN, SD_MISO_PIN, EPD_MOSI_PIN, EPD_CS_PIN);
 
   loadConfig();
   setupWifi();
