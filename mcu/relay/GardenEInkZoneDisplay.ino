@@ -38,10 +38,11 @@ struct WeatherNow {
   float sunlightHours; unsigned long sunriseEpoch; unsigned long sunsetEpoch;
 };
 struct RunState { bool active; uint8_t zone; uint16_t remainingSeconds; uint16_t totalSeconds; };
+static const uint8_t DISPLAY_ZONE_COUNT = 5;
 struct DisplayState {
   char title[64]; char date[32]; char time[16]; bool masterEnable; bool weatherAdjustmentEnabled;
   char gardenNews[512]; char displayMode[16];
-  ZoneCfg zones[5]; WeatherNow weather; RunState run;
+  ZoneCfg zones[DISPLAY_ZONE_COUNT]; WeatherNow weather; RunState run;
 };
 
 DisplayState state = {};
@@ -70,6 +71,25 @@ String ordinalDay(int d) {
   String s = "th";
   if ((d % 100) < 11 || (d % 100) > 13) { if (d % 10 == 1) s = "st"; else if (d % 10 == 2) s = "nd"; else if (d % 10 == 3) s = "rd"; }
   return String(d) + s;
+}
+float directionToDegrees(const char* dir) {
+  if (!dir || !*dir) return 0.0f;
+  if (strcmp(dir, "N") == 0) return 0.0f;
+  if (strcmp(dir, "NE") == 0) return 45.0f;
+  if (strcmp(dir, "E") == 0) return 90.0f;
+  if (strcmp(dir, "SE") == 0) return 135.0f;
+  if (strcmp(dir, "S") == 0) return 180.0f;
+  if (strcmp(dir, "SW") == 0) return 225.0f;
+  if (strcmp(dir, "W") == 0) return 270.0f;
+  if (strcmp(dir, "NW") == 0) return 315.0f;
+  return 0.0f;
+}
+void formatTimeLowerNoLeadingZero(unsigned long epoch, char* out, size_t outSize) {
+  if (!epoch) { snprintf(out, outSize, "--:--"); return; }
+  time_t t = (time_t)epoch;
+  struct tm* tmv = localtime(&t);
+  int hour = tmv->tm_hour % 12; if (hour == 0) hour = 12;
+  snprintf(out, outSize, "%d:%02d%s", hour, tmv->tm_min, tmv->tm_hour >= 12 ? "pm" : "am");
 }
 
 void saveConfig() {
@@ -180,20 +200,48 @@ void drawMap(int x, int y, int w, int h) {
 }
 void drawWeatherWidget(int x, int y, int w, int h) {
   display.drawRect(x,y,w,h,GxEPD_BLACK);
-  display.drawLine(x+235,y+2,x+235,y+h-2,GxEPD_BLACK);
-  display.setCursor(x+8,y+18); display.print(state.weather.condition);
-  display.setCursor(x+8,y+42); display.printf("%.1fF", state.weather.temperatureF);
-  display.setCursor(x+8,y+62); display.printf("Humidity %.0f%%", state.weather.humidityPct);
-  display.setCursor(x+8,y+78); display.printf("Dew point %.0fF", state.weather.dewPointF);
-  display.setCursor(x+8,y+94); display.printf("Precip. chance %.0f%%", state.weather.precipitationChancePct);
-  display.setCursor(x+8,y+110); display.printf("Wind %s %.0f mph", state.weather.windDirection, state.weather.windMph);
-  display.setCursor(x+8,y+126); display.printf("Rain %.2fin  Sun %.1fhr", state.weather.rainIn, state.weather.sunlightHours);
-  int cx=x+295, cy=y+58, r=34;
+  display.drawLine(x+128,y+2,x+128,y+130,GxEPD_BLACK);
+  display.drawLine(x+246,y+2,x+246,y+130,GxEPD_BLACK);
+  display.drawLine(x+2,y+132,x+w-2,y+132,GxEPD_BLACK);
+  display.drawCircle(x+24,y+20,10,GxEPD_BLACK);
+  display.drawLine(x+24,y+7,x+24,y+33,GxEPD_BLACK);
+  display.drawLine(x+11,y+20,x+37,y+20,GxEPD_BLACK);
+  char clippedCondition[20]; snprintf(clippedCondition, sizeof(clippedCondition), "%.18s", state.weather.condition);
+  display.setCursor(x+40,y+20); display.print(clippedCondition);
+  display.setCursor(x+8,y+48); display.printf("%.0fF", state.weather.temperatureF);
+  display.fillCircle(x+136,y+18,2,GxEPD_BLACK); display.setCursor(x+144,y+20); display.printf("Humidity %.0f%%", state.weather.humidityPct);
+  display.drawRect(x+132,y+30,5,10,GxEPD_BLACK); display.setCursor(x+144,y+38); display.printf("Dew point %.0fF", state.weather.dewPointF);
+  display.drawLine(x+132,y+53,x+138,y+59,GxEPD_BLACK); display.drawLine(x+138,y+53,x+132,y+59,GxEPD_BLACK); display.setCursor(x+144,y+56); display.printf("Precip. chance %.0f%%", state.weather.precipitationChancePct);
+  display.drawLine(x+132,y+72,x+138,y+72,GxEPD_BLACK); display.drawLine(x+134,y+69,x+140,y+69,GxEPD_BLACK); display.setCursor(x+144,y+74); display.printf("Wind %s", state.weather.windDirection);
+  display.fillCircle(x+134,y+90,2,GxEPD_BLACK); display.setCursor(x+144,y+92); display.printf("%.0f mph", state.weather.windMph);
+  display.drawCircle(x+134,y+108,3,GxEPD_BLACK); display.setCursor(x+144,y+110); display.printf("Rain %.2fin", state.weather.rainIn);
+  display.drawCircle(x+134,y+126,3,GxEPD_BLACK); display.drawLine(x+134,y+120,x+134,y+132,GxEPD_BLACK); display.setCursor(x+144,y+128); display.printf("Sun %.1fhr", state.weather.sunlightHours);
+  int cx=x+303, cy=y+62, r=44;
   display.drawCircle(cx,cy,r,GxEPD_BLACK); display.setCursor(cx-4,y+20); display.print("N"); display.setCursor(cx-4,y+112); display.print("S"); display.setCursor(cx-r-12,cy+4); display.print("W"); display.setCursor(cx+r+6,cy+4); display.print("E");
-  float rad=(state.weather.windDeg-90)*0.0174533f; int ax=cx+(int)(cos(rad)*r); int ay=cy+(int)(sin(rad)*r); display.drawLine(cx,cy,ax,ay,GxEPD_BLACK);
-  display.drawLine(x+8,y+144,x+224,y+144,GxEPD_BLACK); display.setCursor(x+8,y+156); display.print("Sunrise"); display.setCursor(x+92,y+156); display.print("5:44am"); display.setCursor(x+150,y+156); display.print("Sunset"); display.setCursor(x+208,y+156); display.print("5:56pm");
+  float windDeg = state.weather.windDeg == 0 && strcmp(state.weather.windDirection, "N") != 0 ? directionToDegrees(state.weather.windDirection) : (float)state.weather.windDeg;
+  float rad=(windDeg-90)*0.0174533f; int ax=cx+(int)(cos(rad)*r); int ay=cy+(int)(sin(rad)*r); display.fillTriangle(cx,cy, cx+(int)(cos(rad+2.75f)*16), cy+(int)(sin(rad+2.75f)*16), cx+(int)(cos(rad-2.75f)*16), cy+(int)(sin(rad-2.75f)*16), GxEPD_BLACK); display.drawLine(cx,cy,ax,ay,GxEPD_BLACK);
+  display.setCursor(cx-14, cy+4); display.print(state.weather.windDirection);
+  display.setCursor(cx-20, cy+16); display.printf("%.0f mph", state.weather.windMph);
+  char sunriseTxt[12]; char sunsetTxt[12];
+  formatTimeLowerNoLeadingZero(state.weather.sunriseEpoch, sunriseTxt, sizeof(sunriseTxt));
+  formatTimeLowerNoLeadingZero(state.weather.sunsetEpoch, sunsetTxt, sizeof(sunsetTxt));
+  display.setCursor(x+6,y+145); display.print("Sunrise");
+  display.setCursor(x+10,y+158); display.print(sunriseTxt);
+  for (int hx = x+94; hx <= x+266; hx += 8) display.drawLine(hx, y+154, hx+4, y+154, GxEPD_BLACK);
+  for (int px = 0; px <= 172; px++) { float t = (float)px / 172.0f; float yy = sinf(t * 3.14159f); int sy = y + 154 - (int)(yy * 28.0f); display.drawPixel(x+94+px, sy, GxEPD_BLACK); }
+  unsigned long nowEpoch = time(nullptr);
+  if (state.weather.sunriseEpoch > 0 && state.weather.sunsetEpoch > state.weather.sunriseEpoch) {
+    float pct = (float)((long)nowEpoch - (long)state.weather.sunriseEpoch) / (float)((long)state.weather.sunsetEpoch - (long)state.weather.sunriseEpoch);
+    if (pct < 0.0f) pct = 0.0f; if (pct > 1.0f) pct = 1.0f;
+    int sx = x + 94 + (int)(pct * 172.0f);
+    float yy = sinf((float)(sx - (x + 94)) / 172.0f * 3.14159f);
+    int sy = y + 154 - (int)(yy * 28.0f);
+    display.fillCircle(sx, sy, 4, GxEPD_BLACK);
+  }
+  display.setCursor(x+278,y+145); display.print("Sunset");
+  display.setCursor(x+282,y+158); display.print(sunsetTxt);
 }
-void drawSchedulePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); display.setCursor(x+8,y+18); display.print("Schedule"); for (int i=0;i<5;i++){int row=i%3,col=i/3;int rx=x+8+col*170,ry=y+40+row*28;display.setCursor(rx,ry);display.printf("Zone %d %d:%02dam %dm", i+1, state.zones[i].startHour%12==0?12:state.zones[i].startHour%12, state.zones[i].startMinute, state.zones[i].baseMinutes);} }
+void drawSchedulePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); display.setCursor(x+8,y+18); display.print("Schedule"); for (int i=0;i<DISPLAY_ZONE_COUNT;i++){int row=i%3,col=i/3;int rx=x+8+col*170,ry=y+40+row*28;display.setCursor(rx,ry);display.printf("Zone %d %d:%02dam %dm", i+1, state.zones[i].startHour%12==0?12:state.zones[i].startHour%12, state.zones[i].startMinute, state.zones[i].baseMinutes);} }
 void drawRuntimePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); if (!state.run.active) { display.setCursor(x+8,y+20); display.print("Idle"); display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.setCursor(x+8,y+86); display.print("Remaining: Idle"); return; } display.setCursor(x+8,y+20); display.printf("Running Zone %u", state.run.zone); float r=state.run.totalSeconds?((float)(state.run.totalSeconds-state.run.remainingSeconds)/(float)state.run.totalSeconds):0; if(r<0)r=0;if(r>1)r=1; display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.fillRect(x+9,y+41,(int)((w-18)*r),18,GxEPD_BLACK); display.setCursor(x+8,y+86); display.printf("Remaining: %um %us", state.run.remainingSeconds/60, state.run.remainingSeconds%60); }
 
 void renderScheduleScreenFull() {
@@ -246,7 +294,7 @@ void handleState() {
   doc["pendingExtraZone"] = pendingExtraZone;
   doc["pendingExtraMinutes"] = pendingExtraMinutes;
   JsonArray zones = doc.createNestedArray("zones");
-  for (int i = 0; i < 5; i++) { JsonObject z = zones.createNestedObject(); z["name"] = state.zones[i].name; z["baseMinutes"] = state.zones[i].baseMinutes; z["startHour"] = state.zones[i].startHour; z["startMinute"] = state.zones[i].startMinute; }
+  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) { JsonObject z = zones.createNestedObject(); z["name"] = state.zones[i].name; z["baseMinutes"] = state.zones[i].baseMinutes; z["startHour"] = state.zones[i].startHour; z["startMinute"] = state.zones[i].startMinute; }
   JsonArray history = doc.createNestedArray("history"); history.add("epoch,tempF,rainIn,sunlightHours,windMph,weatherCode,reason");
   JsonArray ledger = doc.createNestedArray("soilLedger"); for (int i=0;i<5;i++) ledger.add(zoneLedger[i]);
   String out; serializeJson(doc, out); server.send(200, "application/json", out);
