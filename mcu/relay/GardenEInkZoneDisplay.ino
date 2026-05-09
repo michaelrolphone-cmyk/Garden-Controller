@@ -1119,28 +1119,75 @@ bool syncFromRelay() {
   DynamicJsonDocument wdoc(4096);
   if (!fetchRelayJson("/weather", wdoc, "Relay weather")) return false;
 
+  // Read the relay weather payload first, then decide if it is valid.
+  // The fixed relay firmware preserves these field names and adds optional
+  // ok/weatherLoaded/weatherStatus fields. Older relay builds may omit the
+  // validity flags, so this display also verifies the actual payload values.
   strlcpy(state.weather.summary, wdoc["summary"] | "", sizeof(state.weather.summary));
   strlcpy(state.weather.condition, wdoc["condition"] | "", sizeof(state.weather.condition));
-
-  // The relay currently uses summary="Updated" as a default/status marker even
-  // when Open-Meteo has not actually populated the weather snapshot. Treat that
-  // as a weather-load failure so the paper display does not present fake 0F data.
-  state.weatherLoaded = true;
-  if (strcmp(state.weather.summary, "Updated") == 0) {
-    state.weatherLoaded = false;
-  }
-
-  state.weather.temperatureF = wdoc["temperatureF"] | 0;
-  state.weather.humidityPct = wdoc["humidityPct"] | 0;
-  state.weather.dewPointF = wdoc["dewPointF"] | 0;
-  state.weather.precipitationChancePct = wdoc["precipitationChancePct"] | 0;
-  state.weather.windMph = wdoc["windMph"] | 0;
+  state.weather.temperatureF = wdoc["temperatureF"] | 0.0f;
+  state.weather.humidityPct = wdoc["humidityPct"] | 0.0f;
+  state.weather.dewPointF = wdoc["dewPointF"] | 0.0f;
+  state.weather.precipitationChancePct = wdoc["precipitationChancePct"] | 0.0f;
+  state.weather.windMph = wdoc["windMph"] | 0.0f;
   state.weather.windDeg = wdoc["windDeg"] | 0;
   strlcpy(state.weather.windDirection, wdoc["windDirection"] | "N", sizeof(state.weather.windDirection));
-  state.weather.rainIn = wdoc["rainIn"] | 0;
-  state.weather.sunlightHours = wdoc["sunlightHours"] | 0;
+  state.weather.rainIn = wdoc["rainIn"] | 0.0f;
+  state.weather.sunlightHours = wdoc["sunlightHours"] | 0.0f;
   state.weather.sunriseEpoch = wdoc["sunriseEpoch"] | 0;
   state.weather.sunsetEpoch = wdoc["sunsetEpoch"] | 0;
+
+  bool relaySaysWeatherLoaded = true;
+  if (!wdoc["weatherLoaded"].isNull()) {
+    relaySaysWeatherLoaded = jsonBool(wdoc["weatherLoaded"], false);
+  } else if (!wdoc["ok"].isNull()) {
+    relaySaysWeatherLoaded = jsonBool(wdoc["ok"], false);
+  }
+
+  String summaryText = String(state.weather.summary);
+  String conditionText = String(state.weather.condition);
+  summaryText.trim();
+  conditionText.trim();
+  String summaryLower = summaryText;
+  String conditionLower = conditionText;
+  summaryLower.toLowerCase();
+  conditionLower.toLowerCase();
+
+  bool oldRelayUpdatedMarker =
+    summaryLower == "updated" ||
+    conditionLower == "updated" ||
+    conditionLower == "open-meteo current+forecast";
+
+  bool hasCondition =
+    conditionText.length() > 0 &&
+    conditionLower != "unknown" &&
+    conditionLower != "weather data unavailable";
+
+  bool hasPlausibleTemp =
+    state.weather.temperatureF > -80.0f &&
+    state.weather.temperatureF < 140.0f;
+
+  bool hasSunTimes =
+    state.weather.sunriseEpoch > 0 &&
+    state.weather.sunsetEpoch > state.weather.sunriseEpoch;
+
+  state.weatherLoaded =
+    relaySaysWeatherLoaded &&
+    !oldRelayUpdatedMarker &&
+    hasCondition &&
+    hasPlausibleTemp &&
+    hasSunTimes;
+
+  if (!state.weatherLoaded) {
+    String weatherStatus = wdoc["weatherStatus"] | "";
+    if (weatherStatus.length() == 0) {
+      weatherStatus = String("Weather payload rejected. summary=") +
+                      state.weather.summary +
+                      " condition=" +
+                      state.weather.condition;
+    }
+    setRelayStatus("Relay weather", weatherStatus, false);
+  }
 
   DynamicJsonDocument sdoc(8192);
   if (!fetchRunState(sdoc)) return false;
@@ -1471,12 +1518,47 @@ void drawWindGauge(int cx, int cy, int r) {
 
   float deg = state.weather.windDeg ? state.weather.windDeg : directionToDegrees(state.weather.windDirection);
   float a = (deg - 90.0f) * PI / 180.0f;
-  int x2 = cx + cos(a) * (r - 1);
-  int y2 = cy + sin(a) * (r - 1);
-  display.drawLine(cx, cy, x2, y2, GxEPD_BLACK);
-  display.fillCircle(x2, y2, 3, GxEPD_BLACK);
-  display.setCursor(cx - 18, cy + 4);
-  display.printf("%.0f", state.weather.windMph);
+
+  // Draw a filled arrowhead near the compass ring with no line from the center.
+  // Shape is a broad filled point with a small V-notch, similar to the reference.
+  float tipDist = r - 2;
+  float baseDist = r - 13;
+  float notchDist = r - 9;
+  float halfWidth = 9.0f;
+  float notchHalfWidth = 2.5f;
+
+  int tipX = (int)roundf(cx + cosf(a) * tipDist);
+  int tipY = (int)roundf(cy + sinf(a) * tipDist);
+  int baseCX = (int)roundf(cx + cosf(a) * baseDist);
+  int baseCY = (int)roundf(cy + sinf(a) * baseDist);
+  int notchX = (int)roundf(cx + cosf(a) * notchDist);
+  int notchY = (int)roundf(cy + sinf(a) * notchDist);
+
+  float perpA = a + PI / 2.0f;
+  int leftX = (int)roundf(baseCX + cosf(perpA) * halfWidth);
+  int leftY = (int)roundf(baseCY + sinf(perpA) * halfWidth);
+  int rightX = (int)roundf(baseCX - cosf(perpA) * halfWidth);
+  int rightY = (int)roundf(baseCY - sinf(perpA) * halfWidth);
+  int notchLeftX = (int)roundf(baseCX + cosf(perpA) * notchHalfWidth);
+  int notchLeftY = (int)roundf(baseCY + sinf(perpA) * notchHalfWidth);
+  int notchRightX = (int)roundf(baseCX - cosf(perpA) * notchHalfWidth);
+  int notchRightY = (int)roundf(baseCY - sinf(perpA) * notchHalfWidth);
+
+  // Fill the broad arrowhead.
+  display.fillTriangle(tipX, tipY, leftX, leftY, rightX, rightY, GxEPD_BLACK);
+  // Carve a small V-notch into the base so it reads as an arrowhead instead of a simple triangle.
+  display.fillTriangle(notchX, notchY, notchLeftX, notchLeftY, notchRightX, notchRightY, GxEPD_WHITE);
+
+  display.setFont(&FreeSans9pt7b);
+  char speedText[12];
+  snprintf(speedText, sizeof(speedText), "%.0fmph", state.weather.windMph);
+  int16_t tbx = 0;
+  int16_t tby = 0;
+  uint16_t tbw = 0;
+  uint16_t tbh = 0;
+  display.getTextBounds(speedText, 0, 0, &tbx, &tby, &tbw, &tbh);
+  display.setCursor(cx - (int)tbw / 2 - tbx, cy + 5);
+  display.print(speedText);
 }
 
 void drawWeatherWidget(int x, int y, int w, int h) {
@@ -1495,19 +1577,19 @@ void drawWeatherWidget(int x, int y, int w, int h) {
   }
 
   display.setFont(&FreeSans9pt7b);
-  drawWeatherIcon(x + 35, y + 42);
+  drawWeatherIcon(x + 45, y + 42);
   display.setFont(&FreeMonoBold12pt7b);
-  display.setCursor(x + 70, y + 42);
+  display.setCursor(x + 90, y + 42);
   display.printf("%.0fF", state.weather.temperatureF);
   display.setFont(&FreeSans9pt7b);
-  display.setCursor(x + 20, y + 82);
+  display.setCursor(x + 20, y + 92);
   display.print(state.weather.condition[0] ? state.weather.condition : "No weather");
 
   display.drawLine(x + 150, y + 8, x + 150, y + 118, GxEPD_BLACK);
   display.setCursor(x + 160, y + 24); display.printf("Humidity %.0f%%", state.weather.humidityPct);
   display.setCursor(x + 160, y + 44); display.printf("Dew point %.0fF", state.weather.dewPointF);
   display.setCursor(x + 160, y + 64); display.printf("Precip %.0f%%", state.weather.precipitationChancePct);
-  display.setCursor(x + 160, y + 84); display.printf("Wind %s", state.weather.windDirection);
+  display.setCursor(x + 160, y + 84); display.printf("Wind %s %.0fmph", state.weather.windDirection, state.weather.windMph);
   display.setCursor(x + 160, y + 104); display.printf("Rain %.2fin", state.weather.rainIn);
 
   drawWindGauge(x + 314, y + 57, 31);
@@ -1523,7 +1605,7 @@ void drawWeatherWidget(int x, int y, int w, int h) {
   // full-circle trick extended below y+160 and visually invaded the schedule panel.
   const int arcX0 = x + 104;
   const int arcX1 = x + 258;
-  const int baseY = y + 149;
+  const int baseY = y + 153;
   const int arcH = 24;
   display.drawLine(arcX0, baseY, arcX1, baseY, GxEPD_BLACK);
   int prevX = arcX0;
