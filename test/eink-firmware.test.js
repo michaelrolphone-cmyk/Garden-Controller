@@ -110,4 +110,43 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
     expect(ino).toContain('display.setPartialWindow(432, 339, 360, 133);');
     expect(ino).toContain('drawRuntimePanel(432, 339, 360, 133);');
   });
+
+  test('runtime panel idle/running meter semantics match requirements', () => {
+    expect(ino).toContain('drawRuntimePanel(432, 339, 360, 133);');
+    expect(ino).toContain('display.print("Idle")');
+    expect(ino).toContain('display.printf("Running Zone %u", state.run.zone);');
+    expect(ino).toContain('display.fillRect(x+9,y+41,(int)((w-18)*r),18,GxEPD_BLACK);');
+    expect(ino).toContain('display.printf("Remaining: %um %us", state.run.remainingSeconds/60, state.run.remainingSeconds%60);');
+  });
+
+  test('news screen wraps body text and keeps monochrome full-screen styling', () => {
+    expect(ino).toContain('drawWrappedTextBlock(16, 120, 760, 20, state.gardenNews);');
+    expect(ino).toContain('display.drawLine(8,48,792,48,GxEPD_BLACK);');
+    expect(ino).toContain('display.drawRect(8,58,784,404,GxEPD_BLACK);');
+  });
+
+  test('weather/history screen includes summary, forecast strips, and readable chart frames', () => {
+    expect(ino).toContain('drawGraphFrame(8,285,784,60,"Temp F","90","70","50","Start","End");');
+    expect(ino).toContain('drawGraphFrame(8,350,784,60,"Rain in","1.0","0.5","0.0","Start","End");');
+    expect(ino).toContain('drawGraphFrame(8,415,784,50,"Sun hrs","12","6","0","Start","End");');
+    expect(ino).toContain('display.drawRect(8,176,784,50,GxEPD_BLACK);');
+    expect(ino).toContain('display.drawRect(8,230,784,50,GxEPD_BLACK);');
+  });
+
+  test('history csv endpoint returns fake weather rows with required schema', () => {
+    expect(ino).toContain('epoch,tempF,rainIn,sunlightHours,windMph,weatherCode,reason');
+    expect(ino).toContain('1715083200,62.3,0.00,9.4,4.1,1000,baseline');
+    expect(ino).toContain('1715169600,65.1,0.12,7.8,6.0,1003,spring-rain');
+  });
+
+
+  test('draws history small-multiple plots using fake CSV rows', () => {
+    expect(ino).toContain('static const char* HISTORY_CSV_DATA =');
+    expect(ino).toContain('int loadFakeHistory(HistoryRow* rows, int maxRows)');
+    expect(ino).toContain('drawHistorySeriesLine(rows, rowCount, 84, 306, 696, 24, true);');
+    expect(ino).toContain('drawHistorySeriesRainBars(rows, rowCount, 84, 371, 696, 24);');
+    expect(ino).toContain('drawHistorySeriesLine(rows, rowCount, 84, 431, 696, 18, false);');
+    expect(ino).toContain('server.send(200,"text/csv",HISTORY_CSV_DATA);');
+  });
+
 });

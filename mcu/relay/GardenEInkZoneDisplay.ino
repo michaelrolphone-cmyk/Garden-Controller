@@ -44,6 +44,14 @@ struct DisplayState {
   char gardenNews[512]; char displayMode[16];
   ZoneCfg zones[DISPLAY_ZONE_COUNT]; WeatherNow weather; RunState run;
 };
+struct HistoryRow { unsigned long epoch; float tempF; float rainIn; float sunlightHours; float windMph; int weatherCode; char reason[24]; };
+static const char* HISTORY_CSV_DATA =
+  "epoch,tempF,rainIn,sunlightHours,windMph,weatherCode,reason\n"
+  "1715083200,62.3,0.00,9.4,4.1,1000,baseline\n"
+  "1715169600,65.1,0.12,7.8,6.0,1003,spring-rain\n"
+  "1715256000,69.8,0.00,10.2,5.4,1000,clear\n"
+  "1715342400,72.4,0.08,11.3,7.2,1006,breezy\n"
+  "1715428800,68.2,0.25,6.5,9.1,1009,storm\n";
 
 DisplayState state = {};
 DisplayState lastDrawn = {};
@@ -242,7 +250,7 @@ void drawWeatherWidget(int x, int y, int w, int h) {
   display.setCursor(x+282,y+158); display.print(sunsetTxt);
 }
 void drawSchedulePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); display.setCursor(x+8,y+18); display.print("Schedule"); for (int i=0;i<DISPLAY_ZONE_COUNT;i++){int row=i%3,col=i/3;int rx=x+8+col*170,ry=y+40+row*28;display.setCursor(rx,ry);display.printf("Zone %d %d:%02dam %dm", i+1, state.zones[i].startHour%12==0?12:state.zones[i].startHour%12, state.zones[i].startMinute, state.zones[i].baseMinutes);} }
-void drawRuntimePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); if (!state.run.active) { display.setCursor(x+8,y+20); display.print("Idle"); display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.setCursor(x+8,y+86); display.print("Remaining: Idle"); return; } display.setCursor(x+8,y+20); display.printf("Running Zone %u", state.run.zone); float r=state.run.totalSeconds?((float)(state.run.totalSeconds-state.run.remainingSeconds)/(float)state.run.totalSeconds):0; if(r<0)r=0;if(r>1)r=1; display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.fillRect(x+9,y+41,(int)((w-18)*r),18,GxEPD_BLACK); display.setCursor(x+8,y+86); display.printf("Remaining: %um %us", state.run.remainingSeconds/60, state.run.remainingSeconds%60); }
+void drawRuntimePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); if (!state.run.active) { display.setCursor(x+8,y+20); display.print("Idle"); display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.setCursor(x+8,y+86); display.print("Idle"); return; } display.setCursor(x+8,y+20); display.printf("Running Zone %u", state.run.zone); float r=state.run.totalSeconds?((float)(state.run.totalSeconds-state.run.remainingSeconds)/(float)state.run.totalSeconds):0; if(r<0)r=0;if(r>1)r=1; display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.fillRect(x+9,y+41,(int)((w-18)*r),18,GxEPD_BLACK); display.setCursor(x+8,y+86); display.printf("Remaining: %um %us", state.run.remainingSeconds/60, state.run.remainingSeconds%60); }
 
 void renderScheduleScreenFull() {
   display.setFullWindow();
@@ -264,8 +272,142 @@ void renderScheduleScreenFull() {
   } while (display.nextPage());
 }
 
-void renderNewsScreenFull() { display.setFullWindow(); display.firstPage(); do { display.fillScreen(GxEPD_WHITE); display.setCursor(8,25); display.print("Castle Hills Garden News"); display.drawLine(8,48,792,48,GxEPD_BLACK); display.setCursor(8,72); display.print(state.date); display.setCursor(680,72); display.print(state.time); display.setCursor(8,110); display.print(state.gardenNews);} while(display.nextPage()); }
-void renderGraphScreenFull() { display.setFullWindow(); display.firstPage(); do { display.fillScreen(GxEPD_WHITE); display.setCursor(8,25); display.print("Current + Weekly Weather"); display.drawLine(8,48,792,48,GxEPD_BLACK); display.drawRect(8,60,784,120,GxEPD_BLACK); display.drawRect(8,190,784,85,GxEPD_BLACK); display.drawRect(8,285,784,85,GxEPD_BLACK); display.drawRect(8,380,784,85,GxEPD_BLACK); display.setCursor(16,210); display.print("Temp F"); display.setCursor(16,305); display.print("Rain in"); display.setCursor(16,400); display.print("Sun hrs"); } while(display.nextPage()); }
+
+void drawWrappedTextBlock(int x, int y, int maxWidth, int lineHeight, const char* text) {
+  if (!text || !*text) return;
+  const int maxCharsPerLine = max(24, maxWidth / 11);
+  char working[512];
+  strlcpy(working, text, sizeof(working));
+  char* token = strtok(working, " ");
+  char line[128] = {0};
+  int currentY = y;
+  while (token) {
+    if (strlen(line) == 0) {
+      strlcpy(line, token, sizeof(line));
+    } else if ((int)(strlen(line) + 1 + strlen(token)) <= maxCharsPerLine) {
+      strlcat(line, " ", sizeof(line));
+      strlcat(line, token, sizeof(line));
+    } else {
+      display.setCursor(x, currentY);
+      display.print(line);
+      currentY += lineHeight;
+      strlcpy(line, token, sizeof(line));
+    }
+    token = strtok(nullptr, " ");
+  }
+  if (strlen(line) > 0) {
+    display.setCursor(x, currentY);
+    display.print(line);
+  }
+}
+
+void renderNewsScreenFull() {
+  display.setFullWindow();
+  display.firstPage();
+  do {
+    display.fillScreen(GxEPD_WHITE);
+    display.setCursor(8,25); display.print("Castle Hills Garden News");
+    display.drawLine(8,48,792,48,GxEPD_BLACK);
+    display.drawRect(8,58,784,404,GxEPD_BLACK);
+    display.setCursor(16,82); display.print(state.date);
+    display.setCursor(650,82); display.print(state.time);
+    display.drawLine(16,92,784,92,GxEPD_BLACK);
+    drawWrappedTextBlock(16, 120, 760, 20, state.gardenNews);
+  } while(display.nextPage());
+}
+
+void drawGraphFrame(int x, int y, int w, int h, const char* title, const char* yTop, const char* yMid, const char* yBot, const char* xLeft, const char* xRight) {
+  display.drawRect(x,y,w,h,GxEPD_BLACK);
+  display.setCursor(x+8,y+16); display.print(title);
+  display.drawLine(x+72,y+20,x+72,y+h-14,GxEPD_BLACK);
+  display.drawLine(x+72,y+h-14,x+w-12,y+h-14,GxEPD_BLACK);
+  display.setCursor(x+8,y+34); display.print(yTop);
+  display.setCursor(x+8,y+h/2); display.print(yMid);
+  display.setCursor(x+8,y+h-16); display.print(yBot);
+  display.setCursor(x+74,y+h-2); display.print(xLeft);
+  display.setCursor(x+w-40,y+h-2); display.print(xRight);
+}
+
+int loadFakeHistory(HistoryRow* rows, int maxRows) {
+  if (!rows || maxRows <= 0) return 0;
+  char csv[768]; strlcpy(csv, HISTORY_CSV_DATA, sizeof(csv));
+  int count = 0;
+  char* line = strtok(csv, "\n");
+  bool skipHeader = true;
+  while (line && count < maxRows) {
+    if (!skipHeader) {
+      HistoryRow r = {};
+      char reason[24] = {0};
+      if (sscanf(line, "%lu,%f,%f,%f,%f,%d,%23s", &r.epoch, &r.tempF, &r.rainIn, &r.sunlightHours, &r.windMph, &r.weatherCode, reason) == 7) {
+        strlcpy(r.reason, reason, sizeof(r.reason));
+        rows[count++] = r;
+      }
+    }
+    skipHeader = false;
+    line = strtok(nullptr, "\n");
+  }
+  return count;
+}
+
+void drawHistorySeriesLine(const HistoryRow* rows, int count, int x, int y, int w, int h, bool tempSeries) {
+  if (!rows || count < 2) return;
+  float minV = 9999.0f, maxV = -9999.0f;
+  for (int i = 0; i < count; i++) {
+    float v = tempSeries ? rows[i].tempF : rows[i].sunlightHours;
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  }
+  float span = max(0.1f, maxV - minV);
+  for (int i = 1; i < count; i++) {
+    int px0 = x + (i - 1) * (w - 1) / (count - 1);
+    int px1 = x + i * (w - 1) / (count - 1);
+    float v0 = tempSeries ? rows[i - 1].tempF : rows[i - 1].sunlightHours;
+    float v1 = tempSeries ? rows[i].tempF : rows[i].sunlightHours;
+    int py0 = y + h - 1 - (int)(((v0 - minV) / span) * (h - 1));
+    int py1 = y + h - 1 - (int)(((v1 - minV) / span) * (h - 1));
+    display.drawLine(px0, py0, px1, py1, GxEPD_BLACK);
+  }
+}
+
+void drawHistorySeriesRainBars(const HistoryRow* rows, int count, int x, int y, int w, int h) {
+  if (!rows || count <= 0) return;
+  float maxRain = 0.0f;
+  for (int i = 0; i < count; i++) if (rows[i].rainIn > maxRain) maxRain = rows[i].rainIn;
+  maxRain = max(0.1f, maxRain);
+  int barW = max(3, (w - 2) / max(1, count));
+  for (int i = 0; i < count; i++) {
+    int px = x + 1 + i * (w - 2) / max(1, count);
+    int bh = (int)((rows[i].rainIn / maxRain) * (h - 2));
+    display.fillRect(px, y + h - 1 - bh, barW - 1, bh, GxEPD_BLACK);
+  }
+}
+
+void renderGraphScreenFull() {
+  display.setFullWindow();
+  display.firstPage();
+  do {
+    display.fillScreen(GxEPD_WHITE);
+    display.setCursor(8,25); display.print("Current + Weekly Weather");
+    display.drawLine(8,48,792,48,GxEPD_BLACK);
+    display.setCursor(16,72); display.print(state.date);
+    display.setCursor(680,72); display.print(state.time);
+    display.drawRect(8,84,784,84,GxEPD_BLACK);
+    display.setCursor(16,106); display.printf("Now %.0fF %s", state.weather.temperatureF, state.weather.condition);
+    display.setCursor(16,126); display.printf("Rain %.2fin  Sun %.1fhr  Wind %.0fmph", state.weather.rainIn, state.weather.sunlightHours, state.weather.windMph);
+    display.drawRect(8,176,784,50,GxEPD_BLACK);
+    display.setCursor(16,202); display.print("7-day forecast strip");
+    display.drawRect(8,230,784,50,GxEPD_BLACK);
+    display.setCursor(16,256); display.print("8-slot hourly forecast strip");
+    drawGraphFrame(8,285,784,60,"Temp F","90","70","50","Start","End");
+    drawGraphFrame(8,350,784,60,"Rain in","1.0","0.5","0.0","Start","End");
+    drawGraphFrame(8,415,784,50,"Sun hrs","12","6","0","Start","End");
+    HistoryRow rows[8];
+    int rowCount = loadFakeHistory(rows, 8);
+    drawHistorySeriesLine(rows, rowCount, 84, 306, 696, 24, true);
+    drawHistorySeriesRainBars(rows, rowCount, 84, 371, 696, 24);
+    drawHistorySeriesLine(rows, rowCount, 84, 431, 696, 18, false);
+  } while(display.nextPage());
+}
 
 void drawScreen() {
   applyScreenRotationMode();
@@ -319,23 +461,25 @@ void handleExtra(){
 void handleStop(){ queueStopped = true; state.run.active = false; pendingExtraZone = 0; pendingExtraMinutes = 0; forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true,\"stopped\":true}"); }
 void handleSaveZone(){
   int zone = server.hasArg("zone") ? server.arg("zone").toInt() : 0;
-  if (zone < 1 || zone > 5) { server.send(400,"application/json","{"ok":false,"error":"zone must be 1-5"}"); return; }
+  if (zone < 1 || zone > 5) { server.send(400,"application/json","{\"ok\":false,\"error\":\"zone must be 1-5\"}"); return; }
   ZoneCfg& z = state.zones[zone - 1];
   if (server.hasArg("name")) strlcpy(z.name, server.arg("name").c_str(), sizeof(z.name));
   if (server.hasArg("baseMinutes")) z.baseMinutes = constrain(server.arg("baseMinutes").toInt(), 1, 240);
   if (server.hasArg("startHour")) z.startHour = constrain(server.arg("startHour").toInt(), 0, 23);
   if (server.hasArg("startMinute")) z.startMinute = constrain(server.arg("startMinute").toInt(), 0, 59);
-  saveConfig(); forceFullRedraw = true; server.send(200,"application/json","{"ok":true}");
+  saveConfig(); forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true}");
 }
 void handleSaveLogic(){ server.send(200,"application/json","{\"ok\":true}"); }
 void handleSaveNews(){ if(server.hasArg("plain")){strlcpy(state.gardenNews, server.arg("plain").c_str(), sizeof(state.gardenNews)); saveConfig(); forceFullRedraw=true;} server.send(200,"application/json","{\"ok\":true}"); }
-void handleHistoryCsv(){ server.send(200,"text/csv","epoch,tempF,rainIn,sunlightHours,windMph,weatherCode,reason\n"); }
+void handleHistoryCsv(){
+  server.send(200,"text/csv",HISTORY_CSV_DATA);
+}
 void handleClearHistory(){ server.send(200,"application/json","{\"ok\":true}"); }
 
 
-void handleQueueClear(){ queueDepth = 0; server.send(200,"application/json","{"ok":true,"queueDepth":0}"); }
-void handleQueueStopClear(){ queueStopped = true; queueDepth = 0; server.send(200,"application/json","{"ok":true,"queueState":"stopped"}"); }
-void handleLedgerReset(){ for(int i=0;i<5;i++) zoneLedger[i]=0; server.send(200,"application/json","{"ok":true}"); }
+void handleQueueClear(){ queueDepth = 0; server.send(200,"application/json","{\"ok\":true,\"queueDepth\":0}"); }
+void handleQueueStopClear(){ queueStopped = true; queueDepth = 0; server.send(200,"application/json","{\"ok\":true,\"queueState\":\"stopped\"}"); }
+void handleLedgerReset(){ for(int i=0;i<5;i++) zoneLedger[i]=0; server.send(200,"application/json","{\"ok\":true}"); }
 
 void setupRoutes() {
   server.on("/", HTTP_GET, handleRoot);
