@@ -16,13 +16,14 @@
 // Snapshot pinout requirements:
 // EPD MOSI=23, SCLK=18, CS=27, DC=14, RST=33, BUSY=13
 // SD CS=5, SD MISO=12
-static const uint8_t EPD_MOSI_PIN = 23;
-static const uint8_t EPD_SCLK_PIN = 18;
-static const uint8_t EPD_CS_PIN = 27;
-static const uint8_t EPD_DC_PIN = 14;
-static const uint8_t EPD_RST_PIN = 33;
-static const uint8_t EPD_BUSY_PIN = 13;
-static const uint8_t SD_CS_PIN = 5;
+static const uint8_t EPD_MOSI_PIN = 4;
+static const uint8_t EPD_SCLK_PIN = 5;
+static const uint8_t EPD_CS_PIN = 7;
+static const uint8_t EPD_DC_PIN = 3;
+static const uint8_t EPD_RST_PIN = 6;
+static const uint8_t EPD_BUSY_PIN = 2;
+static const uint8_t SD_CS_PIN = 20;
+static const uint8_t SD_MISO_PIN = 19;
 
 GxEPD2_BW<GxEPD2_750_GDEY075T7, GxEPD2_750_GDEY075T7::HEIGHT> display(
   GxEPD2_750_GDEY075T7(EPD_CS_PIN, EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN)
@@ -58,8 +59,8 @@ DisplayState state = {};
 DisplayState lastDrawn = {};
 char apSsid[32] = "GardenEInkDisplay";
 char apPass[64] = "gardenpaper";
-char staSsid[32] = "";
-char staPass[64] = "";
+char staSsid[32] = "GardenRelay6";
+char staPass[64] = "gardenwater";
 char relayBase[128] = "http://192.168.4.1";
 char relayApiToken[96] = "";
 unsigned long lastPollMs = 0;
@@ -201,7 +202,7 @@ void syncFromRelay() {
     state.run.totalSeconds = run["durationSeconds"] | 0;
   }
 }
-
+const Pt Z1[]={{24,80},{180,80},{190,150},{140,230},{32,220}};
 const Pt Z2[]={{192,82},{320,82},{330,180},{230,200}};
 const Pt Z3[]={{332,82},{420,82},{420,220},{332,220}};
 const Pt Z4[]={{36,232},{190,232},{180,410},{22,410}};
@@ -576,7 +577,7 @@ void setup() {
   Serial.println("Garden E-Ink Zone Display booting...");
 
   // Display-only SPI. The e-paper panel does not need MISO.
-  SPI.begin(EPD_SCLK_PIN, -1, EPD_MOSI_PIN, EPD_CS_PIN);
+  SPI.begin(EPD_SCLK_PIN, SD_MISO_PIN, EPD_MOSI_PIN, EPD_CS_PIN);
 
   loadConfig();
 
