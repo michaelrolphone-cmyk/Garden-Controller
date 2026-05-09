@@ -23,7 +23,6 @@ static const uint8_t EPD_DC_PIN = 14;
 static const uint8_t EPD_RST_PIN = 33;
 static const uint8_t EPD_BUSY_PIN = 13;
 static const uint8_t SD_CS_PIN = 5;
-static const uint8_t SD_MISO_PIN = 12;
 
 GxEPD2_BW<GxEPD2_750_GDEY075T7, GxEPD2_750_GDEY075T7::HEIGHT> display(
   GxEPD2_750_GDEY075T7(EPD_CS_PIN, EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN)
@@ -143,10 +142,24 @@ void applyScreenRotationMode() {
 }
 
 bool fetchRelayJson(const String& path, DynamicJsonDocument& out) {
-  if (strlen(relayApiToken) == 0) return false;
-  HTTPClient http; http.begin(String(relayBase) + path); http.addHeader("x-api-token", relayApiToken);
-  int code = http.GET(); if (code != 200) { http.end(); return false; }
-  DeserializationError err = deserializeJson(out, http.getString()); http.end(); return !err;
+  HTTPClient http;
+  http.begin(String(relayBase) + path);
+  if (strlen(relayApiToken) > 0) {
+    http.addHeader("x-api-token", relayApiToken);
+  }
+  int code = http.GET();
+  if (code != 200) {
+    Serial.printf("Relay fetch failed %s HTTP %d\n", path.c_str(), code);
+    http.end();
+    return false;
+  }
+  DeserializationError err = deserializeJson(out, http.getString());
+  http.end();
+  if (err) {
+    Serial.printf("Relay JSON parse failed %s: %s\n", path.c_str(), err.c_str());
+    return false;
+  }
+  return true;
 }
 
 void syncFromRelay() {
@@ -557,14 +570,36 @@ void setupRoutes() {
 
 void setup() {
   Serial.begin(115200);
-  SPI.begin(EPD_SCLK_PIN, SD_MISO_PIN, EPD_MOSI_PIN, EPD_CS_PIN);
+  delay(500);
+
+  Serial.println();
+  Serial.println("Garden E-Ink Zone Display booting...");
+
+  // Display-only SPI. The e-paper panel does not need MISO.
+  SPI.begin(EPD_SCLK_PIN, -1, EPD_MOSI_PIN, EPD_CS_PIN);
+
   loadConfig();
+
+  strlcpy(state.title, "Castle Hills Garden Watering Schedule", sizeof(state.title));
+  strlcpy(state.date, "Booting", sizeof(state.date));
+  strlcpy(state.time, "--:--", sizeof(state.time));
+
   setupWifi();
   setupRoutes();
+
+  Serial.println("Initializing e-paper...");
   display.init();
+  display.setRotation(0);
+
   rotationEpochMs = millis();
-  strlcpy(state.title, "Castle Hills Garden Watering Schedule", sizeof(state.title));
   forceFullRedraw = true;
+
+  Serial.println("Drawing first screen...");
+  drawScreen();
+  lastDrawn = state;
+  forceFullRedraw = false;
+
+  Serial.println("Setup complete.");
 }
 
 void loop() {
