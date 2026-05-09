@@ -11,6 +11,7 @@
 #include <Fonts/FreeSans9pt7b.h>
 #include <math.h>
 #include <time.h>
+#include <sys/time.h>
 
 // Required hardware target: 7.5-inch 800x480 GDEY075T7 black/white panel.
 // Verified sample pinout: EPD MOSI=23, SCLK=18, CS=27, DC=14, RST=33, BUSY=13.
@@ -101,7 +102,7 @@ char apSsid[32] = "GardenEInkDisplay";
 char apPass[64] = "gardenpaper";
 char staSsid[32] = "";
 char staPass[64] = "";
-char relayBase[128] = "http://192.168.4.1";
+char relayBase[128] = "http://192.168.50.1";
 char relayApiToken[96] = "";
 
 char bootStatus[256] = "Booting";
@@ -206,7 +207,7 @@ void loadConfig() {
   strlcpy(apPass, prefs.getString("apPass", "gardenpaper").c_str(), sizeof(apPass));
   strlcpy(staSsid, prefs.getString("staSsid", "").c_str(), sizeof(staSsid));
   strlcpy(staPass, prefs.getString("staPass", "").c_str(), sizeof(staPass));
-  strlcpy(relayBase, prefs.getString("relayBase", "http://192.168.4.1").c_str(), sizeof(relayBase));
+  strlcpy(relayBase, prefs.getString("relayBase", "http://192.168.50.1").c_str(), sizeof(relayBase));
   strlcpy(relayApiToken, prefs.getString("relayApiToken", "").c_str(), sizeof(relayApiToken));
   strlcpy(state.displayMode, prefs.getString("displayMode", MODE_AUTO).c_str(), sizeof(state.displayMode));
   strlcpy(state.gardenNews, prefs.getString("gardenNews", "Welcome to Castle Hills Garden.").c_str(), sizeof(state.gardenNews));
@@ -381,6 +382,13 @@ bool syncFromRelay() {
     return false;
   }
 
+  setenv("TZ", "MST7MDT,M3.2.0,M11.1.0", 1);
+  tzset();
+  struct timeval tv;
+  tv.tv_sec = (time_t)epoch;
+  tv.tv_usec = 0;
+  settimeofday(&tv, nullptr);
+
   time_t now = (time_t)epoch;
   struct tm* tmv = localtime(&now);
   const char* weekdays[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
@@ -554,9 +562,9 @@ void drawWeatherWidget(int x, int y, int w, int h) {
   formatTimeLowerNoLeadingZero(state.weather.sunsetEpoch, sunsetTxt, sizeof(sunsetTxt));
   display.setCursor(x + 12, y + 145); display.print("Sunrise");
   display.setCursor(x + 12, y + 158); display.print(sunriseTxt);
-  display.drawLine(x + 98, y + 153, x + 262, y + 153, GxEPD_BLACK);
   display.drawCircle(x + 180, y + 153, 78, GxEPD_BLACK);
   display.fillRect(x + 96, y + 153, 170, 34, GxEPD_WHITE);
+  display.drawLine(x + 98, y + 153, x + 262, y + 153, GxEPD_BLACK);
   unsigned long nowEpoch = time(nullptr);
   if (state.weather.sunriseEpoch > 0 && state.weather.sunsetEpoch > state.weather.sunriseEpoch) {
     float pct = (float)((long)nowEpoch - (long)state.weather.sunriseEpoch) / (float)((long)state.weather.sunsetEpoch - (long)state.weather.sunriseEpoch);
@@ -589,6 +597,7 @@ void drawSchedulePanel(int x, int y, int w, int h) {
 }
 
 void drawRuntimePanel(int x, int y, int w, int h) {
+  display.fillRect(x, y, w, h, GxEPD_WHITE);
   display.drawRect(x, y, w, h, GxEPD_BLACK);
   display.setFont(&FreeMonoBold12pt7b);
   if (!state.run.active) {
@@ -832,7 +841,13 @@ bool substantialChange() {
   if (state.run.active != lastDrawn.run.active) return true;
   if (state.run.zone != lastDrawn.run.zone) return true;
   if (strcmp(state.title, lastDrawn.title) != 0) return true;
-  if (relayDataReady != (!forceDiagnosticScreen)) return true;
+  static bool lastRelayReadySeen = false;
+  static bool lastDiagnosticSeen = true;
+  if (relayDataReady != lastRelayReadySeen || forceDiagnosticScreen != lastDiagnosticSeen) {
+    lastRelayReadySeen = relayDataReady;
+    lastDiagnosticSeen = forceDiagnosticScreen;
+    return true;
+  }
   return false;
 }
 
@@ -885,7 +900,7 @@ void handleRoot() {
   page += F("AP: "); page += htmlEscape(apSsid); page += F(" "); page += WiFi.softAPIP().toString(); page += F("\n");
   page += F("STA: "); page += htmlEscape(staSsid); page += F(" "); page += wifiStatusName(WiFi.status()); page += F(" "); page += (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("none")); page += F("\n");
   page += F("Relay: "); page += htmlEscape(relayBase); page += F("\n");
-  page += F("Stage: "); page += htmlEscape(relayStage); page += F("\n");
+  page += F("Stage: "); page += htmlEscape(relayLastStage); page += F("\n");
   page += F("Message: "); page += htmlEscape(relayStatus);
   page += F("</div><a class='btn' href='/sync'>Sync Relay</a><a class='btn' href='/redraw'>Redraw E-Paper</a><a class='btn' href='/stop'>Stop / All Off</a></section>");
 
