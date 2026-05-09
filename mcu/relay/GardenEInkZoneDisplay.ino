@@ -9,6 +9,7 @@
 #include <GxEPD2_BW.h>
 #include <Fonts/FreeMonoBold12pt7b.h>
 #include <Fonts/FreeMono9pt7b.h>
+#include <Fonts/FreeSans9pt7b.h>
 #include <math.h>
 
 // Required hardware target: 7.5-inch 800x480 GDEY075T7 black/white panel.
@@ -228,7 +229,7 @@ void drawWeatherWidget(int x, int y, int w, int h) {
   int cx=x+303, cy=y+62, r=44;
   display.drawCircle(cx,cy,r,GxEPD_BLACK); display.setCursor(cx-4,y+20); display.print("N"); display.setCursor(cx-4,y+112); display.print("S"); display.setCursor(cx-r-12,cy+4); display.print("W"); display.setCursor(cx+r+6,cy+4); display.print("E");
   float windDeg = state.weather.windDeg == 0 && strcmp(state.weather.windDirection, "N") != 0 ? directionToDegrees(state.weather.windDirection) : (float)state.weather.windDeg;
-  float rad=(windDeg-90)*0.0174533f; int ax=cx+(int)(cos(rad)*r); int ay=cy+(int)(sin(rad)*r); display.fillTriangle(cx,cy, cx+(int)(cos(rad+2.75f)*16), cy+(int)(sin(rad+2.75f)*16), cx+(int)(cos(rad-2.75f)*16), cy+(int)(sin(rad-2.75f)*16), GxEPD_BLACK); display.drawLine(cx,cy,ax,ay,GxEPD_BLACK);
+  float rad=(windDeg-90)*0.0174533f; int ax=cx+(int)(cos(rad)*r); int ay=cy+(int)(sin(rad)*r); display.fillTriangle(cx,cy, cx+(int)(cos(rad+2.75f)*10), cy+(int)(sin(rad+2.75f)*10), cx+(int)(cos(rad-2.75f)*10), cy+(int)(sin(rad-2.75f)*10), GxEPD_BLACK); display.drawLine(cx,cy,ax,ay,GxEPD_BLACK);
   display.setCursor(cx-14, cy+4); display.print(state.weather.windDirection);
   display.setCursor(cx-20, cy+16); display.printf("%.0f mph", state.weather.windMph);
   char sunriseTxt[12]; char sunsetTxt[12];
@@ -237,20 +238,28 @@ void drawWeatherWidget(int x, int y, int w, int h) {
   display.setCursor(x+6,y+145); display.print("Sunrise");
   display.setCursor(x+10,y+158); display.print(sunriseTxt);
   for (int hx = x+94; hx <= x+266; hx += 8) display.drawLine(hx, y+154, hx+4, y+154, GxEPD_BLACK);
-  for (int px = 0; px <= 172; px++) { float t = (float)px / 172.0f; float yy = sinf(t * 3.14159f); int sy = y + 154 - (int)(yy * 28.0f); display.drawPixel(x+94+px, sy, GxEPD_BLACK); }
+  for (int px = -86; px <= 86; px++) { float norm = (float)px / 86.0f; float yy = sqrtf(max(0.0f, 1.0f - norm * norm)); int sy = y + 154 - (int)(yy * 28.0f); display.drawPixel(x+180+px, sy, GxEPD_BLACK); }
   unsigned long nowEpoch = time(nullptr);
   if (state.weather.sunriseEpoch > 0 && state.weather.sunsetEpoch > state.weather.sunriseEpoch) {
     float pct = (float)((long)nowEpoch - (long)state.weather.sunriseEpoch) / (float)((long)state.weather.sunsetEpoch - (long)state.weather.sunriseEpoch);
     if (pct < 0.0f) pct = 0.0f; if (pct > 1.0f) pct = 1.0f;
     int sx = x + 94 + (int)(pct * 172.0f);
-    float yy = sinf((float)(sx - (x + 94)) / 172.0f * 3.14159f);
+    float localNorm = ((float)sx - (float)(x + 180)) / 86.0f;
+    float yy = sqrtf(max(0.0f, 1.0f - localNorm * localNorm));
     int sy = y + 154 - (int)(yy * 28.0f);
     display.fillCircle(sx, sy, 4, GxEPD_BLACK);
   }
   display.setCursor(x+278,y+145); display.print("Sunset");
   display.setCursor(x+282,y+158); display.print(sunsetTxt);
 }
-void drawSchedulePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); display.setCursor(x+8,y+18); display.print("Schedule"); for (int i=0;i<DISPLAY_ZONE_COUNT;i++){int row=i%3,col=i/3;int rx=x+8+col*170,ry=y+40+row*28;display.setCursor(rx,ry);display.printf("Zone %d %d:%02dam %dm", i+1, state.zones[i].startHour%12==0?12:state.zones[i].startHour%12, state.zones[i].startMinute, state.zones[i].baseMinutes);} }
+void drawSchedulePanel(int x, int y, int w, int h) {
+  display.drawRect(x,y,w,h,GxEPD_BLACK);
+  display.setCursor(x+8,y+18); display.print("Schedule");
+  for (int i=0;i<DISPLAY_ZONE_COUNT;i++){
+    int row=i%3,col=i/3;int rx=x+8+col*170,ry=y+40+row*28;
+    display.setCursor(rx,ry); display.printf("Z%d %d:%02d %dm", i+1, state.zones[i].startHour%12==0?12:state.zones[i].startHour%12, state.zones[i].startMinute, state.zones[i].baseMinutes);
+  }
+}
 void drawRuntimePanel(int x, int y, int w, int h) { display.drawRect(x,y,w,h,GxEPD_BLACK); if (!state.run.active) { if (lastFinishedZone > 0) { display.setCursor(x+8,y+20); display.printf("Finished Zone %u", lastFinishedZone); } else { display.setCursor(x+8,y+20); display.print("Idle"); } display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.setCursor(x+8,y+86); display.print("Idle"); return; } display.setCursor(x+8,y+20); display.printf("Running Zone %u", state.run.zone); float r=state.run.totalSeconds?((float)(state.run.totalSeconds-state.run.remainingSeconds)/(float)state.run.totalSeconds):0; if(r<0)r=0;if(r>1)r=1; display.drawRect(x+8,y+40,w-16,20,GxEPD_BLACK); display.fillRect(x+9,y+41,(int)((w-18)*r),18,GxEPD_BLACK); display.setCursor(x+8,y+86); display.printf("Remaining: %um %us", state.run.remainingSeconds/60, state.run.remainingSeconds%60); }
 
 void renderScheduleScreenFull() {
@@ -261,6 +270,7 @@ void renderScheduleScreenFull() {
     display.setFont(&FreeMonoBold12pt7b);
     display.setCursor(8, 25);
     display.print("Castle Hills Garden Watering Schedule");
+    display.setFont(&FreeSans9pt7b);
     display.setCursor(570, 25);
     display.print(state.date);
     display.setCursor(690, 44);
@@ -307,7 +317,9 @@ void renderNewsScreenFull() {
   display.firstPage();
   do {
     display.fillScreen(GxEPD_WHITE);
+    display.setFont(&FreeMonoBold12pt7b);
     display.setCursor(8,25); display.print("Castle Hills Garden News");
+    display.setFont(&FreeSans9pt7b);
     display.drawLine(8,48,792,48,GxEPD_BLACK);
     display.drawRect(8,58,784,404,GxEPD_BLACK);
     display.setCursor(16,82); display.print(state.date);
@@ -388,7 +400,9 @@ void renderGraphScreenFull() {
   display.firstPage();
   do {
     display.fillScreen(GxEPD_WHITE);
+    display.setFont(&FreeMonoBold12pt7b);
     display.setCursor(8,25); display.print("Current + Weekly Weather");
+    display.setFont(&FreeSans9pt7b);
     display.drawLine(8,48,792,48,GxEPD_BLACK);
     display.setCursor(16,72); display.print(state.date);
     display.setCursor(680,72); display.print(state.time);
@@ -427,8 +441,17 @@ bool substantialChange() {
 
 void handleRoot() {
   server.send(200, "text/html",
-    "<html><body><h1>Garden E-Ink Admin</h1>"
-    "<p>Status / Garden Map / Zones / Full-Screen Garden News / Weather History</p>"
+    "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'><style>body{font-family:Arial,sans-serif;padding:4px;margin:0;color:#000;background:#fff}section{border:1px solid #000;padding:6px;margin:0 0 6px 0}button{margin:2px 4px 2px 0;padding:6px 8px;border:1px solid #000;background:#fff;color:#000}input,select,textarea{margin:2px 4px 2px 0;padding:4px;max-width:100%;border:1px solid #000;background:#fff;color:#000}pre{white-space:pre-wrap;word-break:break-word}h1,h2{font-family:monospace;font-weight:700;margin:4px 0}label,p,div,span{font-family:Arial,sans-serif}</style></head><body><h1>Garden E-Ink Admin</h1>"
+    "<section><h2>Status</h2><div><b>Weather summary:</b> <span id='st-weather'>loading...</span></div><div><b>Garden news:</b> <span id='st-news'>loading...</span></div><div><b>Running state:</b> <span id='st-run'>loading...</span></div><div><b>Map preview:</b> <span id='st-map'>loading...</span></div><div><b>Soil water ledger summary per zone:</b> <span id='st-ledger'>loading...</span></div><div id='st-error' style='color:#a00'></div></section>"
+    "<section><h2>Garden Map</h2><p>Map preview follows active zone on display.</p></section><section><h2>Zones</h2><label>Zone <select id='zoneCfg'><option value='1'>1</option><option value='2'>2</option><option value='3'>3</option><option value='4'>4</option><option value='5'>5</option></select></label><label>Name <input id='zoneName' maxlength='23'></label><label>Base Minutes <input id='baseMinutes' type='number' min='1' max='240' value='10'></label><label>Start Hour <input id='startHour' type='number' min='0' max='23' value='6'></label><label>Start Minute <input id='startMinute' type='number' min='0' max='59' value='0'></label></section><section><h2>Full-Screen Garden News</h2><textarea id='news' rows='4' cols='40'></textarea></section><section><h2>Weather History</h2><p>Use Download CSV to export or Clear History to reset.</p></section>"
+    "<button onclick=\"fetch('/stop').then(()=>location.reload())\">Stop / All Off</button>"
+    "<button onclick=\"fetch('/sync').then(()=>location.reload())\">Sync Weather</button>"
+    "<button onclick=\"fetch('/redraw').then(()=>location.reload())\">Redraw E-Paper</button>"
+    "<button onclick=\"saveZone()\">Save Zone</button>"
+    "<button onclick=\"fetch('/saveLogic').then(()=>location.reload())\">Save Logic</button>"
+    "<button onclick=\"saveNews()\">Save News to SD</button>"
+    "<button onclick=\"window.location='/history.csv'\">Download CSV</button>"
+    "<button onclick=\"fetch('/clearHistory').then(()=>location.reload())\">Clear History</button>"
     "<h2>Display Mode</h2>"
     "<button onclick=\"fetch('/display?mode=schedule').then(()=>location.reload())\">Show Schedule</button>"
     "<button onclick=\"fetch('/display?mode=news').then(()=>location.reload())\">Show News</button>"
@@ -439,7 +462,15 @@ void handleRoot() {
     "<option value='1'>1</option><option value='2'>2</option><option value='3'>3</option><option value='4'>4</option><option value='5'>5</option>"
     "</select></label>"
     "<label>Minutes input <input id='minutes' type='number' min='1' max='240' value='10'></label>"
-    "<button onclick=\"fetch('/extra?zone='+encodeURIComponent(document.getElementById('zone').value)+'&minutes='+encodeURIComponent(document.getElementById('minutes').value)).then(()=>location.reload())\">Run Extra Water</button>"
+    "<button onclick=\"fetch('/extra?zone='+encodeURIComponent(document.getElementById('zone').value)+'&minutes='+encodeURIComponent(document.getElementById('minutes').value)).then(()=>location.reload())\">Queue Extra Water</button>"
+    "<script>"
+    "function fmtRun(s){return s.currentRunActive?('active zone '+s.currentRunZone):'idle';}"
+    "function fmtLedger(v){if(!Array.isArray(v))return 'n/a';return v.map((n,i)=>'Z'+(i+1)+': '+Number(n).toFixed(2)).join(' | ');}"
+    "function fmtMap(s){if(!s.currentRunActive)return 'no active watering, map idle';return 'active zone '+s.currentRunZone+' highlighted';}"
+    "function saveNews(){fetch('/saveNews',{method:'POST',body:document.getElementById('news').value}).then(()=>location.reload());}"
+    "function saveZone(){const z=document.getElementById('zoneCfg').value;const q='?zone='+encodeURIComponent(z)+'&name='+encodeURIComponent(document.getElementById('zoneName').value)+'&baseMinutes='+encodeURIComponent(document.getElementById('baseMinutes').value)+'&startHour='+encodeURIComponent(document.getElementById('startHour').value)+'&startMinute='+encodeURIComponent(document.getElementById('startMinute').value);fetch('/saveZone'+q).then(()=>location.reload());}"
+    "fetch('/state').then(r=>{if(!r.ok) throw new Error('state request failed: '+r.status);return r.json();}).then(s=>{document.getElementById('st-weather').textContent=(s.weather&&s.weather.summary)?s.weather.summary:'n/a';document.getElementById('st-news').textContent=s.gardenNews||'';document.getElementById('st-run').textContent=fmtRun(s);document.getElementById('st-map').textContent=fmtMap(s);document.getElementById('st-ledger').textContent=fmtLedger(s.soilLedger);if(Array.isArray(s.zones)&&s.zones.length){const z=s.zones[0];document.getElementById('zoneName').value=z.name||'';document.getElementById('baseMinutes').value=z.baseMinutes||10;document.getElementById('startHour').value=z.startHour||0;document.getElementById('startMinute').value=z.startMinute||0;}document.getElementById('news').value=s.gardenNews||'';}).catch((err)=>{document.getElementById('st-error').textContent=String(err);});"
+    "</script>"
     "</body></html>");
 }
 void handleState() {
@@ -448,6 +479,13 @@ void handleState() {
   doc["masterEnable"] = state.masterEnable; doc["weatherAdjustmentEnabled"] = state.weatherAdjustmentEnabled;
   doc["gardenNews"] = state.gardenNews; doc["currentRunActive"] = state.run.active; doc["currentRunZone"] = state.run.zone;
   doc["displayMode"] = state.displayMode;
+  JsonObject weather = doc.createNestedObject("weather");
+  weather["summary"] = state.weather.summary; weather["condition"] = state.weather.condition;
+  weather["temperatureF"] = state.weather.temperatureF; weather["humidityPct"] = state.weather.humidityPct;
+  weather["dewPointF"] = state.weather.dewPointF; weather["precipitationChancePct"] = state.weather.precipitationChancePct;
+  weather["windMph"] = state.weather.windMph; weather["windDeg"] = state.weather.windDeg;
+  weather["windDirection"] = state.weather.windDirection; weather["rainIn"] = state.weather.rainIn;
+  weather["sunlightHours"] = state.weather.sunlightHours; weather["sunriseEpoch"] = state.weather.sunriseEpoch; weather["sunsetEpoch"] = state.weather.sunsetEpoch;
   doc["queueState"] = queueStopped ? "stopped" : "running";
   doc["queueDepth"] = queueDepth;
   doc["pendingExtraZone"] = pendingExtraZone;
@@ -459,7 +497,7 @@ void handleState() {
   String out; serializeJson(doc, out); server.send(200, "application/json", out);
 }
 void handleConfigGet(){ StaticJsonDocument<512> d; d["apSsid"]=apSsid; d["staSsid"]=staSsid; d["relayBase"]=relayBase; String out; serializeJson(d,out); server.send(200,"application/json",out);} 
-void handleConfigPost(){ if(!server.hasArg("plain")){server.send(400,"application/json","{\"ok\":false}");return;} DynamicJsonDocument d(1024); if(deserializeJson(d,server.arg("plain"))){server.send(400,"application/json","{\"ok\":false}");return;} if(d["staSsid"].is<const char*>())strlcpy(staSsid,d["staSsid"],sizeof(staSsid)); if(d["staPass"].is<const char*>())strlcpy(staPass,d["staPass"],sizeof(staPass)); if(d["relayBase"].is<const char*>())strlcpy(relayBase,d["relayBase"],sizeof(relayBase)); if(d["relayApiToken"].is<const char*>())strlcpy(relayApiToken,d["relayApiToken"],sizeof(relayApiToken)); saveConfig(); server.send(200,"application/json","{\"ok\":true}"); }
+void handleConfigPost(){ if(!server.hasArg("plain")){server.send(400,"application/json","{\"ok\":false}");return;} DynamicJsonDocument d(1024); if(deserializeJson(d,server.arg("plain"))){server.send(400,"application/json","{\"ok\":false}");return;} if(d["staSsid"].is<const char*>())strlcpy(staSsid,d["staSsid"],sizeof(staSsid)); if(d["staPass"].is<const char*>())strlcpy(staPass,d["staPass"],sizeof(staPass)); if(d["relayBase"].is<const char*>())strlcpy(relayBase,d["relayBase"],sizeof(relayBase)); if(d["relayApiToken"].is<const char*>())strlcpy(relayApiToken,d["relayApiToken"],sizeof(relayApiToken)); saveConfig(); forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true}"); }
 void handleDisplayMode(){ String m=server.arg("mode"); if(m=="auto"||m=="schedule"||m=="news"||m=="graph"){strlcpy(state.displayMode,m.c_str(),sizeof(state.displayMode)); saveConfig(); forceFullRedraw=true;} server.send(200,"application/json","{\"ok\":true}"); }
 void handleRedraw(){ forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true}"); }
 void handleSync(){ syncFromRelay(); forceFullRedraw=true; server.send(200,"application/json","{\"ok\":true}"); }
@@ -486,7 +524,7 @@ void handleSaveZone(){
   if (server.hasArg("startMinute")) z.startMinute = constrain(server.arg("startMinute").toInt(), 0, 59);
   saveConfig(); forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true}");
 }
-void handleSaveLogic(){ server.send(200,"application/json","{\"ok\":true}"); }
+void handleSaveLogic(){ forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true}"); }
 void handleSaveNews(){ if(server.hasArg("plain")){strlcpy(state.gardenNews, server.arg("plain").c_str(), sizeof(state.gardenNews)); saveConfig(); forceFullRedraw=true;} server.send(200,"application/json","{\"ok\":true}"); }
 void handleHistoryCsv(){
   server.send(200,"text/csv",HISTORY_CSV_DATA);

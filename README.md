@@ -245,6 +245,9 @@ Relay APIs consumed by e-paper firmware:
 
 State payload additions:
 - `/state` includes `queueState`, `queueDepth`, `pendingExtraZone`, `pendingExtraMinutes`, and `soilLedger` metrics for dashboard/admin visibility.
+- `/state` also includes nested `weather` summary fields (`summary`, `condition`, `temperatureF`, `humidityPct`, `dewPointF`, `precipitationChancePct`, `windMph`, `windDeg`, `windDirection`, `rainIn`, `sunlightHours`, `sunriseEpoch`, `sunsetEpoch`).
+- `GET /` serves a mobile-friendly admin UI with sections (`Status`, `Garden Map`, `Zones`, `Full-Screen Garden News`, `Weather History`) and controls (`Stop / All Off`, `Sync Weather`, `Redraw E-Paper`, `Queue Extra Water`, `Save Zone`, `Save Logic`, `Save News to SD`, `Download CSV`, `Clear History`) backed by `/state`.
+- The admin UI is monochrome and compact (1px borders, no decorative backgrounds/color assumptions) to match simulator visual constraints and readability goals.
 
 Display behavior:
 - Main schedule screen title: `Castle Hills Garden Watering Schedule`.
@@ -257,7 +260,11 @@ Display behavior:
 - Auto-rotation cycle: 4 minutes with watering-active suppression to schedule screen.
 - Garden map uses zone polygons with active-zone hatch + inverted label badges for readability.
 - Weather widget includes compass-style wind gauge and sunrise/sunset strip.
+- Sun strip uses a non-stretched semicircle arc; wind arrow is compact to avoid overlap; schedule rows use compact fixed zone/time formatting to avoid row clipping.
 - Full refresh on substantial layout/screen changes; partial refresh for runtime meter updates.
+- Redraw triggers include boot completion, weather sync completion, zone/config/logic/news saves, manual redraw requests, watering start/end transitions, runtime meter updates, and screen rotation/title changes.
+- Visual style follows simulator rules: black/white only, thin single-line borders/dividers, no doubled seams or decorative backgrounds, no overlapping/clipped text/icons, and compact readable layout.
+- Typography uses bold monospace for major headers and key values with readable sans-serif for dense label/body content.
 
 CLI commands:
 ```bash

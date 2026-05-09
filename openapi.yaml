@@ -334,3 +334,66 @@ paths:
     get:
       responses:
         '200': { description: OpenAPI document as JSON }
+
+  /:
+    get:
+      description: E-paper controller mobile admin UI root page.
+      responses:
+        '200': { description: Admin HTML }
+  /state:
+    get:
+      description: E-paper controller state payload for admin/status UI.
+      responses:
+        '200': { description: E-paper state JSON }
+  /extra:
+    get:
+      parameters:
+        - in: query
+          name: zone
+          schema: { type: integer, minimum: 1, maximum: 5 }
+        - in: query
+          name: minutes
+          schema: { type: integer, minimum: 1, maximum: 240 }
+      responses:
+        '200': { description: Extra watering queued }
+        '400': { description: Invalid zone/minutes }
+  /stop:
+    get:
+      responses: { '200': { description: Stop/All Off accepted } }
+  /sync:
+    get:
+      responses: { '200': { description: Weather sync requested } }
+  /redraw:
+    get:
+      responses: { '200': { description: Manual redraw requested } }
+  /saveZone:
+    get:
+      responses: { '200': { description: Zone saved } }
+  /saveLogic:
+    get:
+      responses: { '200': { description: Logic saved } }
+  /saveNews:
+    post:
+      responses: { '200': { description: News saved to SD/preferences } }
+  /history.csv:
+    get:
+      responses: { '200': { description: CSV history export } }
+  /clearHistory:
+    get:
+      responses: { '200': { description: History cleared } }
+  /display:
+    get:
+      parameters:
+        - in: query
+          name: mode
+          schema: { type: string, enum: [auto, schedule, news, graph] }
+      responses: { '200': { description: Display mode set } }
+  /queue/clear:
+    get:
+      responses: { '200': { description: Queue cleared } }
+  /queue/stop-clear:
+    get:
+      responses: { '200': { description: Queue stopped and cleared } }
+  /ledger/reset:
+    get:
+      responses: { '200': { description: Soil ledger reset } }
