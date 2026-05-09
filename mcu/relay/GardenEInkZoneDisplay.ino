@@ -84,6 +84,7 @@ struct DisplayState {
   char time[16];
   bool masterEnable;
   bool weatherAdjustmentEnabled;
+  bool weatherLoaded;
   char gardenNews[512];
   char displayMode[16];
   ZoneCfg zones[DISPLAY_ZONE_COUNT];
@@ -1001,6 +1002,15 @@ bool syncFromRelay() {
 
   strlcpy(state.weather.summary, wdoc["summary"] | "", sizeof(state.weather.summary));
   strlcpy(state.weather.condition, wdoc["condition"] | "", sizeof(state.weather.condition));
+
+  // The relay currently uses summary="Updated" as a default/status marker even
+  // when Open-Meteo has not actually populated the weather snapshot. Treat that
+  // as a weather-load failure so the paper display does not present fake 0F data.
+  state.weatherLoaded = true;
+  if (strcmp(state.weather.summary, "Updated") == 0) {
+    state.weatherLoaded = false;
+  }
+
   state.weather.temperatureF = wdoc["temperatureF"] | 0;
   state.weather.humidityPct = wdoc["humidityPct"] | 0;
   state.weather.dewPointF = wdoc["dewPointF"] | 0;
@@ -1306,6 +1316,19 @@ void drawWindGauge(int cx, int cy, int r) {
 
 void drawWeatherWidget(int x, int y, int w, int h) {
   display.drawRect(x, y, w, h, GxEPD_BLACK);
+
+  if (!state.weatherLoaded) {
+    display.setFont(&FreeMonoBold12pt7b);
+    display.setCursor(x + 20, y + 62);
+    display.print("Unable to load");
+    display.setCursor(x + 20, y + 92);
+    display.print("weather data");
+    display.setFont(&FreeSans9pt7b);
+    display.setCursor(x + 20, y + 124);
+    display.print("Relay returned no weather.");
+    return;
+  }
+
   display.setFont(&FreeSans9pt7b);
   drawWeatherIcon(x + 35, y + 42);
   display.setFont(&FreeMonoBold12pt7b);
@@ -1375,14 +1398,16 @@ void drawSchedulePanel(int x, int y, int w, int h) {
     return;
   }
   for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
-    int sy = y + 45 + i * 17;
+    // One schedule row per watering zone. Use wider spacing so the
+    // schedule does not collapse into an unreadable text block.
+    int sy = y + 47 + i * 20;
 
     display.setFont(&FreeSansBold9pt7b);
     display.setCursor(x + 10, sy);
     display.printf("Zone %d", i + 1);
 
     display.setFont(&FreeSans9pt7b);
-    display.setCursor(x + 78, sy);
+    display.setCursor(x + 82, sy);
     if (!state.scheduleZoneLoaded[i]) {
       display.print("Not Loaded");
       continue;
@@ -1429,22 +1454,23 @@ void drawRuntimePanel(int x, int y, int w, int h) {
   if (remaining == 0 && meterZone == state.run.zone) remaining = state.run.remainingSeconds;
   if (total == 0 && meterZone == state.run.zone) total = state.run.totalSeconds;
 
-  display.setCursor(x + 8, y + 39);
-  display.printf("Running Zone %u", meterZone);
+  // Keep the active-run header compact and low in the panel so the
+  // schedule panel above has the visual priority. Do not add extra
+  // status text below; the meter itself is the status.
   display.setFont(&FreeMonoBold12pt7b);
-  display.setCursor(x + 225, y + 39);
+  display.setCursor(x + 8, y + 55);
+  display.printf("Running Zone %u", meterZone);
+
+  // Keep the countdown visually secondary to the running-zone label.
+  // Regular/smaller text makes the zone label easier to read at a glance.
+  display.setFont(&FreeSans9pt7b);
+  display.setCursor(x + 238, y + 54);
   display.printf("%um %us", remaining / 60, remaining % 60);
 
   float r = total ? ((float)(total - remaining) / (float)total) : 0;
   r = constrain(r, 0.0f, 1.0f);
-  display.drawRect(x + 8, y + 72, w - 16, 24, GxEPD_BLACK);
-  display.fillRect(x + 9, y + 73, (int)((w - 18) * r), 22, GxEPD_BLACK);
-
-  display.setFont(&FreeSans9pt7b);
-  display.setCursor(x + 8, y + 119);
-  uint8_t runningCount = activeZoneCount();
-  if (runningCount > 1) display.printf("%u zones running - rotating meter", runningCount);
-  else display.print("Watering active");
+  display.drawRect(x + 8, y + 82, w - 16, 28, GxEPD_BLACK);
+  display.fillRect(x + 9, y + 83, (int)((w - 18) * r), 26, GxEPD_BLACK);
 
   lastRuntimeMeterZone = meterZone;
 }
@@ -1858,6 +1884,7 @@ void handleState() {
   doc["tokenConfigured"] = strlen(relayApiToken) > 0;
 
   JsonObject weather = doc.createNestedObject("weather");
+  weather["loaded"] = state.weatherLoaded;
   weather["summary"] = state.weather.summary;
   weather["condition"] = state.weather.condition;
   weather["temperatureF"] = state.weather.temperatureF;
