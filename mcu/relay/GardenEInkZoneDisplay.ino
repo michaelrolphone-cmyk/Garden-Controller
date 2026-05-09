@@ -95,6 +95,8 @@ struct DisplayState {
   uint16_t activeRemainingSeconds[DISPLAY_ZONE_COUNT];
   uint16_t activeTotalSeconds[DISPLAY_ZONE_COUNT];
   bool spigotsOn;
+  uint16_t spigotRemainingSeconds;
+  uint16_t spigotTotalSeconds;
   WeatherNow weather;
   RunState run;
 };
@@ -149,7 +151,7 @@ static const unsigned long RELAY_FULL_SYNC_MS = 60000UL;
 static const unsigned long RELAY_RETRY_SYNC_MS = 10000UL;
 unsigned long lastFullSyncMs = 0;
 static const unsigned long RUNTIME_ZONE_ROTATE_MS = 12000UL;
-static const unsigned long RUNTIME_ZONE_FLASH_MS = 500UL;
+static const unsigned long RUNTIME_ZONE_FLASH_MS = 1500UL;
 uint8_t lastRuntimeMeterZone = 0;
 uint8_t runtimeSwitchFlashZone = 0;
 unsigned long runtimeSwitchFlashUntilMs = 0;
@@ -290,18 +292,14 @@ bool isRuntimeZoneFlashActive(uint8_t displayZone) {
 
 uint8_t runtimeZoneFlashPhase() {
   if (!runtimeSwitchFlashVisible || (int32_t)(millis() - runtimeSwitchFlashUntilMs) >= 0) return 255;
-  unsigned long remaining = runtimeSwitchFlashUntilMs - millis();
-  unsigned long elapsed = RUNTIME_ZONE_FLASH_MS > remaining ? RUNTIME_ZONE_FLASH_MS - remaining : 0;
-  uint8_t phase = (uint8_t)((elapsed * 4UL) / max(1UL, RUNTIME_ZONE_FLASH_MS));
-  return phase > 3 ? 3 : phase;
+  return 0;
 }
 
 bool isRuntimeZoneFlashBadgeInverted(uint8_t displayZone) {
-  if (!isRuntimeZoneFlashActive(displayZone)) return false;
-  uint8_t phase = runtimeZoneFlashPhase();
-  // Two quick badge inversions during the flash window. The active polygon
-  // fill and outline stay stable; only the zone-number badge blinks.
-  return phase == 0 || phase == 2;
+  // E-paper partial refresh is too slow for a rapid blink. Keep the selected
+  // badge inverted for the full flash window, then restore it on expiry.
+  // That gives the display enough time to visibly render the cue.
+  return isRuntimeZoneFlashActive(displayZone);
 }
 
 void formatTimeLowerNoLeadingZero(unsigned long epoch, char* out, size_t outSize) {
@@ -713,6 +711,10 @@ static uint8_t localRunTimerZone = 0;
 static uint32_t localRunTimerStartMs = 0;
 static uint32_t localRunTimerTotalSeconds = 0;
 
+static bool localSpigotTimerActive = false;
+static uint32_t localSpigotTimerStartMs = 0;
+static uint32_t localSpigotTimerTotalSeconds = 0;
+
 static void finalizeRunTimer(bool active, uint8_t zone, uint32_t& remainingSeconds, uint32_t& totalSeconds) {
   if (!active || zone == 0) {
     localRunTimerActive = false;
@@ -742,6 +744,49 @@ static void finalizeRunTimer(bool active, uint8_t zone, uint32_t& remainingSecon
     remainingSeconds = elapsed >= localRunTimerTotalSeconds ? 0 : localRunTimerTotalSeconds - elapsed;
     totalSeconds = localRunTimerTotalSeconds;
   }
+}
+
+static void finalizeSpigotTimer(bool active, uint32_t& remainingSeconds, uint32_t& totalSeconds) {
+  if (!active) {
+    localSpigotTimerActive = false;
+    localSpigotTimerTotalSeconds = 0;
+    return;
+  }
+
+  if (totalSeconds == 0 && remainingSeconds > 0) totalSeconds = remainingSeconds;
+
+  bool newRun = !localSpigotTimerActive ||
+                (totalSeconds > 0 && localSpigotTimerTotalSeconds != totalSeconds);
+
+  if (newRun) {
+    localSpigotTimerActive = true;
+    localSpigotTimerTotalSeconds = totalSeconds;
+    if (totalSeconds > 0 && remainingSeconds > 0 && remainingSeconds <= totalSeconds) {
+      localSpigotTimerStartMs = millis() - ((totalSeconds - remainingSeconds) * 1000UL);
+    } else {
+      localSpigotTimerStartMs = millis();
+    }
+  }
+
+  if (remainingSeconds == 0 && localSpigotTimerActive && localSpigotTimerTotalSeconds > 0) {
+    uint32_t elapsed = (millis() - localSpigotTimerStartMs) / 1000UL;
+    remainingSeconds = elapsed >= localSpigotTimerTotalSeconds ? 0 : localSpigotTimerTotalSeconds - elapsed;
+    totalSeconds = localSpigotTimerTotalSeconds;
+  }
+}
+
+static uint32_t spigotRemainingSecondsFromRoot(JsonObject root) {
+  const char* keys[] = {"spigotRemainingSeconds", "spigotRemainingSec", "spigotRemaining", "spigotSecondsRemaining", "spigotSecondsLeft", "masterRemainingSeconds", "masterSecondsLeft"};
+  return firstU32(root, keys, sizeof(keys) / sizeof(keys[0]), 0);
+}
+
+static uint32_t spigotDurationSecondsFromRoot(JsonObject root) {
+  const char* keys[] = {"spigotDurationSeconds", "spigotTotalSeconds", "spigotDuration", "masterDurationSeconds", "masterTotalSeconds"};
+  uint32_t sec = firstU32(root, keys, sizeof(keys) / sizeof(keys[0]), 0);
+  if (sec > 0) return sec;
+  const char* msKeys[] = {"spigotDurationMs", "spigotTotalMs", "masterDurationMs", "masterTotalMs"};
+  uint32_t ms = firstU32(root, msKeys, sizeof(msKeys) / sizeof(msKeys[0]), 0);
+  return ms > 0 ? (ms + 999UL) / 1000UL : 0;
 }
 
 
@@ -921,6 +966,8 @@ void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
     state.activeTotalSeconds[i] = 0;
   }
   state.spigotsOn = false;
+  state.spigotRemainingSeconds = 0;
+  state.spigotTotalSeconds = 0;
 
   JsonVariant root = sdoc.as<JsonVariant>();
   applyScheduleFromRelayJson(root);
@@ -989,9 +1036,31 @@ void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
     }
   }
 
+  JsonObject rootObj = sdoc.as<JsonObject>();
+  uint32_t spigotRemaining = 0;
+  uint32_t spigotTotal = 0;
+
   JsonObject spigotRunObj = sdoc["spigotRun"].as<JsonObject>();
-  if (relayRunObjectActive(spigotRunObj)) state.spigotsOn = true;
+  if (relayRunObjectActive(spigotRunObj)) {
+    state.spigotsOn = true;
+    spigotRemaining = remainingSecondsFromObject(spigotRunObj);
+    spigotTotal = durationSecondsFromObject(spigotRunObj);
+  }
+
+  JsonObject currentSpigotObj = sdoc["currentSpigotRun"].as<JsonObject>();
+  if (relayRunObjectActive(currentSpigotObj)) {
+    state.spigotsOn = true;
+    if (spigotRemaining == 0) spigotRemaining = remainingSecondsFromObject(currentSpigotObj);
+    if (spigotTotal == 0) spigotTotal = durationSecondsFromObject(currentSpigotObj);
+  }
+
   if (jsonBool(sdoc["spigotsOn"], false) || jsonBool(sdoc["spigotOn"], false) || jsonBool(sdoc["masterValveOn"], false)) state.spigotsOn = true;
+
+  if (spigotRemaining == 0) spigotRemaining = spigotRemainingSecondsFromRoot(rootObj);
+  if (spigotTotal == 0) spigotTotal = spigotDurationSecondsFromRoot(rootObj);
+  finalizeSpigotTimer(state.spigotsOn && !anyActive, spigotRemaining, spigotTotal);
+  state.spigotRemainingSeconds = (uint16_t)min(spigotRemaining, 65535UL);
+  state.spigotTotalSeconds = (uint16_t)min(spigotTotal, 65535UL);
 
   if (!anyActive && primaryZone > 0) anyActive = true;
   if (anyActive && primaryZone == 0) primaryZone = 1;
@@ -1282,7 +1351,8 @@ void drawZoneNumberBadge(int frameX, int frameY, int frameW, int frameH, int zon
   // Always use a filled badge, not an outlined/empty badge.
   // Inactive: black filled circle with white number.
   // Active: white filled circle with black number. During the selected-zone
-  // switch cue, only this badge flashes back to black/white for 0.5 seconds.
+  // switch cue, only this badge inverts for a long enough window to be visible
+  // on the e-paper partial refresh.
   bool flashInvert = active && isRuntimeZoneFlashBadgeInverted((uint8_t)zone);
   if (active && !flashInvert) {
     display.fillCircle(cx, cy, r, GxEPD_WHITE);
@@ -1529,21 +1599,39 @@ void drawRuntimePanel(int x, int y, int w, int h) {
   display.setFont(&FreeMonoBold12pt7b);
   if (!state.run.active) {
     if (state.spigotsOn) {
+      uint16_t remaining = state.spigotRemainingSeconds;
+      uint16_t total = state.spigotTotalSeconds;
       display.setFont(&FreeMonoBold12pt7b);
       display.setCursor(x + 8, y + 42);
       display.print("Spigots On");
-      display.drawRect(x + 8, y + 58, w - 16, 26, GxEPD_BLACK);
-      display.fillRect(x + 9, y + 59, w - 18, 24, GxEPD_BLACK);
+
+      if (remaining > 0 || total > 0) {
+        display.setFont(&FreeSans9pt7b);
+        display.setCursor(x + 238, y + 42);
+        display.printf("%um %us", remaining / 60, remaining % 60);
+      }
+
+      float r = total ? ((float)remaining / (float)total) : (remaining > 0 ? 1.0f : 0.0f);
+      r = constrain(r, 0.0f, 1.0f);
+      display.drawRect(x + 8, y + 61, w - 16, 30, GxEPD_BLACK);
+      display.fillRect(x + 9, y + 62, (int)((w - 18) * r), 28, GxEPD_BLACK);
     } else if (lastFinishedZone > 0) {
       display.setCursor(x + 8, y + 32); display.printf("Finished Zone %u", lastFinishedZone);
       display.drawRect(x + 8, y + 58, w - 16, 26, GxEPD_BLACK);
     } else {
-      display.setCursor(x + 8, y + 32); display.print("Idle");
-      display.drawRect(x + 8, y + 58, w - 16, 26, GxEPD_BLACK);
-      display.setFont(&FreeSans9pt7b);
-      display.setCursor(x + 8, y + h - 12);
-      if (!relayDataReady && relayLastError[0]) display.print("Relay error");
-      else display.print("Idle");
+      display.setFont(&FreeSansBold9pt7b);
+      display.setCursor(x + 8, y + 42);
+      display.print("Water is currently off.");
+
+      // Idle state intentionally has no duplicated label inside the meter area.
+      // Leave the empty meter as the visual off/zero indicator.
+      display.drawRect(x + 8, y + 61, w - 16, 30, GxEPD_BLACK);
+
+      if (!relayDataReady && relayLastError[0]) {
+        display.setFont(&FreeSans9pt7b);
+        display.setCursor(x + 8, y + h - 8);
+        display.print("Relay error");
+      }
     }
     lastRuntimeMeterZone = 0;
     return;
@@ -1570,7 +1658,8 @@ void drawRuntimePanel(int x, int y, int w, int h) {
   display.setCursor(x + 238, y + 42);
   display.printf("%um %us", remaining / 60, remaining % 60);
 
-  float r = total ? ((float)(total - remaining) / (float)total) : 0;
+  // Draining meter: full at the start, shrinking toward zero as time runs out.
+  float r = total ? ((float)remaining / (float)total) : (remaining > 0 ? 1.0f : 0.0f);
   r = constrain(r, 0.0f, 1.0f);
   display.drawRect(x + 8, y + 61, w - 16, 30, GxEPD_BLACK);
   display.fillRect(x + 9, y + 62, (int)((w - 18) * r), 28, GxEPD_BLACK);
@@ -1649,10 +1738,11 @@ void renderConnectionDiagnosticScreen() {
 void drawHeaderChurchCross(int x, int y) {
   // Small bold church-garden cross sized to the schedule title text height.
   // Drawn with filled rectangles so it stays crisp on e-paper.
-  const int w = 14;
+  // Use an odd total width so the horizontal arms are exactly balanced.
+  const int w = 13;
   const int h = 18;
   const int t = 5;
-  const int cx = x + (w - t) / 2;
+  const int cx = x + 4;  // left arm = 4 px, stem = 5 px, right arm = 4 px
   display.fillRect(cx, y, t, h, GxEPD_BLACK);
   display.fillRect(x, y + 5, w, t, GxEPD_BLACK);
 }
@@ -1983,6 +2073,8 @@ void handleState() {
   doc["time"] = state.time;
   doc["masterEnable"] = state.masterEnable;
   doc["spigotsOn"] = state.spigotsOn;
+  doc["spigotRemainingSeconds"] = state.spigotRemainingSeconds;
+  doc["spigotTotalSeconds"] = state.spigotTotalSeconds;
   doc["weatherAdjustmentEnabled"] = state.weatherAdjustmentEnabled;
   doc["gardenNews"] = state.gardenNews;
   doc["currentRunActive"] = state.run.active;
@@ -2232,6 +2324,8 @@ void handleStop() {
   state.run.zone = 0;
   state.run.remainingSeconds = 0;
   state.run.totalSeconds = 0;
+  state.spigotRemainingSeconds = 0;
+  state.spigotTotalSeconds = 0;
   pendingExtraZone = 0;
   pendingExtraMinutes = 0;
   forceFullRedraw = true;
@@ -2420,7 +2514,10 @@ void loop() {
     drawScreen();
     lastDrawn = state;
     forceFullRedraw = false;
-  } else if (relayDataReady && state.run.active && (runtimeZoneChanged || runtimeFlashExpired || runtimeFlashPhaseChanged || state.run.remainingSeconds != lastDrawn.run.remainingSeconds || memcmp(state.activeRemainingSeconds, lastDrawn.activeRemainingSeconds, sizeof(state.activeRemainingSeconds)) != 0)) {
+  } else if (relayDataReady && (
+      (state.run.active && (runtimeZoneChanged || runtimeFlashExpired || runtimeFlashPhaseChanged || state.run.remainingSeconds != lastDrawn.run.remainingSeconds || memcmp(state.activeRemainingSeconds, lastDrawn.activeRemainingSeconds, sizeof(state.activeRemainingSeconds)) != 0)) ||
+      (!state.run.active && state.spigotsOn && (state.spigotRemainingSeconds != lastDrawn.spigotRemainingSeconds || state.spigotTotalSeconds != lastDrawn.spigotTotalSeconds))
+    )) {
     // Update the meter/header first so the newly selected zone is visible,
     // then blink only that zone's badge as the cue.
     partialUpdateRuntimePanel();
@@ -2432,6 +2529,8 @@ void loop() {
     lastDrawn.run.active = state.run.active;
     lastDrawn.run.totalSeconds = state.run.totalSeconds;
     lastDrawn.spigotsOn = state.spigotsOn;
+    lastDrawn.spigotRemainingSeconds = state.spigotRemainingSeconds;
+    lastDrawn.spigotTotalSeconds = state.spigotTotalSeconds;
     memcpy(lastDrawn.activeRemainingSeconds, state.activeRemainingSeconds, sizeof(state.activeRemainingSeconds));
     memcpy(lastDrawn.activeTotalSeconds, state.activeTotalSeconds, sizeof(state.activeTotalSeconds));
   }
