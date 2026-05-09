@@ -1051,14 +1051,18 @@ void drawZoneNumberBadge(int frameX, int frameY, int frameW, int frameH, int zon
   int cy = mapY(frameY, frameH, c.y);
   const int r = 15;
 
+  // Always use a filled badge, not an outlined/empty badge.
+  // Inactive: black filled circle with white number.
+  // Active: inverted white filled circle with black number so it stays readable
+  // against the active zone fill.
   if (active) {
-    display.fillCircle(cx, cy, r, GxEPD_BLACK);
-    display.drawCircle(cx, cy, r, GxEPD_WHITE);
-    display.setTextColor(GxEPD_WHITE);
-  } else {
     display.fillCircle(cx, cy, r, GxEPD_WHITE);
     display.drawCircle(cx, cy, r, GxEPD_BLACK);
     display.setTextColor(GxEPD_BLACK);
+  } else {
+    display.fillCircle(cx, cy, r, GxEPD_BLACK);
+    display.drawCircle(cx, cy, r, GxEPD_BLACK);
+    display.setTextColor(GxEPD_WHITE);
   }
 
   display.setFont(&FreeMonoBold12pt7b);
