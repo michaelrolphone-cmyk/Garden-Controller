@@ -240,7 +240,7 @@ E-paper controller APIs:
 
 Relay APIs consumed by e-paper firmware:
 - `GET /time` (`epoch`, `synced`)
-- `GET /weather` (`summary`, `condition`, `temperatureF`, `rainIn`, `windMph`, `windDeg`, `windDirection`, `humidityPct`, `dewPointF`, `precipitationChancePct`, `sunlightHours`, `sunriseEpoch`, `sunsetEpoch`, `weatherCode`, `lastWeatherMs`)
+- `GET /weather` (`summary`, `condition`, `temperatureF`, `rainIn`, `windMph`, `windDeg`, `windDirection`, `humidityPct`, `dewPointF`, `precipitationChancePct`, `sunlightHours`, `predictedPrecipIn`, `sunriseEpoch`, `sunsetEpoch`, `weatherCode`, `lastWeatherMs`)
 - `GET /status` (running state) with fallback to `GET /api/state`
 
 State payload additions:

@@ -81,6 +81,27 @@ double gardenLongitude = DEFAULT_GARDEN_LONGITUDE;
 char gardenTimeZone[48] = "America/Boise";
 char gardenPosixTimeZone[64] = "MST7MDT,M3.2.0,M11.1.0";
 TaskHandle_t remoteTaskHandle = nullptr;
+uint32_t lastWeatherFetchMs = 0;
+static const uint32_t WEATHER_REFRESH_MS = 15UL * 60UL * 1000UL;
+
+struct WeatherSnapshot {
+  char summary[48];
+  char condition[24];
+  float temperatureF;
+  float rainIn;
+  float windMph;
+  int windDeg;
+  char windDirection[8];
+  float humidityPct;
+  float dewPointF;
+  float precipitationChancePct;
+  float sunlightHours;
+  float predictedPrecipIn;
+  uint32_t sunriseEpoch;
+  uint32_t sunsetEpoch;
+  int weatherCode;
+  uint32_t lastWeatherMs;
+} weatherSnapshot = {"Weather data unavailable","Unknown",0,0,0,0,"N",0,0,0,0,0,0,0,0,0};
 
 const char FIRMWARE_VERSION[] = "v25-multi-zone-runs-compile-fixed";
 char lastCommandId[48] = "";
@@ -139,6 +160,9 @@ void handleSaveAdmin();
 void handleScheduleAdd();
 void handleScheduleDelete();
 void handleSetTime();
+void handleTimeGet();
+void handleWeatherGet();
+void updateWeatherFromOpenMeteo();
 void handleRelay();
 void handleManualRun();
 void handleSpigotRun();
@@ -1189,6 +1213,22 @@ void buildStateJson(JsonDocument& doc) {
   doc["gardenLongitude"] = gardenLongitude;
   doc["gardenTimeZone"] = gardenTimeZone;
   doc["gardenPosixTimeZone"] = gardenPosixTimeZone;
+  doc["summary"] = weatherSnapshot.summary;
+  doc["condition"] = weatherSnapshot.condition;
+  doc["temperatureF"] = weatherSnapshot.temperatureF;
+  doc["rainIn"] = weatherSnapshot.rainIn;
+  doc["windMph"] = weatherSnapshot.windMph;
+  doc["windDeg"] = weatherSnapshot.windDeg;
+  doc["windDirection"] = weatherSnapshot.windDirection;
+  doc["humidityPct"] = weatherSnapshot.humidityPct;
+  doc["dewPointF"] = weatherSnapshot.dewPointF;
+  doc["precipitationChancePct"] = weatherSnapshot.precipitationChancePct;
+  doc["sunlightHours"] = weatherSnapshot.sunlightHours;
+  doc["predictedPrecipIn"] = weatherSnapshot.predictedPrecipIn;
+  doc["sunriseEpoch"] = weatherSnapshot.sunriseEpoch;
+  doc["sunsetEpoch"] = weatherSnapshot.sunsetEpoch;
+  doc["weatherCode"] = weatherSnapshot.weatherCode;
+  doc["lastWeatherMs"] = weatherSnapshot.lastWeatherMs;
 
   JsonArray z = doc.createNestedArray("zones");
   for (uint8_t i = 0; i < ZONE_COUNT; i++) {
@@ -1271,6 +1311,75 @@ void sendStateJson() {
   StaticJsonDocument<4096> doc;
   doc["ok"] = true;
   buildStateJson(doc);
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+void handleTimeGet() {
+  time_t nowEpoch = time(nullptr);
+  StaticJsonDocument<128> doc;
+  doc["epoch"] = (uint32_t)nowEpoch;
+  doc["synced"] = nowEpoch > 1700000000;
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+void updateWeatherFromOpenMeteo() {
+  HTTPClient http;
+  String url = String("https://api.open-meteo.com/v1/forecast?latitude=") + String(gardenLatitude, 6) +
+    "&longitude=" + String(gardenLongitude, 6) +
+    "&current=temperature_2m,relative_humidity_2m,dew_point_2m,precipitation,rain,weather_code,wind_speed_10m,wind_direction_10m" +
+    "&hourly=precipitation_probability,sunshine_duration" +
+    "&daily=precipitation_sum,sunrise,sunset,precipitation_probability_max" +
+    "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&timeformat=unixtime";
+  http.begin(url);
+  int code = http.GET();
+  if (code != 200) { http.end(); return; }
+  DynamicJsonDocument doc(8192);
+  if (deserializeJson(doc, http.getString())) { http.end(); return; }
+  http.end();
+
+  JsonObject current = doc["current"].as<JsonObject>();
+  JsonObject daily = doc["daily"].as<JsonObject>();
+  JsonObject hourly = doc["hourly"].as<JsonObject>();
+  weatherSnapshot.temperatureF = current["temperature_2m"] | 0;
+  weatherSnapshot.humidityPct = current["relative_humidity_2m"] | 0;
+  weatherSnapshot.dewPointF = current["dew_point_2m"] | 0;
+  weatherSnapshot.rainIn = current["rain"] | (current["precipitation"] | 0);
+  weatherSnapshot.windMph = current["wind_speed_10m"] | 0;
+  weatherSnapshot.windDeg = current["wind_direction_10m"] | 0;
+  weatherSnapshot.weatherCode = current["weather_code"] | 0;
+  weatherSnapshot.precipitationChancePct = daily["precipitation_probability_max"][0] | 0;
+  weatherSnapshot.predictedPrecipIn = daily["precipitation_sum"][0] | 0;
+  weatherSnapshot.sunriseEpoch = daily["sunrise"][0] | 0;
+  weatherSnapshot.sunsetEpoch = daily["sunset"][0] | 0;
+  weatherSnapshot.sunlightHours = (hourly["sunshine_duration"][0] | 0) / 3600.0f;
+  strlcpy(weatherSnapshot.summary, "Open-Meteo current+forecast", sizeof(weatherSnapshot.summary));
+  strlcpy(weatherSnapshot.condition, "Updated", sizeof(weatherSnapshot.condition));
+  strlcpy(weatherSnapshot.windDirection, "N", sizeof(weatherSnapshot.windDirection));
+  weatherSnapshot.lastWeatherMs = millis();
+}
+
+void handleWeatherGet() {
+  StaticJsonDocument<512> doc;
+  doc["summary"] = weatherSnapshot.summary;
+  doc["condition"] = weatherSnapshot.condition;
+  doc["temperatureF"] = weatherSnapshot.temperatureF;
+  doc["rainIn"] = weatherSnapshot.rainIn;
+  doc["windMph"] = weatherSnapshot.windMph;
+  doc["windDeg"] = weatherSnapshot.windDeg;
+  doc["windDirection"] = weatherSnapshot.windDirection;
+  doc["humidityPct"] = weatherSnapshot.humidityPct;
+  doc["dewPointF"] = weatherSnapshot.dewPointF;
+  doc["precipitationChancePct"] = weatherSnapshot.precipitationChancePct;
+  doc["sunlightHours"] = weatherSnapshot.sunlightHours;
+  doc["predictedPrecipIn"] = weatherSnapshot.predictedPrecipIn;
+  doc["sunriseEpoch"] = weatherSnapshot.sunriseEpoch;
+  doc["sunsetEpoch"] = weatherSnapshot.sunsetEpoch;
+  doc["weatherCode"] = weatherSnapshot.weatherCode;
+  doc["lastWeatherMs"] = weatherSnapshot.lastWeatherMs;
   String out;
   serializeJson(doc, out);
   server.send(200, "application/json", out);
@@ -1781,6 +1890,8 @@ void setupServer() {
   server.on("/api/config", HTTP_POST, handleApiConfigSet);
   server.on("/api/schedules", HTTP_POST, handleApiScheduleSet);
   server.on("/api/time/set", HTTP_GET, handleSetTime);
+  server.on("/time", HTTP_GET, handleTimeGet);
+  server.on("/weather", HTTP_GET, handleWeatherGet);
   server.on("/api/relay", HTTP_GET, handleRelay);
   server.on("/api/manual-run", HTTP_GET, handleManualRun);
   server.on("/api/spigots-run", HTTP_GET, handleSpigotRun);
@@ -1841,6 +1952,7 @@ void setup() {
   setupAp();
   connectSta(true);
   configTzTime(gardenPosixTimeZone, "pool.ntp.org", "time.nist.gov");
+  updateWeatherFromOpenMeteo();
 
   setupServer();
 
@@ -1862,6 +1974,10 @@ void setup() {
 void loop() {
   dns.processNextRequest();
   server.handleClient();
+  if (millis() - lastWeatherFetchMs >= WEATHER_REFRESH_MS) {
+    lastWeatherFetchMs = millis();
+    updateWeatherFromOpenMeteo();
+  }
 
   updateRunState();
   checkSchedule();
