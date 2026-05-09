@@ -836,52 +836,128 @@ bool substantialChange() {
   return false;
 }
 
-const char ADMIN_HTML[] PROGMEM = R"HTML(
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Garden E-Ink Admin</title>
-<style>
-body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f4f1e8;color:#111;}
-header{background:#111;color:#fff;padding:14px 16px;} h1{font-size:20px;margin:0;}
-main{padding:12px;max-width:900px;margin:auto;} section{background:#fff;border:1px solid #222;margin:12px 0;padding:12px;box-shadow:2px 2px 0 #222;}
-h2{font-size:17px;margin:0 0 10px;} label{display:block;margin:8px 0 3px;font-weight:650;} input,textarea,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid #333;background:#fff;font-size:15px;}
-button{margin:6px 6px 6px 0;padding:10px 12px;border:1px solid #111;background:#111;color:#fff;font-weight:700;} button.secondary{background:#fff;color:#111;}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.status{white-space:pre-wrap;border:1px solid #333;padding:10px;background:#fafafa}.small{font-size:13px;color:#333}.ok{font-weight:700}.bad{font-weight:700;color:#8a0000}@media(max-width:650px){.grid{grid-template-columns:1fr}}
-</style>
-</head>
-<body>
-<header><h1>Garden E-Ink Admin</h1></header>
-<main>
-<section><h2>Status</h2><div id="status" class="status">Loading...</div><button onclick="syncNow()">Sync Relay</button><button onclick="call('/redraw')">Redraw E-Paper</button><button onclick="call('/stop')">Stop / All Off</button></section>
-<section><h2>Wi-Fi + Relay Token Settings</h2><p class="small">Changing the admin AP SSID/password may disconnect this browser. Reconnect to the new AP after saving.</p><div class="grid"><div><label>Admin AP SSID</label><input id="apSsid" maxlength="31"><label>Admin AP Password</label><input id="apPass" type="password" placeholder="8+ chars; leave blank for open AP"></div><div><label>Home / Station Wi-Fi SSID</label><input id="staSsid" maxlength="31"><label>Home / Station Wi-Fi Password</label><input id="staPass" type="password" placeholder="leave blank to keep existing"></div></div><label>Relay Base URL</label><input id="relayBase" placeholder="http://192.168.50.1"><label>Relay API Token</label><input id="relayApiToken" type="password" placeholder="blank if relay does not require token"><button onclick="saveConfig()">Save Wi-Fi / Relay Settings</button><button class="secondary" onclick="loadConfig()">Reload Settings</button><pre id="configResult" class="status"></pre></section>
-<section><h2>Display Mode</h2><button onclick="call('/display?mode=schedule')">Show Schedule</button><button onclick="call('/display?mode=news')">Show News</button><button onclick="call('/display?mode=graph')">Show Historic Weather</button><button onclick="call('/display?mode=auto')">Resume Auto Rotation</button></section>
-<section><h2>Manual Extra Water</h2><label>Zone</label><select id="extraZone"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select><label>Minutes</label><input id="extraMinutes" type="number" value="10" min="1" max="240"><button onclick="queueExtra()">Queue Extra Water</button></section>
-<section><h2>Zones</h2><div class="grid"><div><label>Zone</label><select id="zoneNo"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select><label>Name</label><input id="zoneName"><label>Base Minutes</label><input id="baseMinutes" type="number" min="1" max="240"></div><div><label>Start Hour 0-23</label><input id="startHour" type="number" min="0" max="23"><label>Start Minute 0-59</label><input id="startMinute" type="number" min="0" max="59"><button onclick="saveZone()">Save Zone</button></div></div></section>
-<section><h2>Full-Screen Garden News</h2><textarea id="news" rows="5"></textarea><button onclick="saveNews()">Save News to Display</button></section>
-<section><h2>Weather History</h2><button onclick="location.href='/history.csv'">Download CSV</button><button onclick="call('/clearHistory')">Clear History</button></section>
-</main>
-<script>
-async function jget(u){const r=await fetch(u);return await r.json();}
-async function call(u){const r=await fetch(u);document.getElementById('configResult').textContent=await r.text();setTimeout(loadState,500);}
-async function loadConfig(){const c=await jget('/api/config');apSsid.value=c.apSsid||'';apPass.value='';staSsid.value=c.staSsid||'';staPass.value='';relayBase.value=c.relayBase||'';relayApiToken.value='';configResult.textContent=JSON.stringify(c,null,2);}
-async function saveConfig(){const body={apSsid:apSsid.value,relayBase:relayBase.value,staSsid:staSsid.value}; if(apPass.value.length) body.apPass=apPass.value; if(staPass.value.length) body.staPass=staPass.value; if(relayApiToken.value.length) body.relayApiToken=relayApiToken.value; const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); configResult.textContent=await r.text(); setTimeout(loadState,1000);}
-async function loadState(){const s=await jget('/state');status.innerHTML=(s.relayDataReady?'<span class="ok">Relay data ready</span>':'<span class="bad">Relay data not ready</span>')+'\nTitle: '+s.title+'\nDate/time: '+s.date+' '+s.time+'\nAP: '+s.apSsid+' '+s.apIp+'\nSTA: '+s.staSsid+' '+s.staStatus+' '+s.staIp+'\nRelay: '+s.relayBase+'\nStage: '+s.relayStage+'\nMessage: '+s.relayStatus; news.value=s.gardenNews||''; if(s.zones&&s.zones.length){let z=s.zones[0];zoneName.value=z.name;baseMinutes.value=z.baseMinutes;startHour.value=z.startHour;startMinute.value=z.startMinute;}}
-zoneNo.onchange=async()=>{const s=await jget('/state');let z=s.zones[parseInt(zoneNo.value)-1];zoneName.value=z.name;baseMinutes.value=z.baseMinutes;startHour.value=z.startHour;startMinute.value=z.startMinute;};
-async function saveZone(){await call('/saveZone?zone='+zoneNo.value+'&name='+encodeURIComponent(zoneName.value)+'&baseMinutes='+baseMinutes.value+'&startHour='+startHour.value+'&startMinute='+startMinute.value)}
-async function queueExtra(){await call('/extra?zone='+extraZone.value+'&minutes='+extraMinutes.value)}
-async function saveNews(){const r=await fetch('/saveNews',{method:'POST',body:news.value});configResult.textContent=await r.text();}
-async function syncNow(){await call('/sync')}
-loadConfig();loadState();setInterval(loadState,5000);
-</script>
-</body>
-</html>
-)HTML";
+
+String htmlEscape(const String& in) {
+  String out;
+  out.reserve(in.length() + 8);
+  for (size_t i = 0; i < in.length(); i++) {
+    char c = in[i];
+    if (c == '&') out += F("&amp;");
+    else if (c == '<') out += F("&lt;");
+    else if (c == '>') out += F("&gt;");
+    else if (c == '"') out += F("&quot;");
+    else out += c;
+  }
+  return out;
+}
+
+String htmlInput(const char* id, const char* label, const String& value, const char* type = "text", const char* extra = "") {
+  String out;
+  out += F("<label>");
+  out += label;
+  out += F("</label><input id='");
+  out += id;
+  out += F("' name='");
+  out += id;
+  out += F("' type='");
+  out += type;
+  out += F("' value='");
+  out += htmlEscape(value);
+  out += F("' ");
+  out += extra;
+  out += F(">");
+  return out;
+}
 
 void handleRoot() {
-  server.send_P(200, "text/html", ADMIN_HTML);
+  String page;
+  page.reserve(11000);
+  page += F("<!doctype html><html><head><meta charset='utf-8'>");
+  page += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
+  page += F("<title>Garden E-Ink Admin</title><style>");
+  page += F("body{font-family:Arial,sans-serif;margin:0;background:#f4f1e8;color:#111}header{background:#111;color:#fff;padding:14px 16px}h1{font-size:20px;margin:0}main{padding:12px;max-width:900px;margin:auto}section{background:#fff;border:1px solid #222;margin:12px 0;padding:12px;box-shadow:2px 2px 0 #222}h2{font-size:17px;margin:0 0 10px}label{display:block;margin:8px 0 3px;font-weight:700}input,textarea,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid #333;background:#fff;font-size:15px}button,.btn{display:inline-block;margin:6px 6px 6px 0;padding:10px 12px;border:1px solid #111;background:#111;color:#fff;font-weight:700;text-decoration:none}.secondary{background:#fff;color:#111}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.status{white-space:pre-wrap;border:1px solid #333;padding:10px;background:#fafafa}.small{font-size:13px;color:#333}.ok{font-weight:700}.bad{font-weight:700;color:#8a0000}@media(max-width:650px){.grid{grid-template-columns:1fr}}");
+  page += F("</style></head><body><header><h1>Garden E-Ink Admin</h1></header><main>");
+
+  page += F("<section><h2>Status</h2><div class='status'>");
+  page += relayDataReady ? F("Relay data ready\n") : F("Relay data not ready\n");
+  page += F("Title: "); page += htmlEscape(state.title); page += F("\n");
+  page += F("Date/time: "); page += htmlEscape(state.date); page += F(" "); page += htmlEscape(state.time); page += F("\n");
+  page += F("AP: "); page += htmlEscape(apSsid); page += F(" "); page += WiFi.softAPIP().toString(); page += F("\n");
+  page += F("STA: "); page += htmlEscape(staSsid); page += F(" "); page += wifiStatusName(WiFi.status()); page += F(" "); page += (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("none")); page += F("\n");
+  page += F("Relay: "); page += htmlEscape(relayBase); page += F("\n");
+  page += F("Stage: "); page += htmlEscape(relayStage); page += F("\n");
+  page += F("Message: "); page += htmlEscape(relayStatus);
+  page += F("</div><a class='btn' href='/sync'>Sync Relay</a><a class='btn' href='/redraw'>Redraw E-Paper</a><a class='btn' href='/stop'>Stop / All Off</a></section>");
+
+  page += F("<section><h2>Wi-Fi + Relay Token Settings</h2><p class='small'>Saving these settings reboots the display so Wi-Fi can restart cleanly. Reconnect to the admin AP after it comes back up.</p>");
+  page += F("<form method='get' action='/saveConnectivity'><div class='grid'><div>");
+  page += htmlInput("apSsid", "Admin AP SSID", apSsid, "text", "maxlength='31'");
+  page += htmlInput("apPass", "Admin AP Password", "", "password", "maxlength='63' placeholder='leave blank to keep existing; 8+ chars to change'");
+  page += F("</div><div>");
+  page += htmlInput("staSsid", "Home / Station Wi-Fi SSID", staSsid, "text", "maxlength='31'");
+  page += htmlInput("staPass", "Home / Station Wi-Fi Password", "", "password", "maxlength='63' placeholder='leave blank to keep existing'");
+  page += F("</div></div>");
+  page += htmlInput("relayBase", "Relay Base URL", relayBase, "text", "maxlength='127' placeholder='http://192.168.50.1'");
+  page += htmlInput("relayApiToken", "Relay API Token", "", "password", "maxlength='95' placeholder='leave blank to keep existing / blank if unused'");
+  page += F("<button type='submit'>Save Wi-Fi / Relay Settings</button></form></section>");
+
+  page += F("<section><h2>Display Mode</h2><a class='btn' href='/display?mode=schedule'>Show Schedule</a><a class='btn' href='/display?mode=news'>Show News</a><a class='btn' href='/display?mode=graph'>Show Historic Weather</a><a class='btn secondary' href='/display?mode=auto'>Resume Auto Rotation</a></section>");
+
+  page += F("<section><h2>Manual Extra Water</h2><form method='get' action='/extra'><label>Zone</label><select name='zone'><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select><label>Minutes</label><input name='minutes' type='number' value='10' min='1' max='240'><button type='submit'>Queue Extra Water</button></form></section>");
+
+  page += F("<section><h2>Zones</h2><form method='get' action='/saveZone'><div class='grid'><div><label>Zone</label><select name='zone'><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>");
+  page += htmlInput("name", "Name", state.zones[0].name, "text", "maxlength='23'");
+  page += htmlInput("baseMinutes", "Base Minutes", String(state.zones[0].baseMinutes), "number", "min='1' max='240'");
+  page += F("</div><div>");
+  page += htmlInput("startHour", "Start Hour 0-23", String(state.zones[0].startHour), "number", "min='0' max='23'");
+  page += htmlInput("startMinute", "Start Minute 0-59", String(state.zones[0].startMinute), "number", "min='0' max='59'");
+  page += F("<button type='submit'>Save Zone</button><p class='small'>This no-JavaScript form preloads Zone 1 values. Select another zone and enter its values manually.</p></div></div></form></section>");
+
+  page += F("<section><h2>Full-Screen Garden News</h2><form method='get' action='/saveNewsForm'><textarea name='news' rows='5'>");
+  page += htmlEscape(state.gardenNews);
+  page += F("</textarea><button type='submit'>Save News to Display</button></form></section>");
+
+  page += F("<section><h2>Weather History</h2><a class='btn' href='/history.csv'>Download CSV</a><a class='btn secondary' href='/clearHistory'>Clear History</a></section>");
+  page += F("</main></body></html>");
+  server.send(200, "text/html", page);
+}
+
+void handleSaveConnectivity() {
+  if (server.hasArg("apSsid")) {
+    String v = server.arg("apSsid");
+    if (v.length() < 1 || v.length() >= sizeof(apSsid)) {
+      server.send(400, "text/plain", "apSsid must be 1-31 characters");
+      return;
+    }
+    strlcpy(apSsid, v.c_str(), sizeof(apSsid));
+  }
+  if (server.hasArg("apPass") && server.arg("apPass").length() > 0) {
+    String v = server.arg("apPass");
+    if (v.length() < 8 || v.length() >= sizeof(apPass)) {
+      server.send(400, "text/plain", "AP password must be blank/unchanged or 8-63 characters");
+      return;
+    }
+    strlcpy(apPass, v.c_str(), sizeof(apPass));
+  }
+  if (server.hasArg("staSsid")) strlcpy(staSsid, server.arg("staSsid").c_str(), sizeof(staSsid));
+  if (server.hasArg("staPass") && server.arg("staPass").length() > 0) strlcpy(staPass, server.arg("staPass").c_str(), sizeof(staPass));
+  if (server.hasArg("relayBase")) strlcpy(relayBase, server.arg("relayBase").c_str(), sizeof(relayBase));
+  if (server.hasArg("relayApiToken") && server.arg("relayApiToken").length() > 0) strlcpy(relayApiToken, server.arg("relayApiToken").c_str(), sizeof(relayApiToken));
+
+  saveConfig();
+  server.send(200, "text/html", "<!doctype html><html><body><h1>Connectivity saved</h1><p>The display will reboot now so Wi-Fi can restart cleanly. Reconnect to the admin AP after it comes back up.</p></body></html>");
+  delay(750);
+  ESP.restart();
+}
+
+void handleSaveNewsForm() {
+  if (server.hasArg("news")) {
+    strlcpy(state.gardenNews, server.arg("news").c_str(), sizeof(state.gardenNews));
+    saveConfig();
+    forceFullRedraw = true;
+  }
+  server.sendHeader("Location", "/");
+  server.send(303, "text/plain", "saved");
 }
 
 void handleState() {
@@ -1106,6 +1182,8 @@ void setupRoutes() {
   server.on("/state", HTTP_GET, handleState);
   server.on("/api/config", HTTP_GET, handleConfigGet);
   server.on("/api/config", HTTP_POST, handleConfigPost);
+  server.on("/saveConnectivity", HTTP_GET, handleSaveConnectivity);
+  server.on("/saveNewsForm", HTTP_GET, handleSaveNewsForm);
   server.on("/extra", HTTP_GET, handleExtra);
   server.on("/stop", HTTP_GET, handleStop);
   server.on("/sync", HTTP_GET, handleSync);
