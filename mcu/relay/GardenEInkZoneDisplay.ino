@@ -144,7 +144,6 @@ int queueDepth = 0;
 float zoneLedger[DISPLAY_ZONE_COUNT] = {0, 0, 0, 0, 0};
 int pendingExtraZone = 0;
 int pendingExtraMinutes = 0;
-uint8_t lastFinishedZone = 0;
 
 static const unsigned long RELAY_STATE_POLL_MS = 2000UL;
 static const unsigned long RELAY_FULL_SYNC_MS = 60000UL;
@@ -240,7 +239,7 @@ String currentHeaderDateTime() {
 }
 
 void drawHeaderClockTextOnly() {
-  display.fillRect(420, 0, 372, 45, GxEPD_WHITE);
+  display.fillRect(450, 0, 342, 45, GxEPD_WHITE);
   display.setTextColor(GxEPD_BLACK);
   display.setFont(&FreeSans9pt7b);
   String headerDateTime = currentHeaderDateTime();
@@ -250,14 +249,14 @@ void drawHeaderClockTextOnly() {
   uint16_t tbh = 0;
   display.getTextBounds(headerDateTime, 0, 25, &tbx, &tby, &tbw, &tbh);
   int16_t headerX = 792 - (int16_t)tbw;
-  if (headerX < 420) headerX = 420;
+  if (headerX < 450) headerX = 450;
   display.setCursor(headerX, 25);
   display.print(headerDateTime);
   lastHeaderDateTimeDrawn = headerDateTime;
 }
 
 void partialUpdateHeaderClock() {
-  display.setPartialWindow(420, 0, 372, 45);
+  display.setPartialWindow(450, 0, 342, 45);
   display.firstPage();
   do {
     drawHeaderClockTextOnly();
@@ -1615,9 +1614,6 @@ void drawRuntimePanel(int x, int y, int w, int h) {
       r = constrain(r, 0.0f, 1.0f);
       display.drawRect(x + 8, y + 61, w - 16, 30, GxEPD_BLACK);
       display.fillRect(x + 9, y + 62, (int)((w - 18) * r), 28, GxEPD_BLACK);
-    } else if (lastFinishedZone > 0) {
-      display.setCursor(x + 8, y + 32); display.printf("Finished Zone %u", lastFinishedZone);
-      display.drawRect(x + 8, y + 58, w - 16, 26, GxEPD_BLACK);
     } else {
       display.setFont(&FreeSansBold9pt7b);
       display.setCursor(x + 8, y + 42);
@@ -1754,8 +1750,8 @@ void renderScheduleScreenFull() {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeMonoBold12pt7b);
-    drawHeaderChurchCross(10, 9);
-    display.setCursor(34, 25);
+    drawHeaderChurchCross(8, 9);
+    display.setCursor(30, 25);
     display.print("Castle Hills Garden Schedule");
 
     drawHeaderClockTextOnly();
@@ -2498,10 +2494,8 @@ void loop() {
 
   static bool previousRunActive = false;
   static uint8_t previousRunZone = 0;
-  if (previousRunActive && !state.run.active && previousRunZone > 0) lastFinishedZone = previousRunZone;
   if (state.run.active && state.run.zone > 0) {
     previousRunZone = state.run.zone;
-    lastFinishedZone = 0;
   }
   previousRunActive = state.run.active;
 
@@ -2518,12 +2512,13 @@ void loop() {
       (state.run.active && (runtimeZoneChanged || runtimeFlashExpired || runtimeFlashPhaseChanged || state.run.remainingSeconds != lastDrawn.run.remainingSeconds || memcmp(state.activeRemainingSeconds, lastDrawn.activeRemainingSeconds, sizeof(state.activeRemainingSeconds)) != 0)) ||
       (!state.run.active && state.spigotsOn && (state.spigotRemainingSeconds != lastDrawn.spigotRemainingSeconds || state.spigotTotalSeconds != lastDrawn.spigotTotalSeconds))
     )) {
-    // Update the meter/header first so the newly selected zone is visible,
-    // then blink only that zone's badge as the cue.
-    partialUpdateRuntimePanel();
+    // Flash the selected zone badge first. The runtime panel update happens
+    // immediately after in the same loop pass, but the map/badge partial
+    // refresh is intentionally queued before the meter/header refresh.
     if (runtimeZoneChanged || runtimeFlashExpired || runtimeFlashPhaseChanged) {
       partialUpdateMapPanel();
     }
+    partialUpdateRuntimePanel();
     lastDrawn.run.remainingSeconds = state.run.remainingSeconds;
     lastDrawn.run.zone = state.run.zone;
     lastDrawn.run.active = state.run.active;
