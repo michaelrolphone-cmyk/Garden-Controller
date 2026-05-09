@@ -451,11 +451,17 @@ bool substantialChange() {
   return false;
 }
 
+
+void handleCaptivePortal() {
+  server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
+  server.send(302, "text/plain", "");
+}
+
 void handleRoot() {
   server.send(200, "text/html",
     "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'><style>body{font-family:Arial,sans-serif;padding:4px;margin:0;color:#000;background:#fff}section{border:1px solid #000;padding:6px;margin:0 0 6px 0}button{margin:2px 4px 2px 0;padding:6px 8px;border:1px solid #000;background:#fff;color:#000}input,select,textarea{margin:2px 4px 2px 0;padding:4px;max-width:100%;border:1px solid #000;background:#fff;color:#000}pre{white-space:pre-wrap;word-break:break-word}h1,h2{font-family:monospace;font-weight:700;margin:4px 0}label,p,div,span{font-family:Arial,sans-serif}</style></head><body><h1>Garden E-Ink Admin</h1>"
     "<section><h2>Status</h2><div><b>Weather summary:</b> <span id='st-weather'>loading...</span></div><div><b>Garden news:</b> <span id='st-news'>loading...</span></div><div><b>Running state:</b> <span id='st-run'>loading...</span></div><div><b>Map preview:</b> <span id='st-map'>loading...</span></div><div><b>Soil water ledger summary per zone:</b> <span id='st-ledger'>loading...</span></div><div id='st-error' style='color:#a00'></div></section>"
-    "<section><h2>Garden Map</h2><p>Map preview follows active zone on display.</p></section><section><h2>Zones</h2><label>Zone <select id='zoneCfg'><option value='1'>1</option><option value='2'>2</option><option value='3'>3</option><option value='4'>4</option><option value='5'>5</option></select></label><label>Name <input id='zoneName' maxlength='23'></label><label>Base Minutes <input id='baseMinutes' type='number' min='1' max='240' value='10'></label><label>Start Hour <input id='startHour' type='number' min='0' max='23' value='6'></label><label>Start Minute <input id='startMinute' type='number' min='0' max='59' value='0'></label></section><section><h2>Full-Screen Garden News</h2><textarea id='news' rows='4' cols='40'></textarea></section><section><h2>Weather History</h2><p>Use Download CSV to export or Clear History to reset.</p></section>"
+    "<section><h2>Garden Map</h2><p>Map preview follows active zone on display.</p></section><section><h2>Connectivity</h2><label>Home WiFi SSID <input id='staSsid' maxlength='31'></label><label>Home WiFi Password <input id='staPass' type='password' maxlength='63'></label><label>Relay API Base URL <input id='relayBase' maxlength='127' value='http://192.168.4.1'></label><label>Relay API Token <input id='relayApiToken' maxlength='95'></label><button onclick="saveConnectivity()">Save Connectivity</button></section><section><h2>Zones</h2><label>Zone <select id='zoneCfg'><option value='1'>1</option><option value='2'>2</option><option value='3'>3</option><option value='4'>4</option><option value='5'>5</option></select></label><label>Name <input id='zoneName' maxlength='23'></label><label>Base Minutes <input id='baseMinutes' type='number' min='1' max='240' value='10'></label><label>Start Hour <input id='startHour' type='number' min='0' max='23' value='6'></label><label>Start Minute <input id='startMinute' type='number' min='0' max='59' value='0'></label></section><section><h2>Full-Screen Garden News</h2><textarea id='news' rows='4' cols='40'></textarea></section><section><h2>Weather History</h2><p>Use Download CSV to export or Clear History to reset.</p></section>"
     "<button onclick=\"fetch('/stop').then(()=>location.reload())\">Stop / All Off</button>"
     "<button onclick=\"fetch('/sync').then(()=>location.reload())\">Sync Weather</button>"
     "<button onclick=\"fetch('/redraw').then(()=>location.reload())\">Redraw E-Paper</button>"
@@ -481,7 +487,8 @@ void handleRoot() {
     "function fmtMap(s){if(!s.currentRunActive)return 'no active watering, map idle';return 'active zone '+s.currentRunZone+' highlighted';}"
     "function saveNews(){fetch('/saveNews',{method:'POST',body:document.getElementById('news').value}).then(()=>location.reload());}"
     "function saveZone(){const z=document.getElementById('zoneCfg').value;const q='?zone='+encodeURIComponent(z)+'&name='+encodeURIComponent(document.getElementById('zoneName').value)+'&baseMinutes='+encodeURIComponent(document.getElementById('baseMinutes').value)+'&startHour='+encodeURIComponent(document.getElementById('startHour').value)+'&startMinute='+encodeURIComponent(document.getElementById('startMinute').value);fetch('/saveZone'+q).then(()=>location.reload());}"
-    "fetch('/state').then(r=>{if(!r.ok) throw new Error('state request failed: '+r.status);return r.json();}).then(s=>{document.getElementById('st-weather').textContent=(s.weather&&s.weather.summary)?s.weather.summary:'n/a';document.getElementById('st-news').textContent=s.gardenNews||'';document.getElementById('st-run').textContent=fmtRun(s);document.getElementById('st-map').textContent=fmtMap(s);document.getElementById('st-ledger').textContent=fmtLedger(s.soilLedger);if(Array.isArray(s.zones)&&s.zones.length){const z=s.zones[0];document.getElementById('zoneName').value=z.name||'';document.getElementById('baseMinutes').value=z.baseMinutes||10;document.getElementById('startHour').value=z.startHour||0;document.getElementById('startMinute').value=z.startMinute||0;}document.getElementById('news').value=s.gardenNews||'';}).catch((err)=>{document.getElementById('st-error').textContent=String(err);});"
+function saveConnectivity(){const payload={staSsid:document.getElementById('staSsid').value,staPass:document.getElementById('staPass').value,relayBase:document.getElementById('relayBase').value,relayApiToken:document.getElementById('relayApiToken').value};fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>{if(!r.ok) throw new Error('config save failed: '+r.status);location.reload();}).catch((err)=>{document.getElementById('st-error').textContent=String(err);});}"
+    "fetch('/state').then(r=>{if(!r.ok) throw new Error('state request failed: '+r.status);return r.json();}).then(s=>{document.getElementById('st-weather').textContent=(s.weather&&s.weather.summary)?s.weather.summary:'n/a';document.getElementById('st-news').textContent=s.gardenNews||'';document.getElementById('st-run').textContent=fmtRun(s);document.getElementById('st-map').textContent=fmtMap(s);document.getElementById('st-ledger').textContent=fmtLedger(s.soilLedger);if(Array.isArray(s.zones)&&s.zones.length){const z=s.zones[0];document.getElementById('zoneName').value=z.name||'';document.getElementById('baseMinutes').value=z.baseMinutes||10;document.getElementById('startHour').value=z.startHour||0;document.getElementById('startMinute').value=z.startMinute||0;}document.getElementById('news').value=s.gardenNews||'';return fetch('/api/config');}).then(r=>{if(!r.ok) throw new Error('config request failed: '+r.status);return r.json();}).then(c=>{document.getElementById('staSsid').value=c.staSsid||'';document.getElementById('relayBase').value=c.relayBase||'';document.getElementById('relayApiToken').value=c.relayApiToken||'';}).catch((err)=>{document.getElementById('st-error').textContent=String(err);});"
     "</script>"
     "</body></html>");
 }
@@ -508,7 +515,7 @@ void handleState() {
   JsonArray ledger = doc.createNestedArray("soilLedger"); for (int i=0;i<5;i++) ledger.add(zoneLedger[i]);
   String out; serializeJson(doc, out); server.send(200, "application/json", out);
 }
-void handleConfigGet(){ StaticJsonDocument<512> d; d["apSsid"]=apSsid; d["staSsid"]=staSsid; d["relayBase"]=relayBase; String out; serializeJson(d,out); server.send(200,"application/json",out);} 
+void handleConfigGet(){ StaticJsonDocument<512> d; d["apSsid"]=apSsid; d["staSsid"]=staSsid; d["relayBase"]=relayBase; d["relayApiToken"]=relayApiToken; String out; serializeJson(d,out); server.send(200,"application/json",out);} 
 void handleConfigPost(){ if(!server.hasArg("plain")){server.send(400,"application/json","{\"ok\":false}");return;} DynamicJsonDocument d(1024); if(deserializeJson(d,server.arg("plain"))){server.send(400,"application/json","{\"ok\":false}");return;} if(d["staSsid"].is<const char*>())strlcpy(staSsid,d["staSsid"],sizeof(staSsid)); if(d["staPass"].is<const char*>())strlcpy(staPass,d["staPass"],sizeof(staPass)); if(d["relayBase"].is<const char*>())strlcpy(relayBase,d["relayBase"],sizeof(relayBase)); if(d["relayApiToken"].is<const char*>())strlcpy(relayApiToken,d["relayApiToken"],sizeof(relayApiToken)); saveConfig(); forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true}"); }
 void handleDisplayMode(){ String m=server.arg("mode"); if(m=="auto"||m=="schedule"||m=="news"||m=="graph"){strlcpy(state.displayMode,m.c_str(),sizeof(state.displayMode)); saveConfig(); forceFullRedraw=true;} server.send(200,"application/json","{\"ok\":true}"); }
 void handleRedraw(){ forceFullRedraw = true; server.send(200,"application/json","{\"ok\":true}"); }
@@ -550,6 +557,12 @@ void handleLedgerReset(){ for(int i=0;i<5;i++) zoneLedger[i]=0; server.send(200,
 
 void setupRoutes() {
   server.on("/", HTTP_GET, handleRoot);
+  server.on("/generate_204", HTTP_GET, handleCaptivePortal);
+  server.on("/gen_204", HTTP_GET, handleCaptivePortal);
+  server.on("/hotspot-detect.html", HTTP_GET, handleCaptivePortal);
+  server.on("/ncsi.txt", HTTP_GET, handleCaptivePortal);
+  server.on("/connecttest.txt", HTTP_GET, handleCaptivePortal);
+  server.on("/fwlink", HTTP_GET, handleCaptivePortal);
   server.on("/state", HTTP_GET, handleState);
   server.on("/api/config", HTTP_GET, handleConfigGet);
   server.on("/api/config", HTTP_POST, handleConfigPost);
@@ -566,6 +579,7 @@ void setupRoutes() {
   server.on("/queue/clear", HTTP_GET, handleQueueClear);
   server.on("/queue/stop-clear", HTTP_GET, handleQueueStopClear);
   server.on("/ledger/reset", HTTP_GET, handleLedgerReset);
+  server.onNotFound(handleCaptivePortal);
   server.begin();
 }
 
