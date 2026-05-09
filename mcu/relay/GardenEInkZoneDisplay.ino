@@ -14,14 +14,14 @@
 
 // Required hardware target: 7.5-inch 800x480 GDEY075T7 black/white panel.
 // Snapshot pinout requirements:
-// EPD MOSI=14, SCLK=13, CS=15, DC=27, RST=26, BUSY=25
+// EPD MOSI=23, SCLK=18, CS=27, DC=14, RST=33, BUSY=13
 // SD CS=5, SD MISO=12
-static const uint8_t EPD_MOSI_PIN = 14;
-static const uint8_t EPD_SCLK_PIN = 13;
-static const uint8_t EPD_CS_PIN = 15;
-static const uint8_t EPD_DC_PIN = 27;
-static const uint8_t EPD_RST_PIN = 26;
-static const uint8_t EPD_BUSY_PIN = 25;
+static const uint8_t EPD_MOSI_PIN = 23;
+static const uint8_t EPD_SCLK_PIN = 18;
+static const uint8_t EPD_CS_PIN = 27;
+static const uint8_t EPD_DC_PIN = 14;
+static const uint8_t EPD_RST_PIN = 33;
+static const uint8_t EPD_BUSY_PIN = 13;
 static const uint8_t SD_CS_PIN = 5;
 static const uint8_t SD_MISO_PIN = 12;
 

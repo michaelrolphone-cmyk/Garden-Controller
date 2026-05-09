@@ -216,7 +216,7 @@ Firmware file:
 
 Hardware target:
 - 7.5-inch 800x480 black/white e-paper using `GxEPD2_750_GDEY075T7`.
-- Display pin map: MOSI 14, SCLK 13, CS 15, DC 27, RST 26, BUSY 25.
+- Display pin map: MOSI 23, SCLK 18, CS 27, DC 14, RST 33, BUSY 13.
 - SD pin map: CS 5, MISO 12.
 
 E-paper controller APIs:
