@@ -103,6 +103,11 @@ struct WeatherSnapshot {
   uint32_t lastWeatherMs;
 } weatherSnapshot = {"Weather data unavailable","Unknown",0,0,0,0,"N",0,0,0,0,0,0,0,0,0};
 
+// Weather validity/status are additive fields for local diagnostics.
+// Existing /weather field names are preserved for the e-ink display.
+bool weatherLoaded = false;
+char weatherStatus[96] = "weather not loaded";
+
 const char FIRMWARE_VERSION[] = "v25-multi-zone-runs-compile-fixed";
 char lastCommandId[48] = "";
 char lastCommandStatus[16] = "";
@@ -1229,6 +1234,8 @@ void buildStateJson(JsonDocument& doc) {
   doc["sunsetEpoch"] = weatherSnapshot.sunsetEpoch;
   doc["weatherCode"] = weatherSnapshot.weatherCode;
   doc["lastWeatherMs"] = weatherSnapshot.lastWeatherMs;
+  doc["weatherLoaded"] = weatherLoaded;
+  doc["weatherStatus"] = weatherStatus;
 
   JsonArray z = doc.createNestedArray("zones");
   for (uint8_t i = 0; i < ZONE_COUNT; i++) {
@@ -1316,6 +1323,43 @@ void sendStateJson() {
   server.send(200, "application/json", out);
 }
 
+const char* weatherCodeToCondition(int code) {
+  if (code == 0) return "Clear";
+  if (code == 1) return "Mostly Clear";
+  if (code == 2) return "Partly Cloudy";
+  if (code == 3) return "Cloudy";
+  if (code == 45 || code == 48) return "Fog";
+  if (code >= 51 && code <= 57) return "Drizzle";
+  if (code >= 61 && code <= 67) return "Rain";
+  if (code >= 71 && code <= 77) return "Snow";
+  if (code >= 80 && code <= 82) return "Showers";
+  if (code >= 85 && code <= 86) return "Snow Showers";
+  if (code >= 95 && code <= 99) return "Thunderstorm";
+  return "Unknown";
+}
+
+const char* windDirectionFromDegrees(int deg) {
+  static const char* dirs[] = {
+    "N", "NNE", "NE", "ENE",
+    "E", "ESE", "SE", "SSE",
+    "S", "SSW", "SW", "WSW",
+    "W", "WNW", "NW", "NNW"
+  };
+
+  deg = ((deg % 360) + 360) % 360;
+  int index = (int)((deg + 11.25f) / 22.5f) % 16;
+  return dirs[index];
+}
+
+bool weatherSnapshotLooksValid() {
+  return weatherSnapshot.lastWeatherMs > 0 &&
+         weatherSnapshot.sunriseEpoch > 0 &&
+         weatherSnapshot.sunsetEpoch > weatherSnapshot.sunriseEpoch &&
+         weatherSnapshot.weatherCode >= 0 &&
+         strcmp(weatherSnapshot.condition, "Updated") != 0 &&
+         strcmp(weatherSnapshot.summary, "Updated") != 0;
+}
+
 void handleTimeGet() {
   time_t nowEpoch = time(nullptr);
   StaticJsonDocument<128> doc;
@@ -1327,43 +1371,107 @@ void handleTimeGet() {
 }
 
 void updateWeatherFromOpenMeteo() {
-  HTTPClient http;
+  if (WiFi.status() != WL_CONNECTED) {
+    weatherLoaded = false;
+    strlcpy(weatherStatus, "home WiFi disconnected", sizeof(weatherStatus));
+    return;
+  }
+
   String url = String("https://api.open-meteo.com/v1/forecast?latitude=") + String(gardenLatitude, 6) +
     "&longitude=" + String(gardenLongitude, 6) +
     "&current=temperature_2m,relative_humidity_2m,dew_point_2m,precipitation,rain,weather_code,wind_speed_10m,wind_direction_10m" +
     "&hourly=precipitation_probability,sunshine_duration" +
     "&daily=precipitation_sum,sunrise,sunset,precipitation_probability_max" +
     "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&timeformat=unixtime";
-  http.begin(url);
+
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure();
+
+  HTTPClient http;
+  if (!http.begin(secureClient, url)) {
+    weatherLoaded = false;
+    strlcpy(weatherStatus, "Open-Meteo http.begin failed", sizeof(weatherStatus));
+    return;
+  }
+
+  http.setTimeout(10000);
   int code = http.GET();
-  if (code != 200) { http.end(); return; }
-  DynamicJsonDocument doc(8192);
-  if (deserializeJson(doc, http.getString())) { http.end(); return; }
+  if (code != 200) {
+    snprintf(weatherStatus, sizeof(weatherStatus), "Open-Meteo HTTP %d", code);
+    weatherLoaded = false;
+    http.end();
+    return;
+  }
+
+  String body = http.getString();
   http.end();
+
+  DynamicJsonDocument doc(12288);
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    snprintf(weatherStatus, sizeof(weatherStatus), "weather JSON parse failed: %s", err.c_str());
+    weatherLoaded = false;
+    return;
+  }
 
   JsonObject current = doc["current"].as<JsonObject>();
   JsonObject daily = doc["daily"].as<JsonObject>();
   JsonObject hourly = doc["hourly"].as<JsonObject>();
-  weatherSnapshot.temperatureF = current["temperature_2m"] | 0;
-  weatherSnapshot.humidityPct = current["relative_humidity_2m"] | 0;
-  weatherSnapshot.dewPointF = current["dew_point_2m"] | 0;
-  weatherSnapshot.rainIn = current["rain"] | (current["precipitation"] | 0);
-  weatherSnapshot.windMph = current["wind_speed_10m"] | 0;
+
+  if (current.isNull() || daily.isNull()) {
+    weatherLoaded = false;
+    strlcpy(weatherStatus, "weather JSON missing current/daily", sizeof(weatherStatus));
+    return;
+  }
+
+  weatherSnapshot.temperatureF = current["temperature_2m"] | 0.0f;
+  weatherSnapshot.humidityPct = current["relative_humidity_2m"] | 0.0f;
+  weatherSnapshot.dewPointF = current["dew_point_2m"] | 0.0f;
+  weatherSnapshot.rainIn = current["rain"] | (current["precipitation"] | 0.0f);
+  weatherSnapshot.windMph = current["wind_speed_10m"] | 0.0f;
   weatherSnapshot.windDeg = current["wind_direction_10m"] | 0;
-  weatherSnapshot.weatherCode = current["weather_code"] | 0;
-  weatherSnapshot.precipitationChancePct = daily["precipitation_probability_max"][0] | 0;
-  weatherSnapshot.predictedPrecipIn = daily["precipitation_sum"][0] | 0;
+  weatherSnapshot.weatherCode = current["weather_code"] | -1;
+
+  weatherSnapshot.precipitationChancePct = daily["precipitation_probability_max"][0] | 0.0f;
+  weatherSnapshot.predictedPrecipIn = daily["precipitation_sum"][0] | 0.0f;
   weatherSnapshot.sunriseEpoch = daily["sunrise"][0] | 0;
   weatherSnapshot.sunsetEpoch = daily["sunset"][0] | 0;
-  weatherSnapshot.sunlightHours = (hourly["sunshine_duration"][0] | 0) / 3600.0f;
-  strlcpy(weatherSnapshot.summary, "Open-Meteo current+forecast", sizeof(weatherSnapshot.summary));
-  strlcpy(weatherSnapshot.condition, "Updated", sizeof(weatherSnapshot.condition));
-  strlcpy(weatherSnapshot.windDirection, "N", sizeof(weatherSnapshot.windDirection));
-  weatherSnapshot.lastWeatherMs = millis();
-}
 
+  // Display-friendly daylight hours. This avoids the old bug where only
+  // hourly sunshine_duration[0] was used, often producing 0 even after a valid fetch.
+  if (weatherSnapshot.sunriseEpoch > 0 && weatherSnapshot.sunsetEpoch > weatherSnapshot.sunriseEpoch) {
+    weatherSnapshot.sunlightHours = (float)(weatherSnapshot.sunsetEpoch - weatherSnapshot.sunriseEpoch) / 3600.0f;
+  } else {
+    float sunshineSeconds = 0.0f;
+    JsonArray sunshine = hourly["sunshine_duration"].as<JsonArray>();
+    for (JsonVariant v : sunshine) sunshineSeconds += v.as<float>();
+    weatherSnapshot.sunlightHours = sunshineSeconds / 3600.0f;
+  }
+
+  const char* condition = weatherCodeToCondition(weatherSnapshot.weatherCode);
+  strlcpy(weatherSnapshot.condition, condition, sizeof(weatherSnapshot.condition));
+  strlcpy(weatherSnapshot.summary, condition, sizeof(weatherSnapshot.summary));
+  strlcpy(weatherSnapshot.windDirection, windDirectionFromDegrees(weatherSnapshot.windDeg), sizeof(weatherSnapshot.windDirection));
+
+  weatherSnapshot.lastWeatherMs = millis();
+  lastWeatherFetchMs = weatherSnapshot.lastWeatherMs;
+
+  weatherLoaded = weatherSnapshotLooksValid();
+  if (weatherLoaded) {
+    strlcpy(weatherStatus, "ok", sizeof(weatherStatus));
+  } else {
+    strlcpy(weatherStatus, "weather response missing required fields", sizeof(weatherStatus));
+  }
+}
 void handleWeatherGet() {
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<768> doc;
+
+  // Additive diagnostic fields. Existing e-ink firmware can ignore these safely.
+  doc["ok"] = weatherLoaded;
+  doc["weatherLoaded"] = weatherLoaded;
+  doc["weatherStatus"] = weatherStatus;
+
+  // Existing e-ink contract fields preserved.
   doc["summary"] = weatherSnapshot.summary;
   doc["condition"] = weatherSnapshot.condition;
   doc["temperatureF"] = weatherSnapshot.temperatureF;
@@ -1380,11 +1488,11 @@ void handleWeatherGet() {
   doc["sunsetEpoch"] = weatherSnapshot.sunsetEpoch;
   doc["weatherCode"] = weatherSnapshot.weatherCode;
   doc["lastWeatherMs"] = weatherSnapshot.lastWeatherMs;
+
   String out;
   serializeJson(doc, out);
   server.send(200, "application/json", out);
 }
-
 void handleSetTime() {
   if (!server.hasArg("epoch")) {
     server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing epoch\"}");
