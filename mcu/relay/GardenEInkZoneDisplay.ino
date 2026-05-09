@@ -79,6 +79,8 @@ struct DisplayState {
   char gardenNews[512];
   char displayMode[16];
   ZoneCfg zones[DISPLAY_ZONE_COUNT];
+  bool scheduleLoaded;
+  bool activeZones[DISPLAY_ZONE_COUNT];
   WeatherNow weather;
   RunState run;
 };
@@ -225,13 +227,17 @@ void loadConfig() {
   prefs.end();
 
   if (state.displayMode[0] == '\0') strlcpy(state.displayMode, MODE_AUTO, sizeof(state.displayMode));
-  strlcpy(state.title, "Castle Hills Garden Watering Schedule", sizeof(state.title));
+  strlcpy(state.title, "Castle Hills Garden Schedule", sizeof(state.title));
   strlcpy(state.date, "No relay time", sizeof(state.date));
   strlcpy(state.time, "--:--", sizeof(state.time));
 
+  state.scheduleLoaded = false;
   const char* defaults[DISPLAY_ZONE_COUNT] = {"Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5"};
   for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
+    state.activeZones[i] = false;
     if (state.zones[i].name[0] == '\0') strlcpy(state.zones[i].name, defaults[i], sizeof(state.zones[i].name));
+    // These defaults are only internal placeholders. The paper schedule panel
+    // will show "Not Loaded" until a relay schedule payload is received.
     if (state.zones[i].baseMinutes == 0) state.zones[i].baseMinutes = 15;
   }
 }
@@ -293,20 +299,20 @@ bool waitForStationWifi(uint32_t timeoutMs) {
 
 void applyScreenRotationMode() {
   if (state.run.active) {
-    strlcpy(state.title, "Castle Hills Garden Watering Schedule", sizeof(state.title));
+    strlcpy(state.title, "Castle Hills Garden Schedule", sizeof(state.title));
     return;
   }
   if (strcmp(state.displayMode, MODE_AUTO) != 0) {
     if (strcmp(state.displayMode, MODE_NEWS) == 0) strlcpy(state.title, "Castle Hills Garden News", sizeof(state.title));
     else if (strcmp(state.displayMode, MODE_GRAPH) == 0) strlcpy(state.title, "Current + Weekly Weather", sizeof(state.title));
-    else strlcpy(state.title, "Castle Hills Garden Watering Schedule", sizeof(state.title));
+    else strlcpy(state.title, "Castle Hills Garden Schedule", sizeof(state.title));
     return;
   }
 
   unsigned long cycleMs = (millis() - rotationEpochMs) % (4UL * 60UL * 1000UL);
   if (cycleMs < 45000UL) strlcpy(state.title, "Castle Hills Garden News", sizeof(state.title));
   else if (cycleMs >= 120000UL && cycleMs < 165000UL) strlcpy(state.title, "Current + Weekly Weather", sizeof(state.title));
-  else strlcpy(state.title, "Castle Hills Garden Watering Schedule", sizeof(state.title));
+  else strlcpy(state.title, "Castle Hills Garden Schedule", sizeof(state.title));
 }
 
 bool fetchRelayJson(const String& path, DynamicJsonDocument& out, const char* stage) {
@@ -595,6 +601,130 @@ static void finalizeRunTimer(bool active, uint8_t zone, uint32_t& remainingSecon
   }
 }
 
+
+static bool extractScheduleFields(JsonObject src, uint8_t& zoneOut, uint8_t& hourOut, uint8_t& minuteOut, uint16_t& minutesOut) {
+  int rawZone = -999;
+  bool zoneIsZeroBased = true;
+  if (!src["zoneIndex"].isNull()) { rawZone = src["zoneIndex"].as<int>(); zoneIsZeroBased = true; }
+  else if (!src["index"].isNull()) { rawZone = src["index"].as<int>(); zoneIsZeroBased = true; }
+  else if (!src["idx"].isNull()) { rawZone = src["idx"].as<int>(); zoneIsZeroBased = true; }
+  else if (!src["zoneNumber"].isNull()) { rawZone = src["zoneNumber"].as<int>(); zoneIsZeroBased = false; }
+  else if (!src["zone"].isNull()) {
+    rawZone = src["zone"].as<int>();
+    // GardenSimpleRelay6 schedule objects use zoneIndex. If a future payload uses
+    // bare "zone", accept both: 0..4 means zero-based, 1..5 means one-based.
+    zoneIsZeroBased = (rawZone >= 0 && rawZone < DISPLAY_ZONE_COUNT);
+  }
+  if (rawZone == -999) return false;
+  uint8_t z = normalizeDisplayZoneValue(rawZone, zoneIsZeroBased);
+  if (z < 1 || z > DISPLAY_ZONE_COUNT) return false;
+
+  int h = -1;
+  int m = -1;
+  if (!src["startHour"].isNull()) h = src["startHour"].as<int>();
+  else if (!src["hour"].isNull()) h = src["hour"].as<int>();
+  if (!src["startMinute"].isNull()) m = src["startMinute"].as<int>();
+  else if (!src["minute"].isNull()) m = src["minute"].as<int>();
+
+  const char* timeKeys[] = {"startTime", "time"};
+  for (uint8_t i = 0; (h < 0 || m < 0) && i < sizeof(timeKeys) / sizeof(timeKeys[0]); i++) {
+    const char* t = src[timeKeys[i]] | nullptr;
+    if (t && strlen(t) >= 4) {
+      int hh = atoi(t);
+      const char* colon = strchr(t, ':');
+      if (colon) {
+        int mm = atoi(colon + 1);
+        h = hh;
+        m = mm;
+      }
+    }
+  }
+  if (h < 0 || h > 23 || m < 0 || m > 59) return false;
+
+  uint32_t minutes = 0;
+  const char* minKeys[] = {"runMinutes", "baseMinutes", "minutes", "durationMinutes", "durationMin"};
+  minutes = firstU32(src, minKeys, sizeof(minKeys) / sizeof(minKeys[0]), 0);
+  if (minutes == 0) {
+    const char* secKeys[] = {"durationSeconds", "runSeconds", "seconds"};
+    uint32_t seconds = firstU32(src, secKeys, sizeof(secKeys) / sizeof(secKeys[0]), 0);
+    if (seconds > 0) minutes = (seconds + 59UL) / 60UL;
+  }
+  if (minutes == 0) return false;
+
+  zoneOut = z;
+  hourOut = (uint8_t)h;
+  minuteOut = (uint8_t)m;
+  minutesOut = (uint16_t)constrain((int)minutes, 1, 240);
+  return true;
+}
+
+static bool applySchedulesFromArray(JsonArray arr) {
+  if (arr.isNull() || arr.size() == 0) return false;
+
+  bool loadedAny = false;
+  bool zoneSet[DISPLAY_ZONE_COUNT] = {false, false, false, false, false};
+  ZoneCfg parsed[DISPLAY_ZONE_COUNT];
+  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) parsed[i] = state.zones[i];
+
+  for (JsonObject item : arr) {
+    if (item.isNull()) continue;
+    if (!item["enabled"].isNull() && !jsonBool(item["enabled"], true)) continue;
+    uint8_t z = 0, h = 0, m = 0;
+    uint16_t mins = 0;
+    if (!extractScheduleFields(item, z, h, m, mins)) continue;
+    uint8_t idx = z - 1;
+    // Use the first enabled schedule for each zone in the compact paper panel.
+    if (!zoneSet[idx]) {
+      parsed[idx].startHour = h;
+      parsed[idx].startMinute = m;
+      parsed[idx].baseMinutes = mins;
+      zoneSet[idx] = true;
+      loadedAny = true;
+    }
+  }
+
+  if (loadedAny) {
+    for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) state.zones[i] = parsed[i];
+    state.scheduleLoaded = true;
+  }
+  return loadedAny;
+}
+
+static bool applyScheduleFromRelayJson(JsonVariant root) {
+  bool loaded = false;
+
+  JsonArray schedules = root["dailySchedules"].as<JsonArray>();
+  if (!schedules.isNull()) loaded = applySchedulesFromArray(schedules) || loaded;
+  schedules = root["schedules"].as<JsonArray>();
+  if (!schedules.isNull()) loaded = applySchedulesFromArray(schedules) || loaded;
+
+  JsonArray zones = root["zones"].as<JsonArray>();
+  if (!zones.isNull()) {
+    int i = 0;
+    bool zonesHadSchedule = false;
+    for (JsonObject zobj : zones) {
+      if (i >= DISPLAY_ZONE_COUNT) break;
+      if (!zobj["name"].isNull()) strlcpy(state.zones[i].name, zobj["name"] | state.zones[i].name, sizeof(state.zones[i].name));
+      uint8_t z = 0, h = 0, m = 0;
+      uint16_t mins = 0;
+      if (extractScheduleFields(zobj, z, h, m, mins)) {
+        uint8_t idx = z - 1;
+        state.zones[idx].startHour = h;
+        state.zones[idx].startMinute = m;
+        state.zones[idx].baseMinutes = mins;
+        zonesHadSchedule = true;
+      }
+      i++;
+    }
+    if (zonesHadSchedule) {
+      state.scheduleLoaded = true;
+      loaded = true;
+    }
+  }
+
+  return loaded;
+}
+
 uint8_t normalizeRelayZoneFromRun(JsonObject run, JsonVariant root) {
   uint8_t z = zoneFromObject(run, -1);
   if (z) return z;
@@ -625,12 +755,29 @@ uint8_t normalizeRelayZoneFromRun(JsonObject run, JsonVariant root) {
 }
 
 void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
-  JsonObject run = sdoc["currentRun"].as<JsonObject>();
+  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) state.activeZones[i] = false;
 
-  bool active = relayRunObjectActive(run);
-  uint8_t normalizedZone = normalizeRelayZoneFromRun(run, sdoc.as<JsonVariant>());
-  uint32_t remainingSeconds = remainingSecondsFromObject(run);
-  uint32_t totalSeconds = durationSecondsFromObject(run);
+  JsonVariant root = sdoc.as<JsonVariant>();
+  applyScheduleFromRelayJson(root);
+
+  bool anyActive = false;
+  uint8_t primaryZone = 0;
+  uint32_t primaryRemaining = 0;
+  uint32_t primaryTotal = 0;
+
+  JsonObject run = sdoc["currentRun"].as<JsonObject>();
+  if (relayRunObjectActive(run)) {
+    uint8_t z = zoneFromObject(run, -1);
+    if (z == 0) z = normalizeRelayZoneFromRun(run, root);
+    if (z == 0) z = 1;
+    if (z >= 1 && z <= DISPLAY_ZONE_COUNT) {
+      anyActive = true;
+      primaryZone = z;
+      state.activeZones[z - 1] = true;
+      primaryRemaining = remainingSecondsFromObject(run);
+      primaryTotal = durationSecondsFromObject(run);
+    }
+  }
 
   JsonArray zoneRuns = sdoc["zoneRuns"].as<JsonArray>();
   if (!zoneRuns.isNull()) {
@@ -638,42 +785,45 @@ void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
     for (JsonObject zr : zoneRuns) {
       if (relayRunObjectActive(zr)) {
         uint8_t displayZone = zoneFromObject(zr, idx);
-        if (displayZone > 0) {
-          active = true;
-          normalizedZone = displayZone;
+        if (displayZone >= 1 && displayZone <= DISPLAY_ZONE_COUNT) {
+          anyActive = true;
+          state.activeZones[displayZone - 1] = true;
           uint32_t zrRemaining = remainingSecondsFromObject(zr);
           uint32_t zrTotal = durationSecondsFromObject(zr);
-          if (zrRemaining > 0 || remainingSeconds == 0) remainingSeconds = zrRemaining;
-          if (zrTotal > 0 || totalSeconds == 0) totalSeconds = zrTotal;
-          break;
+          if (primaryZone == 0 || zrRemaining > primaryRemaining) {
+            primaryZone = displayZone;
+            primaryRemaining = zrRemaining;
+            primaryTotal = zrTotal;
+          }
         }
       }
       idx++;
     }
   }
 
-  if (!active && normalizedZone > 0) active = true;
-  if (active && normalizedZone == 0) normalizedZone = 1;
-
-  finalizeRunTimer(active, normalizedZone, remainingSeconds, totalSeconds);
-
-  state.run.active = active;
-  state.run.zone = active ? normalizedZone : 0;
-  state.run.remainingSeconds = active ? remainingSeconds : 0;
-  state.run.totalSeconds = active ? totalSeconds : 0;
-
-  JsonArray zones = sdoc["zones"].as<JsonArray>();
-  if (!zones.isNull()) {
-    int i = 0;
-    for (JsonObject z : zones) {
-      if (i >= DISPLAY_ZONE_COUNT) break;
-      strlcpy(state.zones[i].name, z["name"] | state.zones[i].name, sizeof(state.zones[i].name));
-      state.zones[i].baseMinutes = z["baseMinutes"] | z["minutes"] | state.zones[i].baseMinutes;
-      state.zones[i].startHour = z["startHour"] | state.zones[i].startHour;
-      state.zones[i].startMinute = z["startMinute"] | state.zones[i].startMinute;
-      i++;
+  JsonArray relays = sdoc["relays"].as<JsonArray>();
+  if (!relays.isNull()) {
+    int idx = 0;
+    for (JsonObject r : relays) {
+      bool on = jsonBool(r["on"], false) || jsonBool(r["state"], false) || jsonBool(r["active"], false) || jsonBool(r["relayOn"], false);
+      if (on && idx < DISPLAY_ZONE_COUNT) {
+        anyActive = true;
+        state.activeZones[idx] = true;
+        if (primaryZone == 0) primaryZone = idx + 1;
+      }
+      idx++;
     }
   }
+
+  if (!anyActive && primaryZone > 0) anyActive = true;
+  if (anyActive && primaryZone == 0) primaryZone = 1;
+
+  finalizeRunTimer(anyActive, primaryZone, primaryRemaining, primaryTotal);
+
+  state.run.active = anyActive;
+  state.run.zone = anyActive ? primaryZone : 0;
+  state.run.remainingSeconds = anyActive ? primaryRemaining : 0;
+  state.run.totalSeconds = anyActive ? primaryTotal : 0;
 }
 
 bool syncRunStateOnly() {
@@ -775,22 +925,37 @@ static const MapPolyRef MAP_POLYS[MAP_POLY_COUNT] = {
   {ZONE_POLY_6, 5},
 };
 
-// The SVG has six drawn polygons but only five watering zones. Zone 5 is
-// represented by the two top polygons, so one watering zone can highlight two
-// separate map polygons.
-static const uint8_t ZONE1_POLYS[] = {0};
-static const uint8_t ZONE2_POLYS[] = {1};
-static const uint8_t ZONE3_POLYS[] = {2};
-static const uint8_t ZONE4_POLYS[] = {3};
-static const uint8_t ZONE5_POLYS[] = {4, 5};
+// The relay firmware has five watering zones and relay channel 6 is the
+// master/spigot channel, not a map watering zone. The SVG has six drawn
+// polygons because watering Zone 4 is split into two separate top polygons.
+// Keep these groups aligned to the relay's displayed Zone 1..5 numbering.
+// Watering-zone to SVG-polygon mapping.
+// Polygon indexes are MAP_POLYS[] order:
+//   0 = bottom-left polygon
+//   1 = middle polygon
+//   2 = right-most polygon
+//   3 = upper-left-side / diagonal polygon
+//   4 = top-left polygon
+//   5 = top-right-most polygon
+// User-confirmed mapping:
+//   Zone 1 = right-most polygon
+//   Zone 2 = top-right-most polygon
+//   Zone 3 = top-left polygon
+//   Zone 4 = bottom-left polygon + middle polygon
+//   Zone 5 = upper-most left-side polygon, not the top-left polygon
+static const uint8_t ZONE1_POLYS[] = {2};       // right-most polygon
+static const uint8_t ZONE2_POLYS[] = {5};       // top-right-most polygon
+static const uint8_t ZONE3_POLYS[] = {4};       // top-left polygon
+static const uint8_t ZONE4_POLYS[] = {0, 1};    // bottom-left + middle polygons make one zone
+static const uint8_t ZONE5_POLYS[] = {3};       // upper-most left-side / diagonal polygon
 
-struct ZoneMapGroup { const uint8_t* polyIndexes; uint8_t count; float lx; float ly; };
+struct ZoneMapGroup { const uint8_t* polyIndexes; uint8_t count; };
 static const ZoneMapGroup DISPLAY_ZONE_MAP[DISPLAY_ZONE_COUNT] = {
-  {ZONE1_POLYS, 1, 60.0f, 196.0f},
-  {ZONE2_POLYS, 1, 165.0f, 128.0f},
-  {ZONE3_POLYS, 1, 232.0f, 130.0f},
-  {ZONE4_POLYS, 1, 58.0f, 118.0f},
-  {ZONE5_POLYS, 2, 158.0f, 55.0f},
+  {ZONE1_POLYS, 1},
+  {ZONE2_POLYS, 1},
+  {ZONE3_POLYS, 1},
+  {ZONE4_POLYS, 2},
+  {ZONE5_POLYS, 1},
 };
 
 static inline int mapX(int frameX, int frameW, float vx) {
@@ -821,7 +986,7 @@ static void drawScaledMapPolyOutline(const MapPt* p, int n, int frameX, int fram
   }
 }
 
-static void hatchScaledMapPoly(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH) {
+static void fillScaledMapPoly(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH) {
   float minX = 9999, maxX = -9999, minY = 9999, maxY = -9999;
   for (int i = 0; i < n; i++) {
     minX = min(minX, p[i].x); maxX = max(maxX, p[i].x);
@@ -833,35 +998,77 @@ static void hatchScaledMapPoly(const MapPt* p, int n, int frameX, int frameY, in
   int sy0 = mapY(frameY, frameH, minY);
   int sy1 = mapY(frameY, frameH, maxY);
 
-  for (int sy = sy0; sy <= sy1; sy += 4) {
+  for (int sy = sy0; sy <= sy1; sy++) {
     bool inRun = false;
     int runStart = sx0;
-    for (int sx = sx0; sx <= sx1; sx += 2) {
+    for (int sx = sx0; sx <= sx1; sx++) {
       float vx = ((float)(sx - frameX - 6) / (float)(frameW - 12)) * MAP_VB_W;
       float vy = ((float)(sy - frameY - 6) / (float)(frameH - 12)) * MAP_VB_H;
       bool inside = pointInsideMapPoly(p, n, vx, vy);
       if (inside && !inRun) { runStart = sx; inRun = true; }
       if ((!inside || sx >= sx1) && inRun) {
-        int runEnd = inside ? sx : sx - 2;
-        display.drawLine(runStart, sy, runEnd, sy, GxEPD_BLACK);
+        int runEnd = inside ? sx : sx - 1;
+        if (runEnd >= runStart) display.drawFastHLine(runStart, sy, runEnd - runStart + 1, GxEPD_BLACK);
         inRun = false;
       }
     }
   }
 }
 
-void drawZoneLabel(int frameX, int frameY, int frameW, int frameH, int zone, float lx, float ly, bool active) {
-  int x = mapX(frameX, frameW, lx);
-  int y = mapY(frameY, frameH, ly);
-  display.setFont(&FreeMono9pt7b);
+static MapPt polygonCentroid(const MapPt* p, int n) {
+  // Use the true polygon centroid, not the bounding-box center. If the SVG
+  // polygon repeats its first point at the end, ignore that duplicate vertex.
+  int m = n;
+  if (m > 1 && fabsf(p[0].x - p[m - 1].x) < 0.001f && fabsf(p[0].y - p[m - 1].y) < 0.001f) m--;
+
+  float twiceArea = 0.0f;
+  float cx = 0.0f;
+  float cy = 0.0f;
+  for (int i = 0; i < m; i++) {
+    int j = (i + 1) % m;
+    float cross = p[i].x * p[j].y - p[j].x * p[i].y;
+    twiceArea += cross;
+    cx += (p[i].x + p[j].x) * cross;
+    cy += (p[i].y + p[j].y) * cross;
+  }
+
+  if (fabsf(twiceArea) < 0.0001f) {
+    // Degenerate fallback: average vertices. This is not expected for these
+    // SVG zones, but prevents labels from going invalid if geometry changes.
+    cx = 0.0f;
+    cy = 0.0f;
+    for (int i = 0; i < m; i++) { cx += p[i].x; cy += p[i].y; }
+    return {cx / max(1, m), cy / max(1, m)};
+  }
+
+  float factor = 1.0f / (3.0f * twiceArea);
+  return {cx * factor, cy * factor};
+}
+
+void drawZoneNumberBadge(int frameX, int frameY, int frameW, int frameH, int zone, const MapPt* p, int n, bool active) {
+  MapPt c = polygonCentroid(p, n);
+  int cx = mapX(frameX, frameW, c.x);
+  int cy = mapY(frameY, frameH, c.y);
+  const int r = 15;
+
   if (active) {
-    display.fillRect(x - 4, y - 15, 64, 19, GxEPD_BLACK);
+    display.fillCircle(cx, cy, r, GxEPD_BLACK);
+    display.drawCircle(cx, cy, r, GxEPD_WHITE);
     display.setTextColor(GxEPD_WHITE);
   } else {
+    display.fillCircle(cx, cy, r, GxEPD_WHITE);
+    display.drawCircle(cx, cy, r, GxEPD_BLACK);
     display.setTextColor(GxEPD_BLACK);
   }
-  display.setCursor(x, y);
-  display.printf("Zone %d", zone);
+
+  display.setFont(&FreeMonoBold12pt7b);
+  char label[4];
+  snprintf(label, sizeof(label), "%d", zone);
+  int16_t tx, ty;
+  uint16_t tw, th;
+  display.getTextBounds(label, 0, 0, &tx, &ty, &tw, &th);
+  display.setCursor(cx - (int)tw / 2 - tx, cy - (int)th / 2 - ty);
+  display.print(label);
   display.setTextColor(GxEPD_BLACK);
 }
 
@@ -886,13 +1093,12 @@ void drawMap(int x, int y, int w, int h) {
   display.drawRect(x, y, w, h, GxEPD_BLACK);
   drawMapLinework(x, y, w, h);
 
-  uint8_t activeZone = (state.run.active && state.run.zone >= 1 && state.run.zone <= DISPLAY_ZONE_COUNT) ? state.run.zone : 0;
-
-  if (activeZone > 0) {
-    const ZoneMapGroup& g = DISPLAY_ZONE_MAP[activeZone - 1];
+  for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
+    if (!state.activeZones[zone]) continue;
+    const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
     for (uint8_t j = 0; j < g.count; j++) {
       uint8_t polyIndex = g.polyIndexes[j];
-      if (polyIndex < MAP_POLY_COUNT) hatchScaledMapPoly(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, x, y, w, h);
+      if (polyIndex < MAP_POLY_COUNT) fillScaledMapPoly(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, x, y, w, h);
     }
   }
 
@@ -900,8 +1106,14 @@ void drawMap(int x, int y, int w, int h) {
     drawScaledMapPolyOutline(MAP_POLYS[i].p, MAP_POLYS[i].n, x, y, w, h);
   }
 
-  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
-    drawZoneLabel(x, y, w, h, i + 1, DISPLAY_ZONE_MAP[i].lx, DISPLAY_ZONE_MAP[i].ly, activeZone == i + 1);
+  for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
+    const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
+    for (uint8_t j = 0; j < g.count; j++) {
+      uint8_t polyIndex = g.polyIndexes[j];
+      if (polyIndex < MAP_POLY_COUNT) {
+        drawZoneNumberBadge(x, y, w, h, zone + 1, MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, state.activeZones[zone]);
+      }
+    }
   }
 }
 
@@ -1006,6 +1218,13 @@ void drawSchedulePanel(int x, int y, int w, int h) {
   display.setCursor(x + 8, y + 22);
   display.print("Schedule");
   display.setFont(&FreeSans9pt7b);
+  if (!state.scheduleLoaded) {
+    display.setCursor(x + 10, y + 62);
+    display.print("Not Loaded");
+    display.setCursor(x + 10, y + 87);
+    display.print("Retrying relay schedule...");
+    return;
+  }
   for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
     int col = i < 3 ? 0 : 1;
     int row = i % 3;
@@ -1122,10 +1341,20 @@ void renderScheduleScreenFull() {
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeMonoBold12pt7b);
     display.setCursor(8, 25);
-    display.print("Castle Hills Garden Watering Schedule");
+    display.print("Castle Hills Garden Schedule");
+
     display.setFont(&FreeSans9pt7b);
-    display.setCursor(570, 25); display.print(state.date);
-    display.setCursor(690, 44); display.print(state.time);
+    String headerDateTime = String(state.date) + "  " + String(state.time);
+    int16_t tbx = 0;
+    int16_t tby = 0;
+    uint16_t tbw = 0;
+    uint16_t tbh = 0;
+    display.getTextBounds(headerDateTime, 0, 25, &tbx, &tby, &tbw, &tbh);
+    int16_t headerX = 792 - (int16_t)tbw;
+    if (headerX < 430) headerX = 430;
+    display.setCursor(headerX, 25);
+    display.print(headerDateTime);
+
     display.drawLine(8, 48, 792, 48, GxEPD_BLACK);
     drawMap(8, 48, 424, 424);
     drawWeatherWidget(432, 48, 360, 160);
@@ -1263,6 +1492,10 @@ bool substantialChange() {
   if (state.run.active != lastDrawn.run.active) return true;
   if (state.run.zone != lastDrawn.run.zone) return true;
   if (strcmp(state.title, lastDrawn.title) != 0) return true;
+  if (state.scheduleLoaded != lastDrawn.scheduleLoaded) return true;
+  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
+    if (state.activeZones[i] != lastDrawn.activeZones[i]) return true;
+  }
   static bool lastRelayReadySeen = false;
   static bool lastDiagnosticSeen = true;
   if (relayDataReady != lastRelayReadySeen || forceDiagnosticScreen != lastDiagnosticSeen) {
@@ -1429,6 +1662,7 @@ void handleState() {
   doc["gardenNews"] = state.gardenNews;
   doc["currentRunActive"] = state.run.active;
   doc["currentRunZone"] = state.run.zone;
+  doc["scheduleLoaded"] = state.scheduleLoaded;
   doc["displayMode"] = state.displayMode;
   doc["apSsid"] = apSsid;
   doc["apIp"] = WiFi.softAPIP().toString();
@@ -1461,6 +1695,9 @@ void handleState() {
   doc["queueDepth"] = queueDepth;
   doc["pendingExtraZone"] = pendingExtraZone;
   doc["pendingExtraMinutes"] = pendingExtraMinutes;
+
+  JsonArray activeZonesJson = doc.createNestedArray("activeZones");
+  for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) activeZonesJson.add(state.activeZones[i]);
 
   JsonArray zones = doc.createNestedArray("zones");
   for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
