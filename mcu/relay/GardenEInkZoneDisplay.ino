@@ -94,6 +94,7 @@ struct DisplayState {
   bool activeZones[DISPLAY_ZONE_COUNT];
   uint16_t activeRemainingSeconds[DISPLAY_ZONE_COUNT];
   uint16_t activeTotalSeconds[DISPLAY_ZONE_COUNT];
+  bool spigotsOn;
   WeatherNow weather;
   RunState run;
 };
@@ -148,7 +149,11 @@ static const unsigned long RELAY_FULL_SYNC_MS = 60000UL;
 static const unsigned long RELAY_RETRY_SYNC_MS = 10000UL;
 unsigned long lastFullSyncMs = 0;
 static const unsigned long RUNTIME_ZONE_ROTATE_MS = 8000UL;
+static const unsigned long RUNTIME_ZONE_FLASH_MS = 1800UL;
 uint8_t lastRuntimeMeterZone = 0;
+uint8_t runtimeSwitchFlashZone = 0;
+unsigned long runtimeSwitchFlashUntilMs = 0;
+bool runtimeSwitchFlashVisible = false;
 String lastHeaderDateTimeDrawn = "";
 
 const char* MODE_AUTO = "auto";
@@ -269,6 +274,12 @@ uint8_t runtimeMeterZone() {
     pick--;
   }
   return state.run.zone;
+}
+
+bool isRuntimeZoneFlashActive(uint8_t displayZone) {
+  return runtimeSwitchFlashVisible &&
+         runtimeSwitchFlashZone == displayZone &&
+         (int32_t)(millis() - runtimeSwitchFlashUntilMs) < 0;
 }
 
 void formatTimeLowerNoLeadingZero(unsigned long epoch, char* out, size_t outSize) {
@@ -878,6 +889,7 @@ void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
     state.activeRemainingSeconds[i] = 0;
     state.activeTotalSeconds[i] = 0;
   }
+  state.spigotsOn = false;
 
   JsonVariant root = sdoc.as<JsonVariant>();
   applyScheduleFromRelayJson(root);
@@ -937,10 +949,18 @@ void applyRunStateFromRelayJson(DynamicJsonDocument& sdoc) {
         anyActive = true;
         state.activeZones[idx] = true;
         if (primaryZone == 0) primaryZone = idx + 1;
+      } else if (on && idx == 5) {
+        // Relay 6 is the spigot/master valve channel. Show this only when
+        // no watering zones are active. It is not a map watering zone.
+        state.spigotsOn = true;
       }
       idx++;
     }
   }
+
+  JsonObject spigotRunObj = sdoc["spigotRun"].as<JsonObject>();
+  if (relayRunObjectActive(spigotRunObj)) state.spigotsOn = true;
+  if (jsonBool(sdoc["spigotsOn"], false) || jsonBool(sdoc["spigotOn"], false) || jsonBool(sdoc["masterValveOn"], false)) state.spigotsOn = true;
 
   if (!anyActive && primaryZone > 0) anyActive = true;
   if (anyActive && primaryZone == 0) primaryZone = 1;
@@ -1128,6 +1148,7 @@ static void drawActiveZoneWhiteOutlines(int frameX, int frameY, int frameW, int 
   // so the running zone remains clearly separated from adjacent map geometry.
   for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
     if (!state.activeZones[zone]) continue;
+    if (isRuntimeZoneFlashActive(zone + 1)) continue;
     const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
     for (uint8_t j = 0; j < g.count; j++) {
       uint8_t polyIndex = g.polyIndexes[j];
@@ -1139,7 +1160,7 @@ static void drawActiveZoneWhiteOutlines(int frameX, int frameY, int frameW, int 
   }
 }
 
-static void fillScaledMapPoly(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH) {
+static void fillScaledMapPolyColor(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH, uint16_t color) {
   float minX = 9999, maxX = -9999, minY = 9999, maxY = -9999;
   for (int i = 0; i < n; i++) {
     minX = min(minX, p[i].x); maxX = max(maxX, p[i].x);
@@ -1161,11 +1182,15 @@ static void fillScaledMapPoly(const MapPt* p, int n, int frameX, int frameY, int
       if (inside && !inRun) { runStart = sx; inRun = true; }
       if ((!inside || sx >= sx1) && inRun) {
         int runEnd = inside ? sx : sx - 1;
-        if (runEnd >= runStart) display.drawFastHLine(runStart, sy, runEnd - runStart + 1, GxEPD_BLACK);
+        if (runEnd >= runStart) display.drawFastHLine(runStart, sy, runEnd - runStart + 1, color);
         inRun = false;
       }
     }
   }
+}
+
+static void fillScaledMapPoly(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH) {
+  fillScaledMapPolyColor(p, n, frameX, frameY, frameW, frameH, GxEPD_BLACK);
 }
 
 static MapPt polygonCentroid(const MapPt* p, int n) {
@@ -1252,10 +1277,13 @@ void drawMap(int x, int y, int w, int h) {
 
   for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
     if (!state.activeZones[zone]) continue;
+    bool flashThisZone = isRuntimeZoneFlashActive(zone + 1);
     const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
     for (uint8_t j = 0; j < g.count; j++) {
       uint8_t polyIndex = g.polyIndexes[j];
-      if (polyIndex < MAP_POLY_COUNT) fillScaledMapPoly(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, x, y, w, h);
+      if (polyIndex < MAP_POLY_COUNT) {
+        fillScaledMapPolyColor(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, x, y, w, h, flashThisZone ? GxEPD_WHITE : GxEPD_BLACK);
+      }
     }
   }
 
@@ -1270,10 +1298,28 @@ void drawMap(int x, int y, int w, int h) {
     for (uint8_t j = 0; j < g.count; j++) {
       uint8_t polyIndex = g.polyIndexes[j];
       if (polyIndex < MAP_POLY_COUNT) {
-        drawZoneNumberBadge(x, y, w, h, zone + 1, MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, state.activeZones[zone]);
+        bool badgeActive = state.activeZones[zone] && !isRuntimeZoneFlashActive(zone + 1);
+        drawZoneNumberBadge(x, y, w, h, zone + 1, MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, badgeActive);
       }
     }
   }
+}
+
+void partialUpdateMapPanel() {
+  display.setPartialWindow(8, 48, 424, 424);
+  display.firstPage();
+  do {
+    display.fillRect(8, 48, 424, 424, GxEPD_WHITE);
+    drawMap(8, 48, 424, 424);
+  } while (display.nextPage());
+}
+
+void partialUpdateRuntimePanel() {
+  display.setPartialWindow(432, 373, 360, 99);
+  display.firstPage();
+  do {
+    drawRuntimePanel(432, 373, 360, 99);
+  } while (display.nextPage());
 }
 
 void drawWeatherIcon(int x, int y) {
@@ -1400,7 +1446,7 @@ void drawSchedulePanel(int x, int y, int w, int h) {
   for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
     // One schedule row per watering zone. Use wider spacing so the
     // schedule does not collapse into an unreadable text block.
-    int sy = y + 47 + i * 20;
+    int sy = y + 50 + i * 25;
 
     display.setFont(&FreeSansBold9pt7b);
     display.setCursor(x + 10, sy);
@@ -1432,16 +1478,23 @@ void drawRuntimePanel(int x, int y, int w, int h) {
   display.drawRect(x, y, w, h, GxEPD_BLACK);
   display.setFont(&FreeMonoBold12pt7b);
   if (!state.run.active) {
-    if (lastFinishedZone > 0) {
-      display.setCursor(x + 8, y + 34); display.printf("Finished Zone %u", lastFinishedZone);
+    if (state.spigotsOn) {
+      display.setFont(&FreeMonoBold12pt7b);
+      display.setCursor(x + 8, y + 42);
+      display.print("Spigots On");
+      display.drawRect(x + 8, y + 58, w - 16, 26, GxEPD_BLACK);
+      display.fillRect(x + 9, y + 59, w - 18, 24, GxEPD_BLACK);
+    } else if (lastFinishedZone > 0) {
+      display.setCursor(x + 8, y + 32); display.printf("Finished Zone %u", lastFinishedZone);
+      display.drawRect(x + 8, y + 58, w - 16, 26, GxEPD_BLACK);
     } else {
-      display.setCursor(x + 8, y + 34); display.print("Idle");
+      display.setCursor(x + 8, y + 32); display.print("Idle");
+      display.drawRect(x + 8, y + 58, w - 16, 26, GxEPD_BLACK);
+      display.setFont(&FreeSans9pt7b);
+      display.setCursor(x + 8, y + h - 12);
+      if (!relayDataReady && relayLastError[0]) display.print("Relay error");
+      else display.print("Idle");
     }
-    display.drawRect(x + 8, y + 70, w - 16, 22, GxEPD_BLACK);
-    display.setFont(&FreeSans9pt7b);
-    display.setCursor(x + 8, y + 116);
-    if (!relayDataReady && relayLastError[0]) display.print("Relay error");
-    else display.print("Idle");
     lastRuntimeMeterZone = 0;
     return;
   }
@@ -1454,23 +1507,23 @@ void drawRuntimePanel(int x, int y, int w, int h) {
   if (remaining == 0 && meterZone == state.run.zone) remaining = state.run.remainingSeconds;
   if (total == 0 && meterZone == state.run.zone) total = state.run.totalSeconds;
 
-  // Keep the active-run header compact and low in the panel so the
-  // schedule panel above has the visual priority. Do not add extra
-  // status text below; the meter itself is the status.
+  // Keep the runtime panel compact so vertical space is available
+  // for the schedule list. Do not add extra status text below;
+  // the meter itself is the status. Zone-switch flashing is shown
+  // on the actual map polygon, not in this header.
   display.setFont(&FreeMonoBold12pt7b);
-  display.setCursor(x + 8, y + 55);
+  display.setCursor(x + 8, y + 42);
   display.printf("Running Zone %u", meterZone);
 
   // Keep the countdown visually secondary to the running-zone label.
-  // Regular/smaller text makes the zone label easier to read at a glance.
   display.setFont(&FreeSans9pt7b);
-  display.setCursor(x + 238, y + 54);
+  display.setCursor(x + 238, y + 42);
   display.printf("%um %us", remaining / 60, remaining % 60);
 
   float r = total ? ((float)(total - remaining) / (float)total) : 0;
   r = constrain(r, 0.0f, 1.0f);
-  display.drawRect(x + 8, y + 82, w - 16, 28, GxEPD_BLACK);
-  display.fillRect(x + 9, y + 83, (int)((w - 18) * r), 26, GxEPD_BLACK);
+  display.drawRect(x + 8, y + 66, w - 16, 30, GxEPD_BLACK);
+  display.fillRect(x + 9, y + 67, (int)((w - 18) * r), 28, GxEPD_BLACK);
 
   lastRuntimeMeterZone = meterZone;
 }
@@ -1556,9 +1609,9 @@ void renderScheduleScreenFull() {
 
     display.drawLine(8, 48, 792, 48, GxEPD_BLACK);
     drawMap(8, 48, 424, 424);
-    drawWeatherWidget(432, 48, 360, 160);
-    drawSchedulePanel(432, 207, 360, 133);
-    drawRuntimePanel(432, 339, 360, 133);
+    drawWeatherWidget(432, 48, 360, 166);
+    drawSchedulePanel(432, 213, 360, 161);
+    drawRuntimePanel(432, 373, 360, 99);
   } while (display.nextPage());
 }
 
@@ -1692,6 +1745,7 @@ bool substantialChange() {
   if (state.run.zone != lastDrawn.run.zone) return true;
   if (strcmp(state.title, lastDrawn.title) != 0) return true;
   if (state.scheduleLoaded != lastDrawn.scheduleLoaded) return true;
+  if (state.spigotsOn != lastDrawn.spigotsOn) return true;
   for (int i = 0; i < DISPLAY_ZONE_COUNT; i++) {
     if (state.scheduleZoneLoaded[i] != lastDrawn.scheduleZoneLoaded[i]) return true;
     if (state.activeZones[i] != lastDrawn.activeZones[i]) return true;
@@ -1865,6 +1919,7 @@ void handleState() {
   doc["date"] = state.date;
   doc["time"] = state.time;
   doc["masterEnable"] = state.masterEnable;
+  doc["spigotsOn"] = state.spigotsOn;
   doc["weatherAdjustmentEnabled"] = state.weatherAdjustmentEnabled;
   doc["gardenNews"] = state.gardenNews;
   doc["currentRunActive"] = state.run.active;
@@ -2255,8 +2310,20 @@ void loop() {
     didPoll = true;
   }
 
-  bool runtimeZoneChanged = state.run.active && runtimeMeterZone() != lastRuntimeMeterZone;
-  if (!didPoll && !runtimeZoneChanged) return;
+  uint8_t currentRuntimeMeterZone = state.run.active ? runtimeMeterZone() : 0;
+  bool runtimeZoneChanged = state.run.active && currentRuntimeMeterZone > 0 && currentRuntimeMeterZone != lastRuntimeMeterZone;
+  if (runtimeZoneChanged) {
+    runtimeSwitchFlashZone = currentRuntimeMeterZone;
+    runtimeSwitchFlashUntilMs = nowMs + RUNTIME_ZONE_FLASH_MS;
+    runtimeSwitchFlashVisible = true;
+  }
+
+  bool runtimeFlashExpired = runtimeSwitchFlashVisible && (int32_t)(nowMs - runtimeSwitchFlashUntilMs) >= 0;
+  if (runtimeFlashExpired) {
+    runtimeSwitchFlashVisible = false;
+  }
+
+  if (!didPoll && !runtimeZoneChanged && !runtimeFlashExpired) return;
   if (didPoll) lastPollMs = nowMs;
 
   static bool previousRunActive = false;
@@ -2277,16 +2344,16 @@ void loop() {
     drawScreen();
     lastDrawn = state;
     forceFullRedraw = false;
-  } else if (relayDataReady && state.run.active && (runtimeZoneChanged || state.run.remainingSeconds != lastDrawn.run.remainingSeconds || memcmp(state.activeRemainingSeconds, lastDrawn.activeRemainingSeconds, sizeof(state.activeRemainingSeconds)) != 0)) {
-    display.setPartialWindow(432, 339, 360, 133);
-    display.firstPage();
-    do {
-      drawRuntimePanel(432, 339, 360, 133);
-    } while (display.nextPage());
+  } else if (relayDataReady && state.run.active && (runtimeZoneChanged || runtimeFlashExpired || state.run.remainingSeconds != lastDrawn.run.remainingSeconds || memcmp(state.activeRemainingSeconds, lastDrawn.activeRemainingSeconds, sizeof(state.activeRemainingSeconds)) != 0)) {
+    if (runtimeZoneChanged || runtimeFlashExpired) {
+      partialUpdateMapPanel();
+    }
+    partialUpdateRuntimePanel();
     lastDrawn.run.remainingSeconds = state.run.remainingSeconds;
     lastDrawn.run.zone = state.run.zone;
     lastDrawn.run.active = state.run.active;
     lastDrawn.run.totalSeconds = state.run.totalSeconds;
+    lastDrawn.spigotsOn = state.spigotsOn;
     memcpy(lastDrawn.activeRemainingSeconds, state.activeRemainingSeconds, sizeof(state.activeRemainingSeconds));
     memcpy(lastDrawn.activeTotalSeconds, state.activeTotalSeconds, sizeof(state.activeTotalSeconds));
   }
