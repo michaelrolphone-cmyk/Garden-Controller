@@ -148,12 +148,13 @@ static const unsigned long RELAY_STATE_POLL_MS = 2000UL;
 static const unsigned long RELAY_FULL_SYNC_MS = 60000UL;
 static const unsigned long RELAY_RETRY_SYNC_MS = 10000UL;
 unsigned long lastFullSyncMs = 0;
-static const unsigned long RUNTIME_ZONE_ROTATE_MS = 8000UL;
-static const unsigned long RUNTIME_ZONE_FLASH_MS = 1800UL;
+static const unsigned long RUNTIME_ZONE_ROTATE_MS = 12000UL;
+static const unsigned long RUNTIME_ZONE_FLASH_MS = 300UL;
 uint8_t lastRuntimeMeterZone = 0;
 uint8_t runtimeSwitchFlashZone = 0;
 unsigned long runtimeSwitchFlashUntilMs = 0;
 bool runtimeSwitchFlashVisible = false;
+uint8_t runtimeSwitchFlashLastPhase = 255;
 String lastHeaderDateTimeDrawn = "";
 
 const char* MODE_AUTO = "auto";
@@ -280,6 +281,22 @@ bool isRuntimeZoneFlashActive(uint8_t displayZone) {
   return runtimeSwitchFlashVisible &&
          runtimeSwitchFlashZone == displayZone &&
          (int32_t)(millis() - runtimeSwitchFlashUntilMs) < 0;
+}
+
+uint8_t runtimeZoneFlashPhase() {
+  if (!runtimeSwitchFlashVisible || (int32_t)(millis() - runtimeSwitchFlashUntilMs) >= 0) return 255;
+  unsigned long remaining = runtimeSwitchFlashUntilMs - millis();
+  unsigned long elapsed = RUNTIME_ZONE_FLASH_MS > remaining ? RUNTIME_ZONE_FLASH_MS - remaining : 0;
+  uint8_t phase = (uint8_t)((elapsed * 4UL) / max(1UL, RUNTIME_ZONE_FLASH_MS));
+  return phase > 3 ? 3 : phase;
+}
+
+bool isRuntimeZoneFlashOutlineInverted(uint8_t displayZone) {
+  if (!isRuntimeZoneFlashActive(displayZone)) return false;
+  uint8_t phase = runtimeZoneFlashPhase();
+  // Two quick outline-only inversions during the flash window. The active
+  // polygon fill remains stable; only the border alternates white/black.
+  return phase == 0 || phase == 2;
 }
 
 void formatTimeLowerNoLeadingZero(unsigned long epoch, char* out, size_t outSize) {
@@ -1131,30 +1148,53 @@ static bool pointInsideMapPoly(const MapPt* p, int n, float px, float py) {
   return inside;
 }
 
-static void drawScaledMapPolyOutlineColor(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH, uint16_t color) {
+static void drawThickLine(int x1, int y1, int x2, int y2, uint16_t color, uint8_t thickness) {
+  if (thickness <= 1) {
+    display.drawLine(x1, y1, x2, y2, color);
+    return;
+  }
+
+  // Simple 2px stroke: draw the original segment plus one neighboring
+  // parallel pixel in the dominant normal direction. This keeps the flash
+  // outline visibly heavier without expanding it into a fat blob.
+  display.drawLine(x1, y1, x2, y2, color);
+  int dx = abs(x2 - x1);
+  int dy = abs(y2 - y1);
+  if (dx >= dy) {
+    display.drawLine(x1, y1 + 1, x2, y2 + 1, color);
+  } else {
+    display.drawLine(x1 + 1, y1, x2 + 1, y2, color);
+  }
+}
+
+static void drawScaledMapPolyOutlineColor(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH, uint16_t color, uint8_t thickness = 1) {
   for (int i = 0; i < n; i++) {
     int j = (i + 1) % n;
-    display.drawLine(mapX(frameX, frameW, p[i].x), mapY(frameY, frameH, p[i].y),
-                     mapX(frameX, frameW, p[j].x), mapY(frameY, frameH, p[j].y), color);
+    drawThickLine(mapX(frameX, frameW, p[i].x), mapY(frameY, frameH, p[i].y),
+                  mapX(frameX, frameW, p[j].x), mapY(frameY, frameH, p[j].y),
+                  color, thickness);
   }
 }
 
 static void drawScaledMapPolyOutline(const MapPt* p, int n, int frameX, int frameY, int frameW, int frameH) {
-  drawScaledMapPolyOutlineColor(p, n, frameX, frameY, frameW, frameH, GxEPD_BLACK);
+  drawScaledMapPolyOutlineColor(p, n, frameX, frameY, frameW, frameH, GxEPD_BLACK, 1);
 }
 
 static void drawActiveZoneWhiteOutlines(int frameX, int frameY, int frameW, int frameH) {
-  // Active zones are solid black fills; redraw their polygon borders in white
-  // so the running zone remains clearly separated from adjacent map geometry.
+  // Active zones are solid black fills. Normally their polygon borders redraw
+  // white. During the zone-switch cue, only the selected zone outline blinks
+  // black/white twice; the fill itself does not invert.
   for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
     if (!state.activeZones[zone]) continue;
-    if (isRuntimeZoneFlashActive(zone + 1)) continue;
+    bool flashing = isRuntimeZoneFlashActive(zone + 1);
+    uint16_t outlineColor = isRuntimeZoneFlashOutlineInverted(zone + 1) ? GxEPD_BLACK : GxEPD_WHITE;
+    uint8_t outlineThickness = flashing ? 2 : 1;
     const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
     for (uint8_t j = 0; j < g.count; j++) {
       uint8_t polyIndex = g.polyIndexes[j];
       if (polyIndex < MAP_POLY_COUNT) {
         drawScaledMapPolyOutlineColor(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n,
-                                      frameX, frameY, frameW, frameH, GxEPD_WHITE);
+                                      frameX, frameY, frameW, frameH, outlineColor, outlineThickness);
       }
     }
   }
@@ -1277,12 +1317,11 @@ void drawMap(int x, int y, int w, int h) {
 
   for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
     if (!state.activeZones[zone]) continue;
-    bool flashThisZone = isRuntimeZoneFlashActive(zone + 1);
     const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
     for (uint8_t j = 0; j < g.count; j++) {
       uint8_t polyIndex = g.polyIndexes[j];
       if (polyIndex < MAP_POLY_COUNT) {
-        fillScaledMapPolyColor(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, x, y, w, h, flashThisZone ? GxEPD_WHITE : GxEPD_BLACK);
+        fillScaledMapPolyColor(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, x, y, w, h, GxEPD_BLACK);
       }
     }
   }
@@ -1298,7 +1337,7 @@ void drawMap(int x, int y, int w, int h) {
     for (uint8_t j = 0; j < g.count; j++) {
       uint8_t polyIndex = g.polyIndexes[j];
       if (polyIndex < MAP_POLY_COUNT) {
-        bool badgeActive = state.activeZones[zone] && !isRuntimeZoneFlashActive(zone + 1);
+        bool badgeActive = state.activeZones[zone];
         drawZoneNumberBadge(x, y, w, h, zone + 1, MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, badgeActive);
       }
     }
@@ -1522,8 +1561,8 @@ void drawRuntimePanel(int x, int y, int w, int h) {
 
   float r = total ? ((float)(total - remaining) / (float)total) : 0;
   r = constrain(r, 0.0f, 1.0f);
-  display.drawRect(x + 8, y + 66, w - 16, 30, GxEPD_BLACK);
-  display.fillRect(x + 9, y + 67, (int)((w - 18) * r), 28, GxEPD_BLACK);
+  display.drawRect(x + 8, y + 61, w - 16, 30, GxEPD_BLACK);
+  display.fillRect(x + 9, y + 62, (int)((w - 18) * r), 28, GxEPD_BLACK);
 
   lastRuntimeMeterZone = meterZone;
 }
@@ -1595,6 +1634,18 @@ void renderConnectionDiagnosticScreen() {
   } while (display.nextPage());
 }
 
+
+void drawHeaderChurchCross(int x, int y) {
+  // Small bold church-garden cross sized to the schedule title text height.
+  // Drawn with filled rectangles so it stays crisp on e-paper.
+  const int w = 18;
+  const int h = 18;
+  const int t = 5;
+  const int cx = x + (w - t) / 2;
+  display.fillRect(cx, y, t, h, GxEPD_BLACK);
+  display.fillRect(x, y + 5, w, t, GxEPD_BLACK);
+}
+
 void renderScheduleScreenFull() {
   display.setFullWindow();
   display.firstPage();
@@ -1602,7 +1653,8 @@ void renderScheduleScreenFull() {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeMonoBold12pt7b);
-    display.setCursor(8, 25);
+    drawHeaderChurchCross(8, 7);
+    display.setCursor(34, 25);
     display.print("Castle Hills Garden Schedule");
 
     drawHeaderClockTextOnly();
@@ -2316,14 +2368,23 @@ void loop() {
     runtimeSwitchFlashZone = currentRuntimeMeterZone;
     runtimeSwitchFlashUntilMs = nowMs + RUNTIME_ZONE_FLASH_MS;
     runtimeSwitchFlashVisible = true;
+    runtimeSwitchFlashLastPhase = 255;
   }
 
   bool runtimeFlashExpired = runtimeSwitchFlashVisible && (int32_t)(nowMs - runtimeSwitchFlashUntilMs) >= 0;
+  bool runtimeFlashPhaseChanged = false;
   if (runtimeFlashExpired) {
     runtimeSwitchFlashVisible = false;
+    runtimeSwitchFlashLastPhase = 255;
+  } else if (runtimeSwitchFlashVisible) {
+    uint8_t phase = runtimeZoneFlashPhase();
+    if (phase != runtimeSwitchFlashLastPhase) {
+      runtimeSwitchFlashPhaseChanged = true;
+      runtimeSwitchFlashLastPhase = phase;
+    }
   }
 
-  if (!didPoll && !runtimeZoneChanged && !runtimeFlashExpired) return;
+  if (!didPoll && !runtimeZoneChanged && !runtimeFlashExpired && !runtimeFlashPhaseChanged) return;
   if (didPoll) lastPollMs = nowMs;
 
   static bool previousRunActive = false;
@@ -2344,11 +2405,13 @@ void loop() {
     drawScreen();
     lastDrawn = state;
     forceFullRedraw = false;
-  } else if (relayDataReady && state.run.active && (runtimeZoneChanged || runtimeFlashExpired || state.run.remainingSeconds != lastDrawn.run.remainingSeconds || memcmp(state.activeRemainingSeconds, lastDrawn.activeRemainingSeconds, sizeof(state.activeRemainingSeconds)) != 0)) {
-    if (runtimeZoneChanged || runtimeFlashExpired) {
+  } else if (relayDataReady && state.run.active && (runtimeZoneChanged || runtimeFlashExpired || runtimeFlashPhaseChanged || state.run.remainingSeconds != lastDrawn.run.remainingSeconds || memcmp(state.activeRemainingSeconds, lastDrawn.activeRemainingSeconds, sizeof(state.activeRemainingSeconds)) != 0)) {
+    // Update the meter/header first so the newly selected zone is visible,
+    // then blink only that zone's outline as the cue.
+    partialUpdateRuntimePanel();
+    if (runtimeZoneChanged || runtimeFlashExpired || runtimeFlashPhaseChanged) {
       partialUpdateMapPanel();
     }
-    partialUpdateRuntimePanel();
     lastDrawn.run.remainingSeconds = state.run.remainingSeconds;
     lastDrawn.run.zone = state.run.zone;
     lastDrawn.run.active = state.run.active;
