@@ -60,6 +60,11 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
     expect(ino).toContain('display.setTextColor(GxEPD_WHITE);');
   });
 
+  test('panel layout uses single 1px border calls without decorative border styles in firmware drawing', () => {
+    expect(ino).toContain('display.drawRect(x,y,w,h,GxEPD_BLACK);');
+    expect(ino).not.toContain('drawRoundRect');
+  });
+
   test('draws weather compass and sunrise/sunset strip in widget', () => {
     expect(ino).toContain('char clippedCondition[20]; snprintf(clippedCondition, sizeof(clippedCondition), "%.18s", state.weather.condition);');
     expect(ino).toContain('display.fillCircle(x+136,y+18,2,GxEPD_BLACK);');
@@ -67,11 +72,20 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
     expect(ino).toContain('display.print("Sunrise")');
     expect(ino).toContain('display.print("Sunset")');
     expect(ino).toContain('display.fillTriangle(cx,cy');
+    expect(ino).toContain('cos(rad+2.75f)*10');
     expect(ino).toContain('for (int hx = x+94; hx <= x+266; hx += 8) display.drawLine(hx, y+154, hx+4, y+154, GxEPD_BLACK);');
+    expect(ino).toContain('sqrtf(max(0.0f, 1.0f - norm * norm))');
     expect(ino).toContain('formatTimeLowerNoLeadingZero(state.weather.sunriseEpoch, sunriseTxt, sizeof(sunriseTxt));');
     expect(ino).toContain('float windDeg = state.weather.windDeg == 0 && strcmp(state.weather.windDirection, "N") != 0 ? directionToDegrees(state.weather.windDirection) : (float)state.weather.windDeg;');
     expect(ino).toContain('display.printf("Precip. chance %.0f%%", state.weather.precipitationChancePct);');
     expect(ino).toContain('state.weather.windDeg');
+  });
+
+  test('applies visual typography rules for headers and body text', () => {
+    expect(ino).toContain('#include <Fonts/FreeMonoBold12pt7b.h>');
+    expect(ino).toContain('#include <Fonts/FreeSans9pt7b.h>');
+    expect(ino).toContain('display.setFont(&FreeMonoBold12pt7b);');
+    expect(ino).toContain('display.setFont(&FreeSans9pt7b);');
   });
 
   test('supports queue and ledger maintenance endpoints', () => {
@@ -103,6 +117,7 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
     expect(ino).toContain('static const uint8_t DISPLAY_ZONE_COUNT = 5;');
     expect(ino).toContain('for (int i=0;i<DISPLAY_ZONE_COUNT;i++)');
     expect(ino).toContain('int row=i%3,col=i/3;');
+    expect(ino).toContain('display.printf("Z%d %d:%02d %dm"');
   });
 
   test('consumes relay weather and time fields and updates runtime meter with partial refresh', () => {
@@ -157,6 +172,53 @@ describe('e-ink schedule/news/weather firmware requirements', () => {
     expect(ino).toContain('drawGraphFrame(8,415,784,50,"Sun hrs","12","6","0","Start","End");');
     expect(ino).toContain('display.drawRect(8,176,784,50,GxEPD_BLACK);');
     expect(ino).toContain('display.drawRect(8,230,784,50,GxEPD_BLACK);');
+  });
+
+
+  test('admin ui includes required sections, controls, and news persistence action', () => {
+    expect(ino).toContain('<h2>Status</h2>');
+    expect(ino).toContain('<h2>Garden Map</h2>');
+    expect(ino).toContain('<h2>Zones</h2>');
+    expect(ino).toContain('<h2>Full-Screen Garden News</h2>');
+    expect(ino).toContain('<h2>Weather History</h2>');
+    expect(ino).toContain('Stop / All Off');
+    expect(ino).toContain('Sync Weather');
+    expect(ino).toContain('Redraw E-Paper');
+    expect(ino).toContain('Queue Extra Water');
+    expect(ino).toContain('Save Zone');
+    expect(ino).toContain('Save Logic');
+    expect(ino).toContain('Save News to SD');
+    expect(ino).toContain('Download CSV');
+    expect(ino).toContain('Clear History');
+    expect(ino).toContain('Weather summary:');
+    expect(ino).toContain("id='st-weather'");
+    expect(ino).toContain("id='st-news'");
+    expect(ino).toContain("id='st-run'");
+    expect(ino).toContain("id='st-map'");
+    expect(ino).toContain("id='st-ledger'");
+    expect(ino).toContain("id='st-error'");
+    expect(ino).toContain("function fmtMap(s)");
+    expect(ino).toContain("function saveZone()");
+    expect(ino).toContain("fetch('/saveZone'+q)");
+    expect(ino).toContain("if(!r.ok) throw new Error('state request failed: '+r.status);");
+    expect(ino).toContain("document.getElementById('st-error').textContent=String(err);");
+    expect(ino).toContain('section{border:1px solid #000');
+    expect(ino).not.toContain('border-radius:8px');
+  });
+
+  test('state endpoint includes weather summary object and queue/display fields', () => {
+    expect(ino).toContain('JsonObject weather = doc.createNestedObject("weather")');
+    expect(ino).toContain('weather["summary"] = state.weather.summary;');
+    expect(ino).toContain('weather["temperatureF"] = state.weather.temperatureF;');
+    expect(ino).toContain('weather["sunriseEpoch"] = state.weather.sunriseEpoch;');
+    expect(ino).toContain('doc["queueState"] = queueStopped ? "stopped" : "running";');
+    expect(ino).toContain('doc["displayMode"] = state.displayMode;');
+  });
+
+  test('display redraw flags are raised for config and logic changes', () => {
+    expect(ino).toContain('void handleConfigPost()');
+    expect(ino).toContain('saveConfig(); forceFullRedraw = true;');
+    expect(ino).toContain('void handleSaveLogic(){ forceFullRedraw = true;');
   });
 
   test('history csv endpoint returns fake weather rows with required schema', () => {

@@ -12,6 +12,21 @@ describe('garden controller api', () => {
     return createApp({ apiKey: token, guiUsername: 'admin', guiPassword: 'password', enableWeatherRefresh: false }).app;
   }
 
+  test('openapi includes required e-paper controller endpoints', () => {
+    const spec = yaml.load(fs.readFileSync(path.join(__dirname, '..', 'openapi.yaml'), 'utf8'));
+    const requiredPaths = [
+      '/', '/state', '/extra', '/stop', '/sync', '/redraw', '/saveZone', '/saveLogic', '/saveNews', '/history.csv', '/clearHistory'
+    ];
+    requiredPaths.forEach((p) => expect(spec.paths[p]).toBeDefined());
+    expect(spec.paths['/'].get).toBeDefined();
+    expect(spec.paths['/state'].get).toBeDefined();
+    expect(spec.paths['/saveNews'].post).toBeDefined();
+    expect(spec.paths['/display'].get).toBeDefined();
+    expect(spec.paths['/queue/clear'].get).toBeDefined();
+    expect(spec.paths['/queue/stop-clear'].get).toBeDefined();
+    expect(spec.paths['/ledger/reset'].get).toBeDefined();
+  });
+
   test('requires token for protected endpoints', async () => {
     const res = await request(build()).get('/api/relays');
     expect(res.status).toBe(401);
