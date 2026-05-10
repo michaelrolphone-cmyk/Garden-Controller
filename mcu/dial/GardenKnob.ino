@@ -1998,6 +1998,10 @@ bool enqueueRelayCommand(const AsyncRelayCommand &cmd, bool front = false);
 void relayWorkerTask(void *param);
 void startRelayWorker();
 
+// Forward declarations for early async schedule wrappers.
+void showCommandPending(const String &text);
+void clearCommandPending();
+
 bool replaceScheduleSlot(int zoneNumber, int slotIndex, int hour, int minute, int durationMinutes, bool enabled) {
   AsyncRelayCommand cmd;
   cmd.type = RCMD_REPLACE_SCHEDULE;
@@ -2013,60 +2017,46 @@ bool replaceScheduleSlot(int zoneNumber, int slotIndex, int hour, int minute, in
   return enqueueRelayCommand(cmd, true);
 }
 
+// Forward declarations for early schedule API helpers.
+// These helpers are intentionally defined before the runtime relay-state globals,
+// so the globals/functions they touch must be declared explicitly here.
+extern ZoneSchedule zoneSchedules[5];
+extern String lastCommandText;
+bool loadRelayState(bool fallbackOk);
+void clearCommandPending();
+void showCommandPending(const String &text);
+bool relayPostJson(const String &path, const String &payload, String &body, int &httpCode, String &err);
+
 bool replaceScheduleSlotBlocking(int zoneNumber, int slotIndex, int hour, int minute, int durationMinutes, bool enabled) {
   zoneNumber = constrain(zoneNumber, 1, 5);
   hour = constrain(hour, 0, 23);
   minute = constrain(minute, 0, 59);
   durationMinutes = constrain(durationMinutes, 1, 240);
 
-  int oldId = relayScheduleIdForZoneSlot(zoneNumber, slotIndex);
-  if (oldId < 0) {
-    lastCommandText = "Edit Failed bad slot";
-    clearCommandPending();
-    loadRelayState(true);
-    return false;
-  }
-
   showCommandPending("Saving...");
 
-  // Safer edit order:
-  // 1) add the new schedule first
-  // 2) reload/verify schedules
-  // 3) delete the old schedule id only after the add succeeds
-  //
-  // This avoids the data-loss behavior where an edit deletes the old schedule
-  // and then fails to add the replacement.
-  String body, err;
-  int code = 0;
-  bool addOk = relayGetRaw(scheduleAddPath(zoneNumber, hour, minute, durationMinutes), body, code, err);
-
-  if (!addOk) {
-    lastCommandText = "Edit Failed add " + err + (code > 0 ? " HTTP " + String(code) : "");
+  if (!refreshSchedulesBeforeBulkPost()) {
     clearCommandPending();
-    loadRelayState(true);
     return false;
   }
 
-  loadRelayState(true);
-
-  body = "";
-  err = "";
-  code = 0;
-  bool deleteOk = relayGetRaw("/api/schedule/delete?id=" + String(oldId), body, code, err);
-
-  if (!deleteOk) {
-    // New schedule was added. Do not report this as deleted-only; old row may remain
-    // as a duplicate, which is safer than losing the schedule entirely.
-    lastCommandText = "Saved; old not deleted";
+  if (slotIndex < 0 || slotIndex >= zoneSchedules[zoneNumber - 1].count) {
+    lastCommandText = "Edit Failed bad slot";
     clearCommandPending();
-    loadRelayState(true);
-    return true;
+    return false;
   }
 
-  lastCommandText = "Saved";
+  // Same method as the relay admin API manager: replace by posting the full
+  // resulting schedule set. The local cache has just been refreshed from /api/state.
+  String err;
+  int code = 0;
+  bool ok = postScheduleSetFromLocal(zoneNumber, slotIndex, true,
+                                     true, zoneNumber, hour, minute, durationMinutes, enabled,
+                                     err, code);
+
+  lastCommandText = ok ? "Saved" : "Edit Failed " + err + (code > 0 ? " HTTP " + String(code) : "");
   clearCommandPending();
-  loadRelayState(true);
-  return true;
+  return ok;
 }
 
 void processRelayCommandBlocking(const AsyncRelayCommand &cmd);
@@ -2087,13 +2077,19 @@ bool waterIsActive();
 extern uint32_t lastWateringObservedMs;
 extern bool wasWateringActive;
 
+extern uint32_t runningScreenStickyUntilMs;
+extern uint32_t relayConfirmedNoRunMs;
 void clearWateringDisplayGrace() {
   lastWateringObservedMs = 0;
   wasWateringActive = false;
+  runningScreenStickyUntilMs = 0;
+  relayConfirmedNoRunMs = millis();
 }
 
 void clearWateringDisplayGrace();
 bool waterIsActiveForDisplay();
+bool runningScreenShouldStayLatched();
+void noteRelayConfirmedNoRun();
 bool relayPayloadConfirmsNoActiveRun(JsonDocument &doc);
 bool shouldPreserveLocalRunsAfterParse(bool hasRunData, bool oldHadLocalRun, bool parsedHasActiveRun, JsonDocument &doc);
 void locallyClearZoneRun(int zoneNumber);
@@ -2335,6 +2331,10 @@ uint32_t lastWeatherPollMs = 0;
 uint32_t lastGoodStateMs = 0;
 static const uint32_t LOCAL_RUN_STALE_GRACE_MS = 30000;
 static const uint32_t RUNNING_SCREEN_GRACE_MS = 7000;
+static const uint32_t RUNNING_SCREEN_STICKY_MS = 12000; // keep timer view through async polling gaps while animating
+uint32_t runningScreenStickyUntilMs = 0;
+uint32_t relayConfirmedNoRunMs = 0;
+
 static const uint32_t EXTERNAL_STOP_CONFIRM_MS = 2500;
 static const uint32_t STOP_RECONCILE_MS = 10000;       // do not resurrect locally stopped runs while relay truth catches up
 uint32_t zoneStopSuppressUntilMs[5] = {0, 0, 0, 0, 0};
@@ -2352,6 +2352,9 @@ static const uint32_t LED_CYCLE_MS = 2500;
 
 uint32_t uiAnimStartMs = 0;
 uint32_t lastUiSecondMs = 0;
+static const uint32_t UI_ANIMATION_FRAME_MS = 33;       // ~30 FPS; canvas flush prevents visible blanking
+static const uint32_t RUNNING_COUNTDOWN_FRAME_MS = 100; // smooth progress ring without 1 Hz limit
+
 int diagnosticsPage = 0;
 bool scheduleZonePickerMode = false;
 
@@ -2774,7 +2777,9 @@ void parseSchedulesArray(JsonArrayConst arr) {
   int sourceIndex = 0;
   for (JsonObjectConst obj : arr) {
     int zoneNumber = 0;
-    if (obj["zoneIndex"].is<int>()) zoneNumber = coerceZoneNumber(obj["zoneIndex"], true);
+
+    if (obj["channel"].is<int>()) zoneNumber = coerceZoneNumber(obj["channel"], false);
+    else if (obj["zoneIndex"].is<int>()) zoneNumber = coerceZoneNumber(obj["zoneIndex"], true);
     else if (obj["zoneNumber"].is<int>()) zoneNumber = coerceZoneNumber(obj["zoneNumber"], false);
     else if (obj["displayZone"].is<int>()) zoneNumber = coerceZoneNumber(obj["displayZone"], false);
     else if (obj["zone"].is<int>()) zoneNumber = coerceZoneNumber(obj["zone"], false);
@@ -2798,15 +2803,31 @@ void parseSchedulesArray(JsonArrayConst arr) {
     si.zoneNumber = zoneNumber;
     si.enabled = obj["enabled"].is<bool>() ? obj["enabled"].as<bool>() : true;
 
-    if (obj["startHour"].is<int>()) si.startHour = obj["startHour"].as<int>();
-    else if (obj["hour"].is<int>()) si.startHour = obj["hour"].as<int>();
+    if (obj["startTime"].is<const char*>()) {
+      int h = 0;
+      int m = 0;
+      if (parseScheduleStartTime(String((const char*)obj["startTime"]), h, m)) {
+        si.startHour = h;
+        si.startMinute = m;
+      }
+    } else {
+      if (obj["startHour"].is<int>()) si.startHour = obj["startHour"].as<int>();
+      else if (obj["hour"].is<int>()) si.startHour = obj["hour"].as<int>();
 
-    if (obj["startMinute"].is<int>()) si.startMinute = obj["startMinute"].as<int>();
-    else if (obj["minute"].is<int>()) si.startMinute = obj["minute"].as<int>();
+      if (obj["startMinute"].is<int>()) si.startMinute = obj["startMinute"].as<int>();
+      else if (obj["minute"].is<int>()) si.startMinute = obj["minute"].as<int>();
+    }
 
-    if (obj["runMinutes"].is<int>()) si.durationMinutes = obj["runMinutes"].as<int>();
-    else if (obj["durationMinutes"].is<int>()) si.durationMinutes = obj["durationMinutes"].as<int>();
-    else if (obj["minutes"].is<int>()) si.durationMinutes = obj["minutes"].as<int>();
+    if (obj["durationSeconds"].is<int>()) {
+      int seconds = obj["durationSeconds"].as<int>();
+      si.durationMinutes = constrain((seconds + 59) / 60, 1, 240);
+    } else if (obj["runMinutes"].is<int>()) {
+      si.durationMinutes = obj["runMinutes"].as<int>();
+    } else if (obj["durationMinutes"].is<int>()) {
+      si.durationMinutes = obj["durationMinutes"].as<int>();
+    } else if (obj["minutes"].is<int>()) {
+      si.durationMinutes = obj["minutes"].as<int>();
+    }
   }
 }
 
@@ -3110,6 +3131,7 @@ void parseState(JsonDocument &doc) {
     // The relay API supplied run truth and it says nothing is running.
     // Treat this as authoritative, including stops made from another device.
     clearWateringDisplayGrace();
+    noteRelayConfirmedNoRun();
     needsRedraw = true;
   }
 
@@ -3745,6 +3767,136 @@ String scheduleAddPath(int zoneNumber, int hour, int minute, int durationMinutes
          "&minutes=" + String(constrain(durationMinutes, 1, 240));
 }
 
+
+
+String scheduleTwoDigit(int v) {
+  v = constrain(v, 0, 99);
+  return v < 10 ? "0" + String(v) : String(v);
+}
+
+String scheduleTimeHHMM(int hour, int minute) {
+  return scheduleTwoDigit(constrain(hour, 0, 23)) + ":" + scheduleTwoDigit(constrain(minute, 0, 59));
+}
+
+bool parseScheduleStartTime(const String &timeText, int &hourOut, int &minuteOut) {
+  int colon = timeText.indexOf(':');
+  if (colon <= 0) return false;
+  int h = timeText.substring(0, colon).toInt();
+  int m = timeText.substring(colon + 1).toInt();
+  if (h < 0 || h > 23 || m < 0 || m > 59) return false;
+  hourOut = h;
+  minuteOut = m;
+  return true;
+}
+
+void appendScheduleJsonRow(JsonArray arr, int zoneNumber, int hour, int minute, int durationMinutes, bool enabled) {
+  zoneNumber = constrain(zoneNumber, 1, 5);
+  durationMinutes = constrain(durationMinutes, 1, 240);
+
+  JsonObject row = arr.createNestedObject();
+  row["channel"] = zoneNumber;                         // relay-required user-visible zone number
+  row["zone"] = "Zone " + String(zoneNumber);          // relay treats this as zone display name
+  row["enabled"] = enabled;
+  row["startTime"] = scheduleTimeHHMM(hour, minute);   // relay-required HH:MM string
+  row["durationSeconds"] = (uint32_t)durationMinutes * 60UL;
+
+  // Extra compatibility fields are harmless for readers, but the relay's
+  // applyScheduleArray() depends on the five fields above.
+  row["zoneNumber"] = zoneNumber;
+  row["startHour"] = constrain(hour, 0, 23);
+  row["startMinute"] = constrain(minute, 0, 59);
+  row["runMinutes"] = durationMinutes;
+  row["durationMinutes"] = durationMinutes;
+}
+
+
+bool refreshSchedulesBeforeBulkPost() {
+  // Bulk /api/schedules replaces the relay's whole schedule list.
+  // Never build that payload from stale/empty local cache.
+  bool ok = loadRelayState(true);
+  if (!ok || !scheduleLoaded) {
+    lastCommandText = "Schedule load failed";
+    return false;
+  }
+  return true;
+}
+
+int localScheduleRowCount() {
+  int total = 0;
+  for (int z = 0; z < 5; z++) {
+    total += zoneSchedules[z].count;
+  }
+  return total;
+}
+
+bool postScheduleSetFromLocal(int editZone, int editSlot, bool skipEditedSlot,
+                              bool appendNew, int newZone, int newHour,
+                              int newMinute, int newDuration, bool newEnabled,
+                              String &err, int &code) {
+  DynamicJsonDocument doc(4096);
+  JsonArray arr = doc.createNestedArray("schedules");
+
+  int sourceRows = 0;
+  int emittedRows = 0;
+  bool skippedRequestedSlot = false;
+
+  for (int z = 0; z < 5; z++) {
+    ZoneSchedule &zs = zoneSchedules[z];
+    for (int s = 0; s < zs.count; s++) {
+      sourceRows++;
+      if (skipEditedSlot && (z == editZone - 1) && (s == editSlot)) {
+        skippedRequestedSlot = true;
+        continue;
+      }
+
+      ScheduleItem &it = zs.slots[s];
+      if (!it.valid) continue;
+
+      appendScheduleJsonRow(arr, it.zoneNumber > 0 ? it.zoneNumber : z + 1,
+                            it.startHour, it.startMinute, it.durationMinutes, it.enabled);
+      emittedRows++;
+    }
+  }
+
+  if (skipEditedSlot && !skippedRequestedSlot) {
+    err = "edited slot not found";
+    code = -1;
+    return false;
+  }
+
+  if (sourceRows == 0 && !appendNew) {
+    err = "missing relay-compatible schedule rows";
+    code = -1;
+    return false;
+  }
+
+  if (appendNew) {
+    appendScheduleJsonRow(arr, newZone, newHour, newMinute, newDuration, newEnabled);
+    emittedRows++;
+  }
+
+  // Safety guard: bulk POST replaces the complete schedule list. Do not send an
+  // empty set unless this operation intentionally deletes the last remaining row.
+  bool deletingOnly = skipEditedSlot && !appendNew;
+  bool intentionallyDeletingLastRow = deletingOnly && sourceRows == 1 && skippedRequestedSlot;
+  if (emittedRows == 0 && !intentionallyDeletingLastRow) {
+    err = "refusing empty schedule set";
+    code = -1;
+    return false;
+  }
+
+  String payload;
+  serializeJson(doc, payload);
+
+  String body;
+  code = 0;
+  bool ok = relayPostJson("/api/schedules", payload, body, code, err);
+  if (ok) {
+    loadRelayState(true);
+  }
+  return ok;
+}
+
 bool sendScheduleSlotBlocking(int zoneNumber, int hour, int minute, int durationMinutes, bool enabled) {
   zoneNumber = constrain(zoneNumber, 1, 5);
   hour = constrain(hour, 0, 23);
@@ -3753,39 +3905,48 @@ bool sendScheduleSlotBlocking(int zoneNumber, int hour, int minute, int duration
 
   showCommandPending("Saving...");
 
-  // Current relay firmware supports persistent schedule creation through:
-  // GET /api/schedule/add?zone=N&time=HH:MM&minutes=M
-  // Do not rely on POST /api/schedules for single-row edits; that endpoint expects
-  // a full schedules array and is not the simple add-slot contract.
-  String body, err;
+  if (!refreshSchedulesBeforeBulkPost()) {
+    clearCommandPending();
+    return false;
+  }
+
+  // Match the relay admin API manager: POST the complete schedule array to
+  // /api/schedules. This is atomic from the knob's perspective and avoids
+  // delete/add ordering problems.
+  String err;
   int code = 0;
-  bool ok = relayGetRaw(scheduleAddPath(zoneNumber, hour, minute, durationMinutes), body, code, err);
+  bool ok = postScheduleSetFromLocal(-1, -1, false,
+                                     true, zoneNumber, hour, minute, durationMinutes, enabled,
+                                     err, code);
 
   lastCommandText = ok ? "Saved" : "Schedule Save Failed " + err + (code > 0 ? " HTTP " + String(code) : "");
   clearCommandPending();
-  loadRelayState(true);
   return ok;
 }
 
 bool deleteScheduleSlotBlocking(int zoneNumber, int slotIndex) {
+  zoneNumber = constrain(zoneNumber, 1, 5);
   showCommandPending("Deleting...");
 
-  int id = relayScheduleIdForZoneSlot(zoneNumber, slotIndex);
-  if (id < 0) {
-    lastCommandText = "Delete Failed bad slot";
+  if (!refreshSchedulesBeforeBulkPost()) {
     clearCommandPending();
-    loadRelayState(true);
     return false;
   }
 
-  String body, err;
+  if (slotIndex < 0 || slotIndex >= zoneSchedules[zoneNumber - 1].count) {
+    lastCommandText = "Delete Failed bad slot";
+    clearCommandPending();
+    return false;
+  }
+
+  String err;
   int code = 0;
-  String path = "/api/schedule/delete?id=" + String(id);
-  bool ok = relayGetRaw(path, body, code, err);
+  bool ok = postScheduleSetFromLocal(zoneNumber, slotIndex, true,
+                                     false, 1, 0, 0, 1, true,
+                                     err, code);
 
   lastCommandText = ok ? "Deleted" : "Delete Failed " + err + (code > 0 ? " HTTP " + String(code) : "");
   clearCommandPending();
-  loadRelayState(true);
   return ok;
 }
 
@@ -4588,6 +4749,11 @@ void drawHomeMenuCarousel() {
   gfx->print(title);
 
   drawHomeCarouselEdgeIndicator(homeMenuIndex, HOME_MENU_COUNT, accent);
+
+  // Subtle active shimmer, rendered into the offscreen canvas.
+  uint8_t animTick = (millis() / 80) % 12;
+  int shimmerX = 54 + animTick * 12;
+  gfx->drawFastHLine(shimmerX, 188, 18, dimColor(accent));
 }
 
 void activateHomeMenuAction() {
@@ -5236,6 +5402,8 @@ void drawZoneSelect() {
   drawPlainTitle("Zone " + String(selectedZone), zoneIsActive(selectedZone) ? "Running" : "Select Zone", accent);
 
   drawPlainCard(50, 82, 140, 86, dimColor(accent));
+  int pulseRadius = 8 + ((millis() / 120) % 4);
+  gfx->drawRoundRect(50 - pulseRadius / 2, 82 - pulseRadius / 2, 140 + pulseRadius, 86 + pulseRadius, 12, dimColor(accent));
   drawSelectedZoneOnly(selectedZone);
 
   int prevZone = selectedZone == 1 ? 5 : selectedZone - 1;
@@ -5425,7 +5593,7 @@ void updateRunningCountdownOnly() {
     return;
   }
 
-  if (remText != lastRenderedRunningText || ((frac > lastRenderedRunningFrac ? frac - lastRenderedRunningFrac : lastRenderedRunningFrac - frac) > 0.01f)) {
+  if (remText != lastRenderedRunningText || ((frac > lastRenderedRunningFrac ? frac - lastRenderedRunningFrac : lastRenderedRunningFrac - frac) > 0.001f)) {
     drawProgressRing(frac, accent);
 
     gfx->fillRoundRect(44, 84, 152, 58, 14, C_BG);
@@ -5599,6 +5767,8 @@ void drawDiagnostics() {
   
   drawHeaderChip("DIAGNOSTICS", C_MINT);
   drawWifiIcon(120, 55, WiFi.status() == WL_CONNECTED);
+  int diagPulse = (millis() / 120) % 10;
+  gfx->drawCircle(120, 55, 18 + diagPulse / 2, dimColor(C_MINT));
   
   drawCleanCard(42, 78, 156, 92, C_CARD, dimColor(C_MINT));
 
@@ -5756,12 +5926,16 @@ bool waterIsActive() {
 bool waterIsActiveForDisplay() {
   if (waterIsActive()) {
     lastWateringObservedMs = millis();
+    runningScreenStickyUntilMs = millis() + RUNNING_SCREEN_STICKY_MS;
+    relayConfirmedNoRunMs = 0;
     return true;
   }
 
-  // Async relay polling can briefly clear run state while a worker request is pending
-  // or while a partial response is being reconciled. Do not bounce the UI to Home
-  // immediately; keep the running meter stable for a short grace period.
+  if (runningScreenShouldStayLatched()) {
+    return true;
+  }
+
+  // Older grace path retained for compatibility with existing countdown smoothing.
   if (lastWateringObservedMs > 0 && millis() - lastWateringObservedMs <= RUNNING_SCREEN_GRACE_MS) {
     return true;
   }
@@ -5782,6 +5956,29 @@ bool wakeOnlyInputConsumed() {
   }
 
   return false;
+}
+
+
+void noteRelayConfirmedNoRun() {
+  relayConfirmedNoRunMs = millis();
+  runningScreenStickyUntilMs = 0;
+}
+
+bool runningScreenShouldStayLatched() {
+  if (waterIsActive()) {
+    runningScreenStickyUntilMs = millis() + RUNNING_SCREEN_STICKY_MS;
+    relayConfirmedNoRunMs = 0;
+    return true;
+  }
+
+  // When the async worker is polling/commanding, do not let one transient empty
+  // state route the animated UI to Home/carousel.
+  if (relayIoBusy && millis() < runningScreenStickyUntilMs) return true;
+
+  // If relay truth explicitly confirmed no run, the latch should release.
+  if (relayConfirmedNoRunMs > 0 && millis() - relayConfirmedNoRunMs < 1500) return false;
+
+  return millis() < runningScreenStickyUntilMs;
 }
 
 void noteUserInteraction() {
@@ -6563,11 +6760,10 @@ void updateScreenAutoMode() {
 
   if (actualWatering) {
     wakeDisplay(true);
+    runningScreenStickyUntilMs = now + RUNNING_SCREEN_STICKY_MS;
   }
 
   if (displayWatering && !wasWateringActive) {
-    // A watering cycle just started, or async networking briefly hid it.
-    // The countdown screen remains the default.
     userLeftRunningScreen = false;
     setScreen(SCR_RUNNING, false);
   }
@@ -6576,7 +6772,7 @@ void updateScreenAutoMode() {
     if (screen != SCR_RUNNING && userLeftRunningScreen && (now - lastUserInteractionMs >= RUNNING_RETURN_IDLE_MS)) {
       userLeftRunningScreen = false;
       setScreen(SCR_RUNNING, false);
-    } else if (screen == SCR_HOME && !userLeftRunningScreen) {
+    } else if ((screen == SCR_HOME || screen == SCR_SETUP_ERROR) && !userLeftRunningScreen) {
       setScreen(SCR_RUNNING, false);
     }
   } else {
@@ -6652,6 +6848,24 @@ void setup() {
   needsRedraw = true;
 }
 
+
+bool screenWantsAnimationFrames() {
+  if (displaySleeping) return false;
+  if (commandPending && commandPendingText.length()) return true;
+  if (screen == SCR_RUNNING && waterIsActiveForDisplay()) return true;
+
+  // Guard against visible carousel flashes during async relay gaps. If the timer
+  // view is latched, the next auto-mode pass will restore SCR_RUNNING; do not
+  // animate the Home carousel in that transient frame.
+  if (screen == SCR_HOME && runningScreenShouldStayLatched()) return false;
+
+  if (screen == SCR_HOME || screen == SCR_ZONE_SELECT || screen == SCR_DURATION ||
+      screen == SCR_SCHEDULE || screen == SCR_SCHEDULE_EDIT || screen == SCR_DIAGNOSTICS) {
+    return true;
+  }
+  return false;
+}
+
 void loop() {
   dnsServer.processNextRequest();
   server.handleClient();
@@ -6693,22 +6907,24 @@ void loop() {
 
   updateZoneLeds(false);
 
-  // Avoid high-frequency full-screen redraws on the TFT.
-  // The GC9A01 redraw is visible line-by-line; redrawing animated screens every ~180 ms
-  // caused severe flashing. Only command-pending and diagnostics keep moderate animation.
-  // Avoid full-screen redraws unless visible state changed.
-  // TFT display updates should not blank/repaint the full screen for every second tick.
-  bool animatedScreen = screen == SCR_DIAGNOSTICS;
-  uint32_t redrawInterval = 1000;
-  bool slowRunningRefresh = (screen == SCR_RUNNING && millis() - lastRunningPartialDrawMs > 1000);
-  bool animatedRefresh = (animatedScreen && millis() - lastDrawMs > redrawInterval);
+  // Animations are safe again because full draws clear only the offscreen canvas
+  // and present completed frames with canvas->flush(). Do not throttle the UI to
+  // one redraw per second; render animation frames at normal TFT cadence.
+  uint32_t now = millis();
+  bool animateFrame = screenWantsAnimationFrames() && (now - lastDrawMs >= UI_ANIMATION_FRAME_MS);
+  bool runningFrame = (screen == SCR_RUNNING && waterIsActiveForDisplay() &&
+                       now - lastRunningPartialDrawMs >= RUNNING_COUNTDOWN_FRAME_MS);
 
-  if (needsRedraw || animatedRefresh) {
+  // Reconcile once more immediately before drawing; async worker state can change
+  // between the earlier auto-mode pass and the animation frame decision.
+  updateScreenAutoMode();
+
+  if (needsRedraw || animateFrame) {
     drawUI();
-  } else if (slowRunningRefresh) {
+  } else if (runningFrame) {
     updateRunningCountdownOnly();
-    lastDrawMs = millis();
+    lastDrawMs = now;
   }
 
-  delay(8);
+  delay(1);
 }
