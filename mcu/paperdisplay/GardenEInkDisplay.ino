@@ -158,6 +158,33 @@ bool runtimeSwitchFlashVisible = false;
 uint8_t runtimeSwitchFlashLastPhase = 255;
 String lastHeaderDateTimeDrawn = "";
 
+enum PanelCareMode {
+  PANEL_NORMAL,
+  PANEL_SUN_RISK,
+  PANEL_HIGH_HEAT,
+  PANEL_RECOVERY_REFRESH,
+  PANEL_SLEEP_PROTECT
+};
+
+static const uint8_t CARE_OFFSET_COUNT = 9;
+static const int8_t CARE_OFFSETS[CARE_OFFSET_COUNT][2] = {
+  {0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+  {1, 1}, {-1, 1}, {1, -1}, {-1, -1}
+};
+
+PanelCareMode panelCareMode = PANEL_NORMAL;
+unsigned long lastPanelCareMs = 0;
+unsigned long lastFullPanelRefreshMs = 0;
+unsigned long lastMajorDisplayChangeMs = 0;
+unsigned long lastCareNudgeMs = 0;
+uint16_t partialRefreshCountSinceFull = 0;
+uint8_t carePhase = 0;
+int8_t careOffsetX = 0;
+int8_t careOffsetY = 0;
+bool sunProtectScreenActive = false;
+bool panelCareLowInkActive = false;
+
+
 const char* MODE_AUTO = "auto";
 const char* MODE_SCHEDULE = "schedule";
 const char* MODE_NEWS = "news";
@@ -261,6 +288,7 @@ void partialUpdateHeaderClock() {
   do {
     drawHeaderClockTextOnly();
   } while (display.nextPage());
+  notePartialPanelRefresh();
 }
 
 uint8_t activeZoneCount() {
@@ -321,6 +349,121 @@ float directionToDegrees(const char* dir) {
   if (strcmp(dir, "W") == 0) return 270.0f;
   if (strcmp(dir, "NW") == 0) return 315.0f;
   return 0.0f;
+}
+
+int localMinutesFromEpoch(unsigned long epoch) {
+  if (!epoch) return -1;
+  time_t t = (time_t)epoch;
+  struct tm* tmv = localtime(&t);
+  if (!tmv) return -1;
+  return tmv->tm_hour * 60 + tmv->tm_min;
+}
+
+bool westWallDirectSunLikely() {
+  time_t now = time(nullptr);
+  if (now <= 1700000000UL) return false;
+  struct tm* tmv = localtime(&now);
+  if (!tmv) return false;
+
+  int minuteNow = tmv->tm_hour * 60 + tmv->tm_min;
+  int sunsetMin = localMinutesFromEpoch(state.weather.sunsetEpoch);
+  if (sunsetMin < 0) sunsetMin = 20 * 60;
+
+  // West wall: meaningful direct exposure starts after early afternoon,
+  // with highest risk from mid-afternoon through sunset.
+  if (minuteNow < 13 * 60) return false;
+  if (minuteNow >= 15 * 60 && minuteNow <= sunsetMin) return true;
+  return minuteNow >= 13 * 60 && minuteNow < 15 * 60 &&
+         state.weatherLoaded &&
+         state.weather.sunlightHours > 10.0f &&
+         state.weather.temperatureF > 75.0f;
+}
+
+int computePanelRiskScore() {
+  int score = 0;
+  time_t now = time(nullptr);
+  bool validClock = now > 1700000000UL;
+  bool daytime = false;
+  int minuteNow = -1;
+  int sunsetMin = -1;
+
+  if (validClock) {
+    struct tm* tmv = localtime(&now);
+    if (tmv) minuteNow = tmv->tm_hour * 60 + tmv->tm_min;
+    daytime = state.weather.sunriseEpoch > 0 && state.weather.sunsetEpoch > state.weather.sunriseEpoch &&
+              now >= (time_t)state.weather.sunriseEpoch && now <= (time_t)state.weather.sunsetEpoch;
+    sunsetMin = localMinutesFromEpoch(state.weather.sunsetEpoch);
+  }
+
+  if (daytime) score += 10;
+
+  if (minuteNow >= 0) {
+    if (minuteNow >= 12 * 60 && minuteNow < 14 * 60 + 30) score += 15;
+    if (sunsetMin < 0) sunsetMin = 20 * 60;
+    if (minuteNow >= 14 * 60 + 30 && minuteNow <= sunsetMin) score += 35;
+    if (minuteNow >= 15 * 60 + 30 && minuteNow <= 18 * 60 + 30) score += 20;
+  }
+
+  if (westWallDirectSunLikely()) score += 15;
+
+  float tempF = state.weatherLoaded ? state.weather.temperatureF : 65.0f;
+  if (tempF >= 75.0f) score += 10;
+  if (tempF >= 85.0f) score += 20;
+  if (tempF >= 95.0f) score += 30;
+
+  if (state.weatherLoaded) {
+    if (state.weather.sunlightHours >= 10.0f) score += 10;
+    if (state.weather.sunlightHours >= 12.0f) score += 15;
+  }
+
+  unsigned long staticMinutes = (millis() - lastMajorDisplayChangeMs) / 60000UL;
+  if (staticMinutes >= 10) score += 10;
+  if (staticMinutes >= 30) score += 20;
+  if (staticMinutes >= 60) score += 30;
+
+  if (partialRefreshCountSinceFull >= 20) score += 10;
+  if (partialRefreshCountSinceFull >= 50) score += 20;
+
+  if (score < 0) score = 0;
+  if (score > 100) score = 100;
+  return score;
+}
+
+unsigned long careNudgeIntervalMs(int risk) {
+  if (risk >= 60) return 2UL * 60UL * 1000UL;
+  if (risk >= 30) return 5UL * 60UL * 1000UL;
+  return 10UL * 60UL * 1000UL;
+}
+
+unsigned long fullRefreshIntervalMsForRisk(int risk) {
+  if (risk >= 80) return 5UL * 60UL * 1000UL;
+  if (risk >= 60) return 8UL * 60UL * 1000UL;
+  if (risk >= 30) return 15UL * 60UL * 1000UL;
+  return 30UL * 60UL * 1000UL;
+}
+
+uint16_t maxPartialRefreshesForRisk(int risk) {
+  if (risk >= 60) return 10;
+  if (risk >= 30) return 20;
+  return 35;
+}
+
+bool shouldEnterSunProtect(int risk) {
+  return risk >= 80 && !state.run.active && !state.spigotsOn && relayDataReady;
+}
+
+bool useLowInkActiveZones() {
+  return panelCareLowInkActive && (state.run.active || state.spigotsOn);
+}
+
+void notePartialPanelRefresh() {
+  partialRefreshCountSinceFull++;
+}
+
+void noteFullPanelRefresh() {
+  partialRefreshCountSinceFull = 0;
+  lastFullPanelRefreshMs = millis();
+  lastMajorDisplayChangeMs = millis();
 }
 
 void saveConfig() {
@@ -1310,8 +1453,11 @@ static void drawScaledMapPolyOutline(const MapPt* p, int n, int frameX, int fram
 }
 
 static void drawActiveZoneWhiteOutlines(int frameX, int frameY, int frameW, int frameH) {
-  // Active zones are solid black fills. Their polygon borders stay stable and
-  // white; the zone-switch cue is now shown by flashing the badge only.
+  // Normal active zones are solid black fills with white borders. In high
+  // sun/heat low-ink mode, the fill is suppressed and the active outline is
+  // emphasized in black instead.
+  uint16_t outlineColor = useLowInkActiveZones() ? GxEPD_BLACK : GxEPD_WHITE;
+  uint8_t outlineThickness = useLowInkActiveZones() ? 2 : 1;
   for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
     if (!state.activeZones[zone]) continue;
     const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
@@ -1319,7 +1465,7 @@ static void drawActiveZoneWhiteOutlines(int frameX, int frameY, int frameW, int 
       uint8_t polyIndex = g.polyIndexes[j];
       if (polyIndex < MAP_POLY_COUNT) {
         drawScaledMapPolyOutlineColor(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n,
-                                      frameX, frameY, frameW, frameH, GxEPD_WHITE, 1);
+                                      frameX, frameY, frameW, frameH, outlineColor, outlineThickness);
       }
     }
   }
@@ -1442,13 +1588,18 @@ void drawMap(int x, int y, int w, int h) {
   display.drawRect(x, y, w, h, GxEPD_BLACK);
   drawMapLinework(x, y, w, h);
 
-  for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
-    if (!state.activeZones[zone]) continue;
-    const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
-    for (uint8_t j = 0; j < g.count; j++) {
-      uint8_t polyIndex = g.polyIndexes[j];
-      if (polyIndex < MAP_POLY_COUNT) {
-        fillScaledMapPolyColor(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, x, y, w, h, GxEPD_BLACK);
+  // In high sun/heat care mode, avoid leaving large solid black active-zone
+  // fills on the west-facing outdoor panel. Active zones remain indicated by
+  // badges and outlines, but heavy fill is suppressed until risk drops.
+  if (!useLowInkActiveZones()) {
+    for (int zone = 0; zone < DISPLAY_ZONE_COUNT; zone++) {
+      if (!state.activeZones[zone]) continue;
+      const ZoneMapGroup& g = DISPLAY_ZONE_MAP[zone];
+      for (uint8_t j = 0; j < g.count; j++) {
+        uint8_t polyIndex = g.polyIndexes[j];
+        if (polyIndex < MAP_POLY_COUNT) {
+          fillScaledMapPolyColor(MAP_POLYS[polyIndex].p, MAP_POLYS[polyIndex].n, x, y, w, h, GxEPD_BLACK);
+        }
       }
     }
   }
@@ -1472,20 +1623,23 @@ void drawMap(int x, int y, int w, int h) {
 }
 
 void partialUpdateMapPanel() {
-  display.setPartialWindow(8, 48, 424, 424);
+  display.setPartialWindow(6, 46, 428, 428);
   display.firstPage();
   do {
-    display.fillRect(8, 48, 424, 424, GxEPD_WHITE);
-    drawMap(8, 48, 424, 424);
+    display.fillRect(6, 46, 428, 428, GxEPD_WHITE);
+    drawMap(8 + careOffsetX, 48 + careOffsetY, 424, 424);
   } while (display.nextPage());
+  notePartialPanelRefresh();
 }
 
 void partialUpdateRuntimePanel() {
-  display.setPartialWindow(432, 373, 360, 99);
+  display.setPartialWindow(430, 371, 364, 103);
   display.firstPage();
   do {
-    drawRuntimePanel(432, 373, 360, 99);
+    display.fillRect(430, 371, 364, 103, GxEPD_WHITE);
+    drawRuntimePanel(432 + careOffsetX, 373 + careOffsetY, 360, 99);
   } while (display.nextPage());
+  notePartialPanelRefresh();
 }
 
 void drawWeatherIcon(int x, int y) {
@@ -1839,10 +1993,10 @@ void renderScheduleScreenFull() {
     drawHeaderClockTextOnly();
 
     display.drawLine(8, 48, 792, 48, GxEPD_BLACK);
-    drawMap(8, 48, 424, 424);
-    drawWeatherWidget(432, 48, 360, 166);
-    drawSchedulePanel(432, 213, 360, 161);
-    drawRuntimePanel(432, 373, 360, 99);
+    drawMap(8 + careOffsetX, 48 + careOffsetY, 424, 424);
+    drawWeatherWidget(432 + careOffsetX, 48 + careOffsetY, 360, 166);
+    drawSchedulePanel(432 + careOffsetX, 213 + careOffsetY, 360, 161);
+    drawRuntimePanel(432 + careOffsetX, 373 + careOffsetY, 360, 99);
   } while (display.nextPage());
 }
 
@@ -1958,9 +2112,105 @@ void renderGraphScreenFull() {
   } while (display.nextPage());
 }
 
+void drawSunProtectScreen() {
+  display.setFullWindow();
+  display.firstPage();
+  do {
+    display.fillScreen(GxEPD_WHITE);
+    display.setTextColor(GxEPD_BLACK);
+    display.setFont(&FreeSansBold9pt7b);
+    display.setCursor(170, 185);
+    display.print("Castle Hills Garden");
+
+    display.setFont(&FreeSans9pt7b);
+    display.setCursor(170, 222);
+    display.print("Water is currently off.");
+    display.setCursor(170, 254);
+    display.print("Display resting for sun protection.");
+    display.setCursor(170, 286);
+    display.print("Admin remains available on Wi-Fi.");
+  } while (display.nextPage());
+  noteFullPanelRefresh();
+}
+
+void panelRecoveryRefresh() {
+  display.setFullWindow();
+
+  display.firstPage();
+  do {
+    display.fillScreen(GxEPD_WHITE);
+  } while (display.nextPage());
+  delay(250);
+
+  display.firstPage();
+  do {
+    display.fillScreen(GxEPD_BLACK);
+  } while (display.nextPage());
+  delay(250);
+
+  display.firstPage();
+  do {
+    display.fillScreen(GxEPD_WHITE);
+  } while (display.nextPage());
+  delay(250);
+
+  noteFullPanelRefresh();
+}
+
+void servicePanelCare() {
+  unsigned long nowMs = millis();
+  if (nowMs - lastPanelCareMs < 60000UL) return;
+  lastPanelCareMs = nowMs;
+
+  int risk = computePanelRiskScore();
+  if (risk >= 80) panelCareMode = PANEL_SLEEP_PROTECT;
+  else if (risk >= 60) panelCareMode = PANEL_HIGH_HEAT;
+  else if (risk >= 30) panelCareMode = PANEL_SUN_RISK;
+  else panelCareMode = PANEL_NORMAL;
+
+  panelCareLowInkActive = risk >= 60;
+
+  if (shouldEnterSunProtect(risk)) {
+    if (!sunProtectScreenActive) {
+      panelRecoveryRefresh();
+      sunProtectScreenActive = true;
+      drawSunProtectScreen();
+      lastDrawn = state;
+      forceFullRedraw = false;
+    }
+    return;
+  }
+
+  if (sunProtectScreenActive) {
+    sunProtectScreenActive = false;
+    panelRecoveryRefresh();
+    forceFullRedraw = true;
+  }
+
+  if (nowMs - lastCareNudgeMs >= careNudgeIntervalMs(risk)) {
+    carePhase = (carePhase + 1) % CARE_OFFSET_COUNT;
+    careOffsetX = CARE_OFFSETS[carePhase][0];
+    careOffsetY = CARE_OFFSETS[carePhase][1];
+    lastCareNudgeMs = nowMs;
+    forceFullRedraw = true;
+  }
+
+  if (nowMs - lastFullPanelRefreshMs >= fullRefreshIntervalMsForRisk(risk) ||
+      partialRefreshCountSinceFull >= maxPartialRefreshesForRisk(risk)) {
+    panelRecoveryRefresh();
+    forceFullRedraw = true;
+  }
+}
+
 void drawScreen() {
+  if (sunProtectScreenActive && shouldEnterSunProtect(computePanelRiskScore())) {
+    drawSunProtectScreen();
+    return;
+  }
+
   if (!relayDataReady && forceDiagnosticScreen) {
     renderConnectionDiagnosticScreen();
+    noteFullPanelRefresh();
     return;
   }
 
@@ -1968,9 +2218,19 @@ void drawScreen() {
   if (strstr(state.title, "Garden News")) renderNewsScreenFull();
   else if (strstr(state.title, "Weekly Weather")) renderGraphScreenFull();
   else renderScheduleScreenFull();
+  noteFullPanelRefresh();
 }
 
 bool substantialChange() {
+  static bool lastLowInkActive = false;
+  static int8_t lastCareOffsetXSeen = 0;
+  static int8_t lastCareOffsetYSeen = 0;
+  if (panelCareLowInkActive != lastLowInkActive || careOffsetX != lastCareOffsetXSeen || careOffsetY != lastCareOffsetYSeen) {
+    lastLowInkActive = panelCareLowInkActive;
+    lastCareOffsetXSeen = careOffsetX;
+    lastCareOffsetYSeen = careOffsetY;
+    return true;
+  }
   if (forceFullRedraw) return true;
   if (state.run.active != lastDrawn.run.active) return true;
   if (state.run.zone != lastDrawn.run.zone) return true;
@@ -2509,6 +2769,9 @@ void setup() {
   display.init(115200);
   display.setRotation(0);
   rotationEpochMs = millis();
+  lastFullPanelRefreshMs = millis();
+  lastMajorDisplayChangeMs = millis();
+  lastCareNudgeMs = millis();
 
   setRelayStatus("Boot", "Display initialized. Attempting relay sync.", false);
   drawScreen();
@@ -2525,7 +2788,9 @@ void loop() {
   server.handleClient();
 
   unsigned long nowMs = millis();
-  if (relayDataReady && updateHeaderClockFromSystem()) {
+  servicePanelCare();
+
+  if (relayDataReady && !sunProtectScreenActive && updateHeaderClockFromSystem()) {
     if (strstr(state.title, "Garden Schedule")) {
       partialUpdateHeaderClock();
       strlcpy(lastDrawn.date, state.date, sizeof(lastDrawn.date));
@@ -2573,6 +2838,7 @@ void loop() {
 
   if (!didPoll && !runtimeZoneChanged && !runtimeFlashExpired && !runtimeFlashPhaseChanged) return;
   if (didPoll) lastPollMs = nowMs;
+  if (sunProtectScreenActive && shouldEnterSunProtect(computePanelRiskScore())) return;
 
   static bool previousRunActive = false;
   static uint8_t previousRunZone = 0;
