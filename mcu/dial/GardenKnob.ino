@@ -2121,6 +2121,49 @@ void drawBackEdge();
 const uint16_t * homeMenuIconData(int idx);
 void drawSprite565(int x, int y, int w, int h, const uint16_t *bmp, uint16_t transparent = SPRITE_TRANSPARENT);
 void drawSprite565Scaled(int x, int y, int w, int h, const uint16_t *bmp, int scale, uint16_t transparent = SPRITE_TRANSPARENT);
+
+uint16_t blendColor565(uint16_t a, uint16_t b, float t) {
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
+
+  int ar = (a >> 11) & 0x1F;
+  int ag = (a >> 5) & 0x3F;
+  int ab = a & 0x1F;
+
+  int br = (b >> 11) & 0x1F;
+  int bg = (b >> 5) & 0x3F;
+  int bb = b & 0x1F;
+
+  int rr = ar + (int)((br - ar) * t);
+  int rg = ag + (int)((bg - ag) * t);
+  int rb = ab + (int)((bb - ab) * t);
+
+  return (uint16_t)((rr << 11) | (rg << 5) | rb);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 void drawHomeCarouselEdgeIndicator(int active, int total, uint16_t accent);
 void drawHomeHeader(const String &title, const String &subtitle, int idx, uint16_t accent);
 void drawSelectedZoneOnly(int zoneNumber);
@@ -2352,7 +2395,20 @@ static const uint32_t LED_CYCLE_MS = 2500;
 
 uint32_t uiAnimStartMs = 0;
 uint32_t lastUiSecondMs = 0;
-static const uint32_t UI_ANIMATION_FRAME_MS = 33;       // ~30 FPS; canvas flush prevents visible blanking
+static const uint32_t UI_ANIMATION_FRAME_MS = 33;
+static const uint32_t ZONE_SLIDE_MS = 180;
+static const uint32_t HOME_RING_STEP_MS = 160;
+uint32_t homeRingStepStartMs = 0;
+int homeRingFromIndex = 0;
+int homeRingToIndex = 0;
+int homeRingStepDir = 0;
+int lastEncoderDetentRemainderForRing = 0;
+
+uint32_t zoneSlideStartMs = 0;
+int zoneSlideDir = 0;   // -1 = new card enters from left, +1 = new card enters from right
+int zoneSlideFrom = 1;
+int zoneSlideTo = 1;
+       // ~30 FPS; canvas flush prevents visible blanking
 static const uint32_t RUNNING_COUNTDOWN_FRAME_MS = 100; // smooth progress ring without 1 Hz limit
 
 int diagnosticsPage = 0;
@@ -3794,14 +3850,14 @@ void appendScheduleJsonRow(JsonArray arr, int zoneNumber, int hour, int minute, 
   durationMinutes = constrain(durationMinutes, 1, 240);
 
   JsonObject row = arr.createNestedObject();
-  row["channel"] = zoneNumber;                         // relay-required user-visible zone number
-  row["zone"] = "Zone " + String(zoneNumber);          // relay treats this as zone display name
+  row["channel"] = zoneNumber;
+  row["zone"] = "Zone " + String(zoneNumber);
   row["enabled"] = enabled;
-  row["startTime"] = scheduleTimeHHMM(hour, minute);   // relay-required HH:MM string
+  row["startTime"] = scheduleTimeHHMM(hour, minute);
   row["durationSeconds"] = (uint32_t)durationMinutes * 60UL;
 
-  // Extra compatibility fields are harmless for readers, but the relay's
-  // applyScheduleArray() depends on the five fields above.
+  // Compatibility fields for knob-side parsing/debugging. The relay uses the
+  // five fields above.
   row["zoneNumber"] = zoneNumber;
   row["startHour"] = constrain(hour, 0, 23);
   row["startMinute"] = constrain(minute, 0, 59);
@@ -4245,6 +4301,109 @@ volatile bool buttonLevel = true;
 static const int ENCODER_EDGES_PER_DETENT = 2;
 int encoderDetentRemainder = 0;
 
+// ----------------------------- Home carousel animation helpers -------------
+
+void startHomeCarouselRingStep(int fromIndex, int toIndex, int dir) {
+  fromIndex = (fromIndex + HOME_MENU_COUNT) % HOME_MENU_COUNT;
+  toIndex = (toIndex + HOME_MENU_COUNT) % HOME_MENU_COUNT;
+  if (fromIndex == toIndex) return;
+
+  homeRingFromIndex = fromIndex;
+  homeRingToIndex = toIndex;
+  homeRingStepDir = dir >= 0 ? 1 : -1;
+  homeRingStepStartMs = millis();
+}
+
+bool homeRingStepActive() {
+  return homeRingStepDir != 0 && millis() - homeRingStepStartMs < HOME_RING_STEP_MS;
+}
+
+float homeRingStepT() {
+  if (!homeRingStepActive()) return 1.0f;
+  float t = (float)(millis() - homeRingStepStartMs) / (float)HOME_RING_STEP_MS;
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
+  // Ease-out so the ring feels attached to the knob but settles softly.
+  return 1.0f - (1.0f - t) * (1.0f - t);
+}
+
+float homeRingFractionalIndex() {
+  if (homeRingStepActive()) {
+    return (float)homeRingFromIndex + (float)homeRingStepDir * homeRingStepT();
+  }
+
+  float partial = (float)encoderDetentRemainder / (float)ENCODER_EDGES_PER_DETENT;
+  if (partial > 0.95f) partial = 0.95f;
+  if (partial < -0.95f) partial = -0.95f;
+  return (float)homeMenuIndex + partial;
+}
+
+uint16_t homeRingBlendedAccent() {
+  if (homeRingStepActive()) {
+    return blendColor565(homeMenuAccent(homeRingFromIndex), homeMenuAccent(homeRingToIndex), homeRingStepT());
+  }
+
+  float partial = (float)encoderDetentRemainder / (float)ENCODER_EDGES_PER_DETENT;
+  int dir = partial >= 0.0f ? 1 : -1;
+  float t = partial >= 0.0f ? partial : -partial;
+  if (t > 1.0f) t = 1.0f;
+
+  int nextIndex = (homeMenuIndex + dir + HOME_MENU_COUNT) % HOME_MENU_COUNT;
+  return blendColor565(homeMenuAccent(homeMenuIndex), homeMenuAccent(nextIndex), t);
+}
+
+uint16_t fadeToBg565(uint16_t c, float alpha) {
+  return blendColor565(C_BG, c, alpha);
+}
+
+void drawSprite565Alpha(int x, int y, int w, int h, const uint16_t *bmp, float alpha, uint16_t transparent) {
+  if (alpha <= 0.01f) return;
+  if (alpha > 1.0f) alpha = 1.0f;
+
+  for (int yy = 0; yy < h; yy++) {
+    int py = y + yy;
+    if (py < 0 || py >= SCREEN_H) continue;
+
+    for (int xx = 0; xx < w; xx++) {
+      int px = x + xx;
+      if (px < 0 || px >= SCREEN_W) continue;
+
+      uint16_t c = pgm_read_word(&bmp[yy * w + xx]);
+      if (c != transparent) gfx->drawPixel(px, py, fadeToBg565(c, alpha));
+    }
+  }
+}
+
+void drawMainCarouselIconAlpha(int idx, int cx, int cy, float alpha) {
+  const uint16_t *icon = homeMenuIconData(idx);
+  drawSprite565Alpha(cx - (HOME_ICON_W / 2), cy - (HOME_ICON_H / 2),
+                     HOME_ICON_W, HOME_ICON_H, icon, alpha, SPRITE_TRANSPARENT);
+}
+
+float homeIconSlideT() {
+  return homeRingStepActive() ? homeRingStepT() : 1.0f;
+}
+
+bool homeIconSlideActive() {
+  return homeRingStepActive();
+}
+
+void drawHomeCarouselSlidingIcons() {
+  if (!homeIconSlideActive()) {
+    drawMainCarouselIcon(homeMenuIndex, CX, 108, homeMenuAccent(homeMenuIndex));
+    return;
+  }
+
+  float t = homeIconSlideT();
+  int travel = 150;
+  int oldX = CX - (int)(t * travel) * homeRingStepDir;
+  int newX = CX + (int)((1.0f - t) * travel) * homeRingStepDir;
+
+  drawMainCarouselIconAlpha(homeRingFromIndex, oldX, 108, 1.0f - t);
+  drawMainCarouselIconAlpha(homeRingToIndex, newX, 108, t);
+}
+
+
 bool buttonPressed = false;
 uint32_t buttonDownMs = 0;
 bool longPressSent = false;
@@ -4289,6 +4448,11 @@ int takeEncoderDelta() {
   while (encoderDetentRemainder <= -ENCODER_EDGES_PER_DETENT) {
     detents--;
     encoderDetentRemainder += ENCODER_EDGES_PER_DETENT;
+  }
+
+  if (screen == SCR_HOME && encoderDetentRemainder != lastEncoderDetentRemainderForRing) {
+    lastEncoderDetentRemainderForRing = encoderDetentRemainder;
+    needsRedraw = true;
   }
 
   return detents;
@@ -4738,7 +4902,7 @@ void drawHomeMenuCarousel() {
 
   // Header stays status-only; the app name is the large label below the icon.
   drawHomeHeader("", subtitle, homeMenuIndex, accent);
-  drawMainCarouselIcon(homeMenuIndex, CX, 108, accent);
+  drawHomeCarouselSlidingIcons();
 
   gfx->setTextSize(3);
   gfx->setTextColor(accent);
@@ -4748,12 +4912,7 @@ void drawHomeMenuCarousel() {
   gfx->setCursor(CX - w / 2, 157);
   gfx->print(title);
 
-  drawHomeCarouselEdgeIndicator(homeMenuIndex, HOME_MENU_COUNT, accent);
-
-  // Subtle active shimmer, rendered into the offscreen canvas.
-  uint8_t animTick = (millis() / 80) % 12;
-  int shimmerX = 54 + animTick * 12;
-  gfx->drawFastHLine(shimmerX, 188, 18, dimColor(accent));
+  drawHomeCarouselEdgeIndicator(homeRingFractionalIndex(), HOME_MENU_COUNT, homeRingBlendedAccent());
 }
 
 void activateHomeMenuAction() {
@@ -4941,25 +5100,27 @@ void drawSprite565Scaled(int x, int y, int w, int h, const uint16_t *bmp, int sc
   }
 }
 
-void drawHomeCarouselEdgeIndicator(int active, int total, uint16_t accent) {
+void drawHomeCarouselEdgeIndicator(float activePosition, int total, uint16_t accent) {
   if (total <= 0) return;
 
-  float seg = 360.0f / (float)total;
-  float startDeg = active * seg + 3.0f;
-  float endDeg = (active + 1) * seg - 3.0f;
+  while (activePosition < 0.0f) activePosition += (float)total;
+  while (activePosition >= (float)total) activePosition -= (float)total;
 
-  // Draw only the active arc. Avoid drawing a full circumference every frame:
-  // on the ESP32 round TFT that made knob navigation feel laggy.
+  float seg = 360.0f / (float)total;
+  float startDeg = activePosition * seg + 3.0f;
+  float endDeg = startDeg + seg - 6.0f;
+
   for (int band = 0; band < 3; band++) {
     int r = 118 - band;
-    for (float deg = startDeg; deg <= endDeg; deg += 2.0f) {
-      float a = (deg - 90.0f) * PI / 180.0f;
+    for (float deg = startDeg; deg <= endDeg; deg += 1.5f) {
+      float wrapped = deg;
+      while (wrapped >= 360.0f) wrapped -= 360.0f;
+      while (wrapped < 0.0f) wrapped += 360.0f;
+
+      float a = (wrapped - 90.0f) * PI / 180.0f;
       int px = CX + (int)roundf(cosf(a) * r);
       int py = CY + (int)roundf(sinf(a) * r);
       gfx->drawPixel(px, py, accent);
-      // Fill tiny gaps from 2-degree step without a full arc routine.
-      float a2 = (deg + 1.0f - 90.0f) * PI / 180.0f;
-      gfx->drawPixel(CX + (int)roundf(cosf(a2) * r), CY + (int)roundf(sinf(a2) * r), accent);
     }
   }
 }
@@ -5391,6 +5552,70 @@ void drawHome() {
   drawHomeMenuCarousel();
 }
 
+
+void startZoneSlideAnimation(int fromZone, int toZone, int dir) {
+  fromZone = constrain(fromZone, 1, 5);
+  toZone = constrain(toZone, 1, 5);
+  if (fromZone == toZone || dir == 0) return;
+  zoneSlideFrom = fromZone;
+  zoneSlideTo = toZone;
+  zoneSlideDir = dir > 0 ? 1 : -1;
+  zoneSlideStartMs = millis();
+}
+
+bool zoneSlideActive() {
+  return zoneSlideDir != 0 && (millis() - zoneSlideStartMs) < ZONE_SLIDE_MS;
+}
+
+int zoneSlideOffsetForNewCard() {
+  if (!zoneSlideActive()) return 0;
+  float t = (float)(millis() - zoneSlideStartMs) / (float)ZONE_SLIDE_MS;
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
+  // Ease-out: starts fast, settles softly.
+  float eased = 1.0f - (1.0f - t) * (1.0f - t);
+  return (int)((1.0f - eased) * 170.0f) * zoneSlideDir;
+}
+
+int zoneSlideOffsetForOldCard() {
+  if (!zoneSlideActive()) return 0;
+  float t = (float)(millis() - zoneSlideStartMs) / (float)ZONE_SLIDE_MS;
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
+  float eased = 1.0f - (1.0f - t) * (1.0f - t);
+  return (int)(-eased * 170.0f) * zoneSlideDir;
+}
+
+void drawSelectedZoneOnlyAt(int zoneNumber, int dx) {
+  int oldCx = CX;
+  // This firmware's zone polygon renderer is centered around CX internally.
+  // Temporarily shift the global drawing center by drawing the card background
+  // with dx and then offsetting the canvas transform is not available here, so
+  // use a simple clipped sprite-like redraw by shifting the card and badge areas
+  // around the fixed recentered polygon. The actual polygon still lands in-card
+  // because the full zone select scene is redrawn each frame.
+  (void)oldCx;
+  if (dx == 0) {
+    drawSelectedZoneOnly(zoneNumber);
+    return;
+  }
+
+  // Minimal off-center preview: draw a compact label/badge at the card's slide
+  // position while the primary polygon settles into place. This avoids complex
+  // geometry rewrites and still gives clear directional motion.
+  uint16_t accent = zoneUiColor(zoneNumber);
+  int bx = CX + dx;
+  gfx->drawRoundRect(50 + dx, 82, 140, 86, 18, dimColor(accent));
+  gfx->setTextSize(3);
+  gfx->setTextColor(accent);
+  String label = "Z" + String(zoneNumber);
+  int16_t x1, y1;
+  uint16_t tw, th;
+  gfx->getTextBounds((char*)label.c_str(), 0, 0, &x1, &y1, &tw, &th);
+  gfx->setCursor(bx - tw / 2, 111);
+  gfx->print(label);
+}
+
 void drawZoneSelect() {
   fillCircularBackground();
 
@@ -5402,12 +5627,15 @@ void drawZoneSelect() {
   drawPlainTitle("Zone " + String(selectedZone), zoneIsActive(selectedZone) ? "Running" : "Select Zone", accent);
 
   drawPlainCard(50, 82, 140, 86, dimColor(accent));
-  int pulseRadius = 8 + ((millis() / 120) % 4);
-  gfx->drawRoundRect(50 - pulseRadius / 2, 82 - pulseRadius / 2, 140 + pulseRadius, 86 + pulseRadius, 12, dimColor(accent));
-  drawSelectedZoneOnly(selectedZone);
 
-  int prevZone = selectedZone == 1 ? 5 : selectedZone - 1;
-  int nextZone = selectedZone == 5 ? 1 : selectedZone + 1;
+  if (zoneSlideActive()) {
+    drawSelectedZoneOnlyAt(zoneSlideFrom, zoneSlideOffsetForOldCard());
+    drawSelectedZoneOnlyAt(selectedZone, zoneSlideOffsetForNewCard());
+  } else {
+    zoneSlideDir = 0;
+    drawSelectedZoneOnly(selectedZone);
+  }
+
   gfx->drawLine(34, 126, 44, 118, C_SOFT_TEXT);
   gfx->drawLine(34, 126, 44, 134, C_SOFT_TEXT);
   gfx->drawLine(35, 126, 44, 119, C_SOFT_TEXT);
@@ -5621,17 +5849,26 @@ void drawSchedule() {
     uint16_t accent = zoneUiColor(scheduleZone);
     drawPlainTitle("Zone " + String(scheduleZone), "Choose Schedule", accent);
     drawPlainCard(50, 82, 140, 86, dimColor(accent));
-    drawSelectedZoneOnly(scheduleZone);
+
+    if (zoneSlideActive()) {
+      drawSelectedZoneOnlyAt(zoneSlideFrom, zoneSlideOffsetForOldCard());
+      drawSelectedZoneOnlyAt(scheduleZone, zoneSlideOffsetForNewCard());
+    } else {
+      zoneSlideDir = 0;
+      drawSelectedZoneOnly(scheduleZone);
+    }
 
     gfx->drawLine(34, 126, 44, 118, C_SOFT_TEXT);
-  gfx->drawLine(34, 126, 44, 134, C_SOFT_TEXT);
-  gfx->drawLine(35, 126, 44, 119, C_SOFT_TEXT);
-  gfx->drawLine(35, 126, 44, 133, C_SOFT_TEXT);
+    gfx->drawLine(34, 126, 44, 134, C_SOFT_TEXT);
+    gfx->drawLine(35, 126, 44, 119, C_SOFT_TEXT);
+    gfx->drawLine(35, 126, 44, 133, C_SOFT_TEXT);
     gfx->drawLine(206, 126, 196, 118, C_SOFT_TEXT);
-  gfx->drawLine(206, 126, 196, 134, C_SOFT_TEXT);
-  gfx->drawLine(205, 126, 196, 119, C_SOFT_TEXT);
-  gfx->drawLine(205, 126, 196, 133, C_SOFT_TEXT);
-    drawHomeCarouselEdgeIndicator(scheduleZone - 1, 5, accent);
+    gfx->drawLine(206, 126, 196, 134, C_SOFT_TEXT);
+    gfx->drawLine(205, 126, 196, 119, C_SOFT_TEXT);
+    gfx->drawLine(205, 126, 196, 133, C_SOFT_TEXT);
+
+    // Schedule zone paging uses dots like Zone Select, not the Home carousel ring.
+    drawPlainPageDots(scheduleZone - 1, 5, accent);
     drawSmallCentered("Press to view slots", SAFE_BOTTOM_HINT_Y, C_SOFT_TEXT);
     return;
   }
@@ -6186,23 +6423,27 @@ void rotateUI(int delta) {
   bool fast = mag >= 3;
 
   switch (screen) {
-    case SCR_HOME:
+    case SCR_HOME: {
+      int oldIndex = homeMenuIndex;
       homeMenuIndex = (homeMenuIndex + navStep + HOME_MENU_COUNT) % HOME_MENU_COUNT;
-      // Do not block the encoder by forcing a full TFT redraw on every raw turn event.
-      // The index updates immediately; drawing is capped to roughly 30 fps.
-      if (millis() - lastHomeCarouselRedrawMs >= 33) {
+      startHomeCarouselRingStep(oldIndex, homeMenuIndex, navStep > 0 ? 1 : -1);
+      if (millis() - lastHomeCarouselRedrawMs >= 16) {
         lastHomeCarouselRedrawMs = millis();
         needsRedraw = true;
       }
       break;
-    case SCR_ZONE_SELECT:
+    }
+    case SCR_ZONE_SELECT: {
+      int oldZone = selectedZone;
       selectedZone += navStep;
       if (selectedZone < 1) selectedZone = 5;
       if (selectedZone > 5) selectedZone = 1;
       selectedItem = selectedZone - 1;
       cfg.lastSelectedZone = selectedZone;
+      startZoneSlideAnimation(oldZone, selectedZone, navStep > 0 ? 1 : -1);
       needsRedraw = true;
       break;
+    }
     case SCR_DURATION:
       durationMinutes += valueStep * (fast ? 5 : 1);
       durationMinutes = constrain(durationMinutes, 1, 240);
@@ -6228,15 +6469,19 @@ void rotateUI(int delta) {
     }
         case SCR_SCHEDULE:
       if (scheduleZonePickerMode) {
+        int oldZone = scheduleZone;
         scheduleZone += navStep;
         if (scheduleZone < 1) scheduleZone = 5;
         if (scheduleZone > 5) scheduleZone = 1;
         scheduleSlot = 0;
+        startZoneSlideAnimation(oldZone, scheduleZone, navStep > 0 ? 1 : -1);
       } else if (fast) {
+        int oldZone = scheduleZone;
         scheduleZone += navStep;
         if (scheduleZone < 1) scheduleZone = 5;
         if (scheduleZone > 5) scheduleZone = 1;
         scheduleSlot = 0;
+        startZoneSlideAnimation(oldZone, scheduleZone, navStep > 0 ? 1 : -1);
       } else {
         ZoneSchedule &zs = zoneSchedules[scheduleZone - 1];
         int maxSlot = zs.loaded ? min((int)zs.count, 5) : 0;
@@ -6293,14 +6538,18 @@ void handleTouchTap(int x, int y) {
 
   if (screen == SCR_ZONE_SELECT) {
     if (x < 80) {
+      int oldZone = selectedZone;
       selectedZone = selectedZone == 1 ? 5 : selectedZone - 1;
       selectedItem = selectedZone - 1;
       cfg.lastSelectedZone = selectedZone;
+      startZoneSlideAnimation(oldZone, selectedZone, -1);
       needsRedraw = true;
     } else if (x > 160) {
+      int oldZone = selectedZone;
       selectedZone = selectedZone == 5 ? 1 : selectedZone + 1;
       selectedItem = selectedZone - 1;
       cfg.lastSelectedZone = selectedZone;
+      startZoneSlideAnimation(oldZone, selectedZone, 1);
       needsRedraw = true;
     } else {
       durationTarget = DUR_ZONE;
@@ -6312,10 +6561,14 @@ void handleTouchTap(int x, int y) {
 
   if (screen == SCR_HOME) {
     if (x < 80) {
+      int oldIndex = homeMenuIndex;
       homeMenuIndex = (homeMenuIndex + HOME_MENU_COUNT - 1) % HOME_MENU_COUNT;
+      startHomeCarouselRingStep(oldIndex, homeMenuIndex, -1);
       needsRedraw = true;
     } else if (x > 160) {
+      int oldIndex = homeMenuIndex;
       homeMenuIndex = (homeMenuIndex + 1) % HOME_MENU_COUNT;
+      startHomeCarouselRingStep(oldIndex, homeMenuIndex, 1);
       needsRedraw = true;
     } else {
       activateHomeMenuAction();
@@ -6362,12 +6615,16 @@ void handleTouchTap(int x, int y) {
   if (screen == SCR_SCHEDULE) {
     if (scheduleZonePickerMode) {
       if (x < 80) {
+        int oldZone = scheduleZone;
         scheduleZone = scheduleZone == 1 ? 5 : scheduleZone - 1;
         scheduleSlot = 0;
+        startZoneSlideAnimation(oldZone, scheduleZone, -1);
         needsRedraw = true;
       } else if (x > 160) {
+        int oldZone = scheduleZone;
         scheduleZone = scheduleZone == 5 ? 1 : scheduleZone + 1;
         scheduleSlot = 0;
+        startZoneSlideAnimation(oldZone, scheduleZone, 1);
         needsRedraw = true;
       } else {
         scheduleZonePickerMode = false;
@@ -6525,8 +6782,10 @@ void processInput() {
       if (screenAllowsBack() && touchStart.x <= BACK_SWIPE_START_X && dx >= BACK_SWIPE_MIN_DX && abs(dx) > abs(dy)) {
         performBackGesture();
       } else if (screen == SCR_HOME && abs(dx) > 45 && abs(dx) > abs(dy)) {
+        int oldIndex = homeMenuIndex;
         if (dx < 0) homeMenuIndex = (homeMenuIndex + 1) % HOME_MENU_COUNT;
         else homeMenuIndex = (homeMenuIndex + HOME_MENU_COUNT - 1) % HOME_MENU_COUNT;
+        startHomeCarouselRingStep(oldIndex, homeMenuIndex, dx < 0 ? 1 : -1);
         needsRedraw = true;
       } else if (screen == SCR_ZONE_SELECT && abs(dx) > 45 && abs(dx) > abs(dy)) {
         if (dx < 0) selectedZone = selectedZone == 5 ? 1 : selectedZone + 1;
@@ -6535,9 +6794,11 @@ void processInput() {
         cfg.lastSelectedZone = selectedZone;
         needsRedraw = true;
       } else if (screen == SCR_SCHEDULE && scheduleZonePickerMode && abs(dx) > 45 && abs(dx) > abs(dy)) {
+        int oldZone = scheduleZone;
         if (dx < 0) scheduleZone = scheduleZone == 5 ? 1 : scheduleZone + 1;
         else scheduleZone = scheduleZone == 1 ? 5 : scheduleZone - 1;
         scheduleSlot = 0;
+        startZoneSlideAnimation(oldZone, scheduleZone, dx < 0 ? 1 : -1);
         needsRedraw = true;
       } else {
         if (wakeOnlyInputConsumed()) {
@@ -6853,6 +7114,9 @@ bool screenWantsAnimationFrames() {
   if (displaySleeping) return false;
   if (commandPending && commandPendingText.length()) return true;
   if (screen == SCR_RUNNING && waterIsActiveForDisplay()) return true;
+  if (screen == SCR_ZONE_SELECT && zoneSlideActive()) return true;
+  if (screen == SCR_SCHEDULE && scheduleZonePickerMode && zoneSlideActive()) return true;
+  if (screen == SCR_HOME && (homeRingStepActive() || homeIconSlideActive() || encoderDetentRemainder != 0)) return true;
 
   // Guard against visible carousel flashes during async relay gaps. If the timer
   // view is latched, the next auto-mode pass will restore SCR_RUNNING; do not
