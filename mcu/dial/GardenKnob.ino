@@ -1949,9 +1949,48 @@ IPAddress apSubnet(255, 255, 255, 0);
 
 
 
+// ----------------------------- Async Relay I/O -------------------------------
+// ESP32-S3 has two cores. Keep touch/encoder/UI responsive on the Arduino loop
+// while relay HTTP runs in a FreeRTOS task pinned to core 0.
+enum AsyncRelayCommandType {
+  RCMD_NONE = 0,
+  RCMD_MANUAL_RUN,
+  RCMD_SPIGOT_RUN,
+  RCMD_STOP_ZONE,
+  RCMD_STOP_SPIGOTS,
+  RCMD_ALL_OFF,
+  RCMD_SEND_SCHEDULE,
+  RCMD_DELETE_SCHEDULE,
+  RCMD_RELOAD_STATE,
+  RCMD_RELOAD_SCHEDULE
+};
+
+struct AsyncRelayCommand {
+  AsyncRelayCommandType type = RCMD_NONE;
+  int zone = 0;
+  int minutes = 0;
+  int hour = 0;
+  int minute = 0;
+  int duration = 0;
+  int slot = 0;
+  bool enabled = true;
+};
+
+static QueueHandle_t relayCommandQueue = nullptr;
+static TaskHandle_t relayWorkerHandle = nullptr;
+static volatile bool relayWorkerReady = false;
+static volatile bool relayIoBusy = false;
+static uint32_t lastAsyncStatePollMs = 0;
+static uint32_t lastAsyncSchedulePollMs = 0;
+
 // Forward declarations for helpers that are called before their definitions.
 // These stop Arduino's auto-prototype generator from creating broken prototypes.
 void drawUI();
+bool enqueueRelayCommand(const AsyncRelayCommand &cmd, bool front = false);
+void relayWorkerTask(void *param);
+void startRelayWorker();
+void processRelayCommandBlocking(const AsyncRelayCommand &cmd);
+void pollRelayTasksBlocking();
 void presentDisplay();
 void updateZoneLeds(bool force = false);
 String buildUiStateSignature();
@@ -1964,6 +2003,7 @@ void setScreen(ScreenId s, bool userNavigation);
 void sleepDisplay();
 void wakeDisplay(bool redraw = true);
 void handleDisplaySleepTask();
+bool wakeOnlyInputConsumed();
 bool shouldClearScreenForDraw();
 void drawRunningFull();
 void updateRunningCountdownOnly();
@@ -2212,7 +2252,18 @@ uint32_t lastUserInteractionMs = 0;
 // If nothing is watering and the user has been idle, turn the TFT/backlight off.
 // Any rotary/touch interaction or watering start wakes it.
 static const uint32_t DISPLAY_SLEEP_IDLE_MS = 60000;
+
+// Keep relay HTTP short because these calls are synchronous on the UI loop.
+// Long HTTPClient timeouts feel like device freezes because encoder/touch input
+// cannot be processed until the request returns.
+static const uint16_t RELAY_HTTP_CONNECT_TIMEOUT_MS = 450;
+static const uint16_t RELAY_HTTP_READ_TIMEOUT_MS = 900;
+static const uint16_t RELAY_HTTP_POST_TIMEOUT_MS = 1200;
+
+
 bool displaySleeping = false;
+static const uint32_t WAKE_INPUT_SUPPRESS_MS = 450;
+uint32_t inputSuppressUntilMs = 0;
 uint32_t lastHomeCarouselRedrawMs = 0;
 uint8_t ambientSweepIndex = 0;
 int displayedRunningZone = 0;   // 1-5 while zone status is displayed
@@ -2656,31 +2707,53 @@ bool relayGetRaw(const String &path, String &body, int &httpCode, String &err) {
     return false;
   }
 
+  if (WiFi.status() != WL_CONNECTED) {
+    err = "station Wi-Fi disconnected";
+    httpCode = -1;
+    return false;
+  }
+
   WiFiClient client;
+  client.setTimeout(RELAY_HTTP_READ_TIMEOUT_MS / 1000);
   HTTPClient http;
   String url = joinUrl(cfg.relayBaseUrl, path);
+
   if (!http.begin(client, url)) {
     err = "relay HTTP begin failed";
     httpCode = -1;
     return false;
   }
-  http.setTimeout(3500);
+
+  http.setConnectTimeout(RELAY_HTTP_CONNECT_TIMEOUT_MS);
+  http.setTimeout(RELAY_HTTP_READ_TIMEOUT_MS);
+
   if (cfg.relayToken.length()) {
     http.addHeader("x-api-token", cfg.relayToken);
   }
+
+  uint32_t started = millis();
   httpCode = http.GET();
+
   if (httpCode <= 0) {
     err = "relay request failed";
     http.end();
     return false;
   }
+
   body = http.getString();
   http.end();
 
+  uint32_t elapsed = millis() - started;
+  if (elapsed > 250) {
+    relayError = "slow relay HTTP " + String(elapsed) + "ms";
+  }
+
   if (httpCode < 200 || httpCode >= 300) {
-    err = "relay returned non-200";
+    err = "relay returned HTTP " + String(httpCode);
     return false;
   }
+
+  err = "";
   return true;
 }
 
@@ -2690,31 +2763,55 @@ bool relayPostJson(const String &path, const String &payload, String &body, int 
     httpCode = -1;
     return false;
   }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    err = "station Wi-Fi disconnected";
+    httpCode = -1;
+    return false;
+  }
+
   WiFiClient client;
+  client.setTimeout(RELAY_HTTP_POST_TIMEOUT_MS / 1000);
   HTTPClient http;
   String url = joinUrl(cfg.relayBaseUrl, path);
+
   if (!http.begin(client, url)) {
     err = "relay HTTP begin failed";
     httpCode = -1;
     return false;
   }
-  http.setTimeout(5000);
+
+  http.setConnectTimeout(RELAY_HTTP_CONNECT_TIMEOUT_MS);
+  http.setTimeout(RELAY_HTTP_POST_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");
+
   if (cfg.relayToken.length()) {
     http.addHeader("x-api-token", cfg.relayToken);
   }
+
+  uint32_t started = millis();
   httpCode = http.POST(payload);
+
   if (httpCode <= 0) {
     err = "relay request failed";
     http.end();
     return false;
   }
+
   body = http.getString();
   http.end();
+
+  uint32_t elapsed = millis() - started;
+  if (elapsed > 300) {
+    relayError = "slow relay POST " + String(elapsed) + "ms";
+  }
+
   if (httpCode < 200 || httpCode >= 300) {
-    err = "relay returned non-200";
+    err = "relay returned HTTP " + String(httpCode);
     return false;
   }
+
+  err = "";
   return true;
 }
 
@@ -2790,8 +2887,155 @@ void clearCommandPending() {
   commandMessageUntil = millis() + 800;
   // No forced redraw here; command completion should not flash the TFT.
 }
+bool enqueueRelayCommand(const AsyncRelayCommand &cmd, bool front) {
+  if (!relayCommandQueue) return false;
+  BaseType_t ok = front ? xQueueSendToFront(relayCommandQueue, &cmd, 0)
+                        : xQueueSend(relayCommandQueue, &cmd, 0);
+  return ok == pdTRUE;
+}
+
+void startRelayWorker() {
+  if (relayCommandQueue == nullptr) {
+    relayCommandQueue = xQueueCreate(16, sizeof(AsyncRelayCommand));
+  }
+
+  if (relayWorkerHandle == nullptr && relayCommandQueue != nullptr) {
+    xTaskCreatePinnedToCore(
+      relayWorkerTask,
+      "relay-io",
+      12288,
+      nullptr,
+      1,
+      &relayWorkerHandle,
+      0
+    );
+  }
+}
 
 bool sendManualRun(int zoneNumber, int minutes) {
+  AsyncRelayCommand cmd;
+  cmd.type = RCMD_MANUAL_RUN;
+  cmd.zone = constrain(zoneNumber, 1, 5);
+  cmd.minutes = constrain(minutes, 1, 240);
+  showCommandPending("Starting Z" + String(cmd.zone));
+  return enqueueRelayCommand(cmd, true);
+}
+
+bool sendSpigotRun(int minutes) {
+  AsyncRelayCommand cmd;
+  cmd.type = RCMD_SPIGOT_RUN;
+  cmd.minutes = constrain(minutes, 1, 240);
+  showCommandPending("Starting Spigot");
+  return enqueueRelayCommand(cmd, true);
+}
+
+bool sendStopZone(int zoneNumber) {
+  AsyncRelayCommand cmd;
+  cmd.type = RCMD_STOP_ZONE;
+  cmd.zone = constrain(zoneNumber, 1, 5);
+  showCommandPending("Stopping Z" + String(cmd.zone));
+  return enqueueRelayCommand(cmd, true);
+}
+
+bool sendStopSpigots() {
+  AsyncRelayCommand cmd;
+  cmd.type = RCMD_STOP_SPIGOTS;
+  showCommandPending("Stopping Spigots");
+  return enqueueRelayCommand(cmd, true);
+}
+
+bool sendAllOff() {
+  AsyncRelayCommand cmd;
+  cmd.type = RCMD_ALL_OFF;
+  showCommandPending("Stopping All");
+  return enqueueRelayCommand(cmd, true);
+}
+
+bool sendScheduleSlot(int zoneNumber, int hour, int minute, int durationMinutes, bool enabled) {
+  AsyncRelayCommand cmd;
+  cmd.type = RCMD_SEND_SCHEDULE;
+  cmd.zone = constrain(zoneNumber, 1, 5);
+  cmd.hour = constrain(hour, 0, 23);
+  cmd.minute = constrain(minute, 0, 59);
+  cmd.duration = constrain(durationMinutes, 1, 240);
+  cmd.enabled = enabled;
+  showCommandPending("Saving");
+  return enqueueRelayCommand(cmd, true);
+}
+
+bool deleteScheduleSlot(int zoneNumber, int slotIndex) {
+  AsyncRelayCommand cmd;
+  cmd.type = RCMD_DELETE_SCHEDULE;
+  cmd.zone = constrain(zoneNumber, 1, 5);
+  cmd.slot = slotIndex;
+  showCommandPending("Deleting");
+  return enqueueRelayCommand(cmd, true);
+}
+
+void processRelayCommandBlocking(const AsyncRelayCommand &cmd) {
+  switch (cmd.type) {
+    case RCMD_MANUAL_RUN:
+      sendManualRunBlocking(cmd.zone, cmd.minutes);
+      break;
+
+    case RCMD_SPIGOT_RUN:
+      sendSpigotRunBlocking(cmd.minutes);
+      break;
+
+    case RCMD_STOP_ZONE:
+      sendStopZoneBlocking(cmd.zone);
+      break;
+
+    case RCMD_STOP_SPIGOTS:
+      sendStopSpigotsBlocking();
+      break;
+
+    case RCMD_ALL_OFF:
+      sendAllOffBlocking();
+      break;
+
+    case RCMD_SEND_SCHEDULE:
+      sendScheduleSlotBlocking(cmd.zone, cmd.hour, cmd.minute, cmd.duration, cmd.enabled);
+      break;
+
+    case RCMD_DELETE_SCHEDULE:
+      deleteScheduleSlotBlocking(cmd.zone, cmd.slot);
+      break;
+
+    case RCMD_RELOAD_STATE:
+      loadRelayState(true);
+      break;
+
+    case RCMD_RELOAD_SCHEDULE:
+      loadRelayState(true);
+      break;
+
+    default:
+      break;
+  }
+}
+
+void relayWorkerTask(void *param) {
+  relayWorkerReady = true;
+  AsyncRelayCommand cmd;
+
+  for (;;) {
+    if (xQueueReceive(relayCommandQueue, &cmd, pdMS_TO_TICKS(25)) == pdTRUE) {
+      relayIoBusy = true;
+      processRelayCommandBlocking(cmd);
+      relayIoBusy = false;
+      vTaskDelay(pdMS_TO_TICKS(5));
+      continue;
+    }
+
+    relayIoBusy = true;
+    pollRelayTasksBlocking();
+    relayIoBusy = false;
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+bool sendManualRunBlocking(int zoneNumber, int minutes) {
   zoneNumber = constrain(zoneNumber, 1, 5);
   minutes = constrain(minutes, 1, 240);
   cfg.lastSelectedZone = zoneNumber;
@@ -2807,7 +3051,7 @@ bool sendManualRun(int zoneNumber, int minutes) {
   return ok;
 }
 
-bool sendSpigotRun(int minutes) {
+bool sendSpigotRunBlocking(int minutes) {
   minutes = constrain(minutes, 1, 240);
   cfg.manualDefaultMinutes = minutes;
   saveConfig();
@@ -2841,7 +3085,7 @@ bool relayGetFirstOk(const String paths[], int pathCount, String &usedPath, Stri
   return false;
 }
 
-bool sendStopZone(int zoneNumber) {
+bool sendStopZoneBlocking(int zoneNumber) {
   zoneNumber = constrain(zoneNumber, 1, 5);
   showCommandPending("Stopping Z" + String(zoneNumber));
 
@@ -2885,7 +3129,7 @@ bool sendStopZone(int zoneNumber) {
   return false;
 }
 
-bool sendStopSpigots() {
+bool sendStopSpigotsBlocking() {
   showCommandPending("Stopping Spigots");
 
   String paths[] = {
@@ -2906,7 +3150,7 @@ bool sendStopSpigots() {
   return ok;
 }
 
-bool sendAllOff() {
+bool sendAllOffBlocking() {
   showCommandPending("Stopping All");
 
   String body, err;
@@ -2934,7 +3178,7 @@ bool sendAllOff() {
   return ok;
 }
 
-bool sendScheduleSlot(int zoneNumber, int hour, int minute, int durationMinutes, bool enabled) {
+bool sendScheduleSlotBlocking(int zoneNumber, int hour, int minute, int durationMinutes, bool enabled) {
   DynamicJsonDocument doc(512);
   JsonObject slot = doc.createNestedObject("schedule");
   slot["zone"] = zoneNumber;
@@ -2965,7 +3209,7 @@ bool sendScheduleSlot(int zoneNumber, int hour, int minute, int durationMinutes,
   return ok;
 }
 
-bool deleteScheduleSlot(int zoneNumber, int slotIndex) {
+bool deleteScheduleSlotBlocking(int zoneNumber, int slotIndex) {
   showCommandPending("Sending...");
   String body, err;
   int code;
@@ -4891,6 +5135,21 @@ bool waterIsActive() {
   return isAnyZoneRunning() || spigotRun.active;
 }
 
+
+bool wakeOnlyInputConsumed() {
+  if (displaySleeping) {
+    wakeDisplay(true);
+    inputSuppressUntilMs = millis() + WAKE_INPUT_SUPPRESS_MS;
+    return true;
+  }
+
+  if (millis() < inputSuppressUntilMs) {
+    return true;
+  }
+
+  return false;
+}
+
 void noteUserInteraction() {
   lastUserInteractionMs = millis();
   wakeDisplay(true);
@@ -4973,6 +5232,7 @@ void openScheduleEditor() {
 }
 
 void shortPress() {
+  if (wakeOnlyInputConsumed()) return;
   acceptedFeedback();
   switch (screen) {
     case SCR_HOME:
@@ -5035,6 +5295,7 @@ void shortPress() {
 }
 
 void longPress() {
+  if (wakeOnlyInputConsumed()) return;
   acceptedFeedback();
   switch (screen) {
     case SCR_RUNNING:
@@ -5065,6 +5326,7 @@ void longPress() {
 }
 
 void emergencyPress() {
+  if (wakeOnlyInputConsumed()) return;
   if (cfg.emergencyDirectStop || screen == SCR_RUNNING) {
     sendAllOff();
     go(SCR_HOME);
@@ -5075,6 +5337,7 @@ void emergencyPress() {
 
 void rotateUI(int delta) {
   if (delta == 0) return;
+  if (wakeOnlyInputConsumed()) return;
   noteUserInteraction();
   acceptedFeedback();
 
@@ -5183,6 +5446,7 @@ void rotateUI(int delta) {
 }
 
 void handleTouchTap(int x, int y) {
+  if (wakeOnlyInputConsumed()) return;
   noteUserInteraction();
   acceptedFeedback();
 
@@ -5334,6 +5598,14 @@ void processInput() {
   uint32_t now = millis();
 
   if (level == LOW && !buttonPressed) {
+    if (wakeOnlyInputConsumed()) {
+      buttonPressed = true;
+      buttonDownMs = now;
+      emergencyPressSent = false;
+      longPressSent = true;
+      cancelTouchForButtonPress();
+      return;
+    }
     noteUserInteraction();
     buttonPressed = true;
     buttonDownMs = now;
@@ -5383,6 +5655,13 @@ void processInput() {
     return;
   }
 
+  if (tp.touched && wakeOnlyInputConsumed()) {
+    touchWasDown = false;
+    lastTouch.touched = false;
+    touchStart.touched = false;
+    return;
+  }
+
   if (tp.touched) {
     lastTouch = tp;
     if (!touchWasDown) {
@@ -5421,6 +5700,11 @@ void processInput() {
         scheduleSlot = 0;
         needsRedraw = true;
       } else {
+        if (wakeOnlyInputConsumed()) {
+          lastTouch.touched = false;
+          touchStart.touched = false;
+          return;
+        }
         handleTouchTap(lastTouch.x, lastTouch.y);
       }
     }
@@ -5488,7 +5772,12 @@ void requestRedrawIfUiStateChanged() {
   }
 }
 
-void pollRelayTasks() {
+void pollRelayTasksBlocking() {
+  // Keep the UI responsive: defer background polling briefly during active user interaction.
+  // Manual commands still call their HTTP directly; this only delays automatic state/schedule/time polls.
+  if (!commandPending && (millis() - lastUserInteractionMs < 120)) {
+    return;
+  }
   uint32_t now = millis();
   uint32_t stateInterval = (isAnyZoneRunning() || spigotRun.active || screen == SCR_RUNNING) ? 1000 : 2000;
   if (now - lastStatePollMs > stateInterval) {
@@ -5518,18 +5807,44 @@ void pollRelayTasks() {
   }
 }
 
+void pollRelayTasks() {
+  // UI loop is non-blocking. The worker task performs relay HTTP on core 0.
+  if (!relayCommandQueue || !relayWorkerReady) return;
+
+  uint32_t now = millis();
+
+  uint32_t stateInterval = (isAnyZoneRunning() || spigotRun.active || screen == SCR_RUNNING) ? 1000 : 2000;
+  if (now - lastAsyncStatePollMs > stateInterval) {
+    lastAsyncStatePollMs = now;
+    AsyncRelayCommand cmd;
+    cmd.type = RCMD_RELOAD_STATE;
+    enqueueRelayCommand(cmd, false);
+  }
+
+  if (now - lastAsyncSchedulePollMs > 30000) {
+    lastAsyncSchedulePollMs = now;
+    AsyncRelayCommand cmd;
+    cmd.type = RCMD_RELOAD_SCHEDULE;
+    enqueueRelayCommand(cmd, false);
+  }
+}
+
 
 void sleepDisplay() {
   if (displaySleeping) return;
   displaySleeping = true;
 
+  // Turn off the actual CrowPanel backlight. The firmware uses TFT_BLK, not TFT_BL/GFX_BL.
+  analogWrite(TFT_BLK, 0);
+
 #if defined(TFT_BL)
   digitalWrite(TFT_BL, LOW);
-#elif defined(GFX_BL)
+#endif
+#if defined(GFX_BL)
   digitalWrite(GFX_BL, LOW);
 #endif
 
-  // Do not draw a blank frame; ask the TFT controller to sleep/display-off directly.
+  // Ask the hardware panel to turn off; do not draw a black frame.
   (panelGfx ? panelGfx : gfx)->displayOff();
 }
 
@@ -5539,9 +5854,13 @@ void wakeDisplay(bool redraw) {
 
   (panelGfx ? panelGfx : gfx)->displayOn();
 
+  // Restore the actual CrowPanel backlight brightness.
+  analogWrite(TFT_BLK, cfg.brightness);
+
 #if defined(TFT_BL)
   digitalWrite(TFT_BL, HIGH);
-#elif defined(GFX_BL)
+#endif
+#if defined(GFX_BL)
   digitalWrite(GFX_BL, HIGH);
 #endif
 
@@ -5552,13 +5871,14 @@ void wakeDisplay(bool redraw) {
 
 void handleDisplaySleepTask() {
   bool watering = waterIsActive();
+  uint32_t now = millis();
 
   if (watering) {
     wakeDisplay(true);
     return;
   }
 
-  if (!displaySleeping && (millis() - lastUserInteractionMs >= DISPLAY_SLEEP_IDLE_MS)) {
+  if (!displaySleeping && (now - lastUserInteractionMs >= DISPLAY_SLEEP_IDLE_MS)) {
     sleepDisplay();
   }
 }
@@ -5643,6 +5963,7 @@ void setup() {
   initEncoder();
   setupWiFi();
   setupWebServer();
+  startRelayWorker();
   clearRuns();
 
   lastStatePollMs = millis() - 2500;
@@ -5654,6 +5975,7 @@ void setup() {
   durationMinutes = cfg.manualDefaultMinutes;
   screen = cfg.staSsid.length() == 0 ? SCR_SETUP_ERROR : SCR_HOME;
   updateZoneLeds(true);
+  lastUserInteractionMs = millis();
   needsRedraw = true;
 }
 
@@ -5691,8 +6013,9 @@ void loop() {
   processInput();
   pollRelayTasks();
   updateScreenAutoMode();
+  handleDisplaySleepTask();
 
-  if (millis() < commandMessageUntil) needsRedraw = true;
+  if (!displaySleeping && millis() < commandMessageUntil) needsRedraw = true;
 
   updateZoneLeds(false);
 
