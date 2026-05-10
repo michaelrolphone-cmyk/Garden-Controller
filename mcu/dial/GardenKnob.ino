@@ -1983,6 +1983,12 @@ static volatile bool relayIoBusy = false;
 static uint32_t lastAsyncStatePollMs = 0;
 static uint32_t lastAsyncSchedulePollMs = 0;
 
+static const uint32_t RELAY_STALE_MS = 15000;
+static const uint8_t RELAY_FAILS_TO_DISCONNECT = 3;
+static volatile uint32_t lastRelaySuccessMs = 0;
+static volatile uint8_t relayConsecutiveFailures = 0;
+
+
 // Forward declarations for helpers that are called before their definitions.
 // These stop Arduino's auto-prototype generator from creating broken prototypes.
 void drawUI();
@@ -1991,6 +1997,9 @@ void relayWorkerTask(void *param);
 void startRelayWorker();
 void processRelayCommandBlocking(const AsyncRelayCommand &cmd);
 void pollRelayTasksBlocking();
+void markRelaySuccess();
+void markRelayFailure(const String &err);
+bool relayConnectionIsUsable();
 void presentDisplay();
 void updateZoneLeds(bool force = false);
 String buildUiStateSignature();
@@ -1998,6 +2007,7 @@ void requestRedrawIfUiStateChanged();
 void go(ScreenId s);
 void emergencyPress();
 bool waterIsActive();
+bool waterIsActiveForDisplay();
 void noteUserInteraction();
 void setScreen(ScreenId s, bool userNavigation);
 void sleepDisplay();
@@ -2229,6 +2239,11 @@ uint32_t lastSchedulePollMs = 0;
 uint32_t lastTimePollMs = 0;
 uint32_t lastWeatherPollMs = 0;
 uint32_t lastGoodStateMs = 0;
+static const uint32_t LOCAL_RUN_STALE_GRACE_MS = 30000;
+static const uint32_t RUNNING_SCREEN_GRACE_MS = 7000;   // prevent async poll gaps from bouncing to carousel
+uint32_t lastWateringObservedMs = 0;
+  // keep last known countdown during async relay refresh gaps
+
 uint32_t commandMessageUntil = 0;
 
 uint32_t lastLedUpdateMs = 0;
@@ -2306,8 +2321,13 @@ int activeZoneCount() {
 
 long localRemaining(const RunItem &r) {
   if (!r.active) return 0;
+
+  // Unknown remaining time means the relay did not provide timer data.
+  // Keep the item active, but render as unknown instead of forcing it off.
   if (r.remainingSeconds < 0) return -1;
-  long elapsed = (millis() - r.lastUpdateMs) / 1000;
+
+  uint32_t now = millis();
+  long elapsed = (long)((now - r.lastUpdateMs) / 1000);
   long rem = r.remainingSeconds - elapsed;
   if (rem < 0) rem = 0;
   return rem;
@@ -2348,7 +2368,7 @@ uint32_t spigotLedColor() {
 
 uint32_t statusLedColor() {
   if (commandPending) return pixels.Color(255, 190, 0);
-  if (!relayConnected) return pixels.Color(120, 0, 0);
+  if (!relayConnectionIsUsable()) return pixels.Color(120, 0, 0);
   return pixels.Color(0, 28, 8);
 }
 
@@ -2404,24 +2424,79 @@ void clearRuns() {
   spigotRun.spigot = true;
 }
 
+
+bool runStillHasLocalTime(const RunItem &r) {
+  if (!r.active) return false;
+  if (r.remainingSeconds < 0) return true;
+  return localRemaining(r) > 0;
+}
+
+void preserveRunCountdownFromOld(RunItem &dst, const RunItem &oldRun) {
+  if (!oldRun.active) return;
+
+  long oldRemaining = localRemaining(oldRun);
+  if (oldRemaining > 0) {
+    dst.remainingSeconds = oldRemaining;
+    dst.durationSeconds = oldRun.durationSeconds > 0 ? oldRun.durationSeconds : oldRemaining;
+    dst.lastUpdateMs = millis();
+  } else if (oldRun.remainingSeconds < 0) {
+    // Relay said the run was active, but never provided time data.
+    dst.remainingSeconds = -1;
+    dst.durationSeconds = oldRun.durationSeconds;
+    dst.lastUpdateMs = millis();
+  }
+}
+
+void restoreLocalRunSnapshot(const RunItem oldZones[5], const RunItem &oldSpigot) {
+  for (int i = 0; i < 5; i++) {
+    if (runStillHasLocalTime(oldZones[i])) {
+      zoneRuns[i] = oldZones[i];
+      preserveRunCountdownFromOld(zoneRuns[i], oldZones[i]);
+    }
+  }
+
+  if (runStillHasLocalTime(oldSpigot)) {
+    spigotRun = oldSpigot;
+    spigotRun.spigot = true;
+    preserveRunCountdownFromOld(spigotRun, oldSpigot);
+  }
+}
+
 void applyRunItem(int zoneNumber, bool spigot, bool active, long remainingSec, long durationSec) {
+  RunItem oldRun;
   if (spigot) {
+    oldRun = spigotRun;
+
     spigotRun.active = active;
     spigotRun.spigot = true;
     spigotRun.zoneNumber = 0;
     spigotRun.remainingSeconds = remainingSec;
     spigotRun.durationSeconds = durationSec;
     spigotRun.lastUpdateMs = millis();
+
+    if (active && (remainingSec < 0 || durationSec < 0)) {
+      preserveRunCountdownFromOld(spigotRun, oldRun);
+      if (durationSec >= 0) spigotRun.durationSeconds = durationSec;
+    }
     return;
   }
+
   if (zoneNumber < 1 || zoneNumber > 5) return;
+
   RunItem &r = zoneRuns[zoneNumber - 1];
+  oldRun = r;
+
   r.active = active;
   r.spigot = false;
   r.zoneNumber = zoneNumber;
   r.remainingSeconds = remainingSec;
   r.durationSeconds = durationSec;
   r.lastUpdateMs = millis();
+
+  if (active && (remainingSec < 0 || durationSec < 0)) {
+    preserveRunCountdownFromOld(r, oldRun);
+    if (durationSec >= 0) r.durationSeconds = durationSec;
+  }
 }
 
 long readSeconds(JsonObjectConst obj) {
@@ -2654,6 +2729,23 @@ void parseSchedules(JsonDocument &doc) {
 }
 
 void parseState(JsonDocument &doc) {
+  RunItem oldZones[5];
+  for (int i = 0; i < 5; i++) oldZones[i] = zoneRuns[i];
+  RunItem oldSpigot = spigotRun;
+
+  bool oldHadLocalRun = false;
+  for (int i = 0; i < 5; i++) {
+    if (runStillHasLocalTime(oldZones[i])) oldHadLocalRun = true;
+  }
+  if (runStillHasLocalTime(oldSpigot)) oldHadLocalRun = true;
+
+  bool hasRunData =
+    doc["currentRun"].is<JsonObjectConst>() ||
+    doc["currentSpigotRun"].is<JsonObjectConst>() ||
+    doc["spigotRun"].is<JsonObjectConst>() ||
+    doc["zoneRuns"].is<JsonArrayConst>() ||
+    doc["relays"].is<JsonArrayConst>();
+
   clearRuns();
   parseRelayZoneColors(doc);
 
@@ -2683,11 +2775,24 @@ void parseState(JsonDocument &doc) {
     }
   }
 
+  // Some relay responses are valid but do not include run/timer data. With async
+  // polling, those partial responses must not blank the running display or reset
+  // the LEDs. Keep counting down from the last known remaining time until a real
+  // run payload refreshes it or the local timer reaches zero.
+  bool parsedHasActiveRun = waterIsActive();
+
+  if (!hasRunData || (oldHadLocalRun && !parsedHasActiveRun && relayConnectionIsUsable())) {
+    restoreLocalRunSnapshot(oldZones, oldSpigot);
+  }
+
+  if (waterIsActive()) {
+    lastWateringObservedMs = millis();
+  }
+
   parseSchedules(doc);
 
-  relayConnected = true;
-  relayError = "";
-  relayStatusText = "Connected";
+  markRelaySuccess();
+  relayStatusText = scheduleLoaded ? "Connected" : "state loaded, schedule not loaded";
   lastGoodStateMs = millis();
   updateZoneLeds(true);
 }
@@ -2700,16 +2805,45 @@ String joinUrl(const String &base, const String &path) {
   return base + path;
 }
 
+
+void markRelaySuccess() {
+  lastRelaySuccessMs = millis();
+  relayConsecutiveFailures = 0;
+  relayConnected = true;
+  relayError = "";
+}
+
+void markRelayFailure(const String &err) {
+  relayConsecutiveFailures++;
+  relayError = err;
+
+  // Async HTTP can be slow or briefly fail. Do not flicker disconnected from a
+  // single delayed background poll while the last known relay state is still fresh.
+  uint32_t now = millis();
+  bool stale = (lastRelaySuccessMs == 0) || (now - lastRelaySuccessMs > RELAY_STALE_MS);
+  if (relayConsecutiveFailures >= RELAY_FAILS_TO_DISCONNECT && stale) {
+    relayConnected = false;
+  }
+}
+
+bool relayConnectionIsUsable() {
+  if (relayConnected) return true;
+  if (lastRelaySuccessMs == 0) return false;
+  return (millis() - lastRelaySuccessMs) <= RELAY_STALE_MS;
+}
+
 bool relayGetRaw(const String &path, String &body, int &httpCode, String &err) {
   if (cfg.relayBaseUrl.length() == 0) {
     err = "relay URL blank";
     httpCode = -1;
+    markRelayFailure(err);
     return false;
   }
 
   if (WiFi.status() != WL_CONNECTED) {
     err = "station Wi-Fi disconnected";
     httpCode = -1;
+    markRelayFailure(err);
     return false;
   }
 
@@ -2721,6 +2855,7 @@ bool relayGetRaw(const String &path, String &body, int &httpCode, String &err) {
   if (!http.begin(client, url)) {
     err = "relay HTTP begin failed";
     httpCode = -1;
+    markRelayFailure(err);
     return false;
   }
 
@@ -2737,6 +2872,7 @@ bool relayGetRaw(const String &path, String &body, int &httpCode, String &err) {
   if (httpCode <= 0) {
     err = "relay request failed";
     http.end();
+    markRelayFailure(err);
     return false;
   }
 
@@ -2750,10 +2886,12 @@ bool relayGetRaw(const String &path, String &body, int &httpCode, String &err) {
 
   if (httpCode < 200 || httpCode >= 300) {
     err = "relay returned HTTP " + String(httpCode);
+    markRelayFailure(err);
     return false;
   }
 
   err = "";
+  markRelaySuccess();
   return true;
 }
 
@@ -2761,12 +2899,14 @@ bool relayPostJson(const String &path, const String &payload, String &body, int 
   if (cfg.relayBaseUrl.length() == 0) {
     err = "relay URL blank";
     httpCode = -1;
+    markRelayFailure(err);
     return false;
   }
 
   if (WiFi.status() != WL_CONNECTED) {
     err = "station Wi-Fi disconnected";
     httpCode = -1;
+    markRelayFailure(err);
     return false;
   }
 
@@ -2778,6 +2918,7 @@ bool relayPostJson(const String &path, const String &payload, String &body, int 
   if (!http.begin(client, url)) {
     err = "relay HTTP begin failed";
     httpCode = -1;
+    markRelayFailure(err);
     return false;
   }
 
@@ -2795,6 +2936,7 @@ bool relayPostJson(const String &path, const String &payload, String &body, int 
   if (httpCode <= 0) {
     err = "relay request failed";
     http.end();
+    markRelayFailure(err);
     return false;
   }
 
@@ -2808,10 +2950,12 @@ bool relayPostJson(const String &path, const String &payload, String &body, int 
 
   if (httpCode < 200 || httpCode >= 300) {
     err = "relay returned HTTP " + String(httpCode);
+    markRelayFailure(err);
     return false;
   }
 
   err = "";
+  markRelaySuccess();
   return true;
 }
 
@@ -2822,7 +2966,7 @@ bool loadRelayState(bool fallbackOk = true) {
   if (!ok && fallbackOk) ok = relayGetRaw("/status", body, code, err);
 
   if (!ok) {
-    relayConnected = false;
+    markRelayFailure(err.length() ? err : "relay state unavailable");
     relayError = err + (code > 0 ? " HTTP " + String(code) : "");
     relayStatusText = relayError;
     return false;
@@ -2831,7 +2975,7 @@ bool loadRelayState(bool fallbackOk = true) {
   DynamicJsonDocument doc(16384);
   DeserializationError jerr = deserializeJson(doc, body);
   if (jerr) {
-    relayConnected = false;
+    markRelayFailure(err.length() ? err : "relay state unavailable");
     relayError = "relay JSON parse failed";
     relayStatusText = relayError;
     return false;
@@ -2912,13 +3056,56 @@ void startRelayWorker() {
   }
 }
 
+
+void startOptimisticLocalRun(int zoneNumber, bool spigot, int minutes) {
+  minutes = constrain(minutes, 1, 240);
+  long seconds = (long)minutes * 60L;
+
+  if (spigot) {
+    spigotRun.active = true;
+    spigotRun.spigot = true;
+    spigotRun.zoneNumber = 0;
+    spigotRun.remainingSeconds = seconds;
+    spigotRun.durationSeconds = seconds;
+    spigotRun.lastUpdateMs = millis();
+  } else if (zoneNumber >= 1 && zoneNumber <= 5) {
+    RunItem &r = zoneRuns[zoneNumber - 1];
+    r.active = true;
+    r.spigot = false;
+    r.zoneNumber = zoneNumber;
+    r.remainingSeconds = seconds;
+    r.durationSeconds = seconds;
+    r.lastUpdateMs = millis();
+  }
+
+  lastWateringObservedMs = millis();
+  userLeftRunningScreen = false;
+  needsRedraw = true;
+  updateZoneLeds(true);
+}
+
 bool sendManualRun(int zoneNumber, int minutes) {
   AsyncRelayCommand cmd;
   cmd.type = RCMD_MANUAL_RUN;
   cmd.zone = constrain(zoneNumber, 1, 5);
   cmd.minutes = constrain(minutes, 1, 240);
   showCommandPending("Starting Z" + String(cmd.zone));
-  return enqueueRelayCommand(cmd, true);
+
+  bool queued = enqueueRelayCommand(cmd, true);
+  if (!queued) {
+    lastCommandText = "Relay Busy";
+    clearCommandPending();
+    return false;
+  }
+
+  cfg.lastSelectedZone = cmd.zone;
+  cfg.manualDefaultMinutes = cmd.minutes;
+  saveConfig();
+
+  // Same behavior as spigots: once the command is queued, show the local countdown
+  // immediately and let the async worker reconcile with relay state later.
+  startOptimisticLocalRun(cmd.zone, false, cmd.minutes);
+  return true;
 }
 
 bool sendSpigotRun(int minutes) {
@@ -2926,7 +3113,18 @@ bool sendSpigotRun(int minutes) {
   cmd.type = RCMD_SPIGOT_RUN;
   cmd.minutes = constrain(minutes, 1, 240);
   showCommandPending("Starting Spigot");
-  return enqueueRelayCommand(cmd, true);
+
+  bool queued = enqueueRelayCommand(cmd, true);
+  if (!queued) {
+    lastCommandText = "Relay Busy";
+    clearCommandPending();
+    return false;
+  }
+
+  cfg.manualDefaultMinutes = cmd.minutes;
+  saveConfig();
+  startOptimisticLocalRun(0, true, cmd.minutes);
+  return true;
 }
 
 bool sendStopZone(int zoneNumber) {
@@ -3038,31 +3236,48 @@ void relayWorkerTask(void *param) {
 bool sendManualRunBlocking(int zoneNumber, int minutes) {
   zoneNumber = constrain(zoneNumber, 1, 5);
   minutes = constrain(minutes, 1, 240);
-  cfg.lastSelectedZone = zoneNumber;
-  cfg.manualDefaultMinutes = minutes;
-  saveConfig();
-  showCommandPending("Sending...");
+
   String body, err;
-  int code;
+  int code = 0;
   bool ok = relayGetRaw("/api/manual-run?zone=" + String(zoneNumber) + "&minutes=" + String(minutes), body, code, err);
-  lastCommandText = ok ? "Started Zone " + String(zoneNumber) : "Command Failed /api/manual-run " + err + (code > 0 ? " HTTP " + String(code) : "");
-  clearCommandPending();
+
+  // The relay can accept/start the zone even when the HTTP response is delayed
+  // or times out. Refresh state before deciding what message to show.
   loadRelayState(true);
-  return ok;
+
+  bool activeNow = zoneRuns[zoneNumber - 1].active;
+  if (ok || activeNow) {
+    lastCommandText = "Started Zone " + String(zoneNumber);
+  } else {
+    // Avoid a false connection-failed message while async relay I/O catches up.
+    lastCommandText = relayConnectionIsUsable() ? "Zone Start Sent" : "Zone Start Pending";
+  }
+
+  clearCommandPending();
+  return ok || activeNow;
 }
 
 bool sendSpigotRunBlocking(int minutes) {
   minutes = constrain(minutes, 1, 240);
-  cfg.manualDefaultMinutes = minutes;
-  saveConfig();
-  showCommandPending("Sending...");
+
   String body, err;
-  int code;
+  int code = 0;
   bool ok = relayGetRaw("/api/spigots-run?minutes=" + String(minutes), body, code, err);
-  lastCommandText = ok ? "Spigots On" : "Command Failed /api/spigots-run " + err + (code > 0 ? " HTTP " + String(code) : "");
-  clearCommandPending();
+
+  // A command can succeed on the relay even if the HTTP response times out.
+  // Always refresh state before reporting failure.
   loadRelayState(true);
-  return ok;
+
+  bool activeNow = spigotRun.active;
+  if (ok || activeNow) {
+    lastCommandText = "Spigots On";
+  } else {
+    // Avoid false "connection failed" while async relay I/O is still catching up.
+    lastCommandText = relayConnectionIsUsable() ? "Spigot Start Sent" : "Spigot Start Pending";
+  }
+
+  clearCommandPending();
+  return ok || activeNow;
 }
 
 
@@ -3494,7 +3709,7 @@ bool scheduleAddMode = false;
 int editHour = 6;
 int editMinute = 0;
 int editDuration = cfg.manualDefaultMinutes;
-int editField = 0; // 0 hour, 1 minute, 2 duration, 3 save, 4 cancel, 5 delete
+int editField = 0; // schedule editor: 0 start hour, 1 start minute, 2 run duration minutes, 3 save, 4 reserved/cancel, 5 delete
 
 bool needsRedraw = true;
 bool forceFullScreenClear = true;
@@ -3695,7 +3910,7 @@ uint16_t dimColor(uint16_t c) {
 }
 
 void drawConnectionDot() {
-  uint16_t c = commandPending ? C_AMBER : (relayConnected ? C_GREEN : C_RED);
+  uint16_t c = commandPending ? C_AMBER : (relayConnectionIsUsable() ? C_GREEN : C_RED);
   gfx->fillCircle(120, 14, 4, c);
   gfx->drawCircle(120, 14, 7, C_PANEL);
 }
@@ -4941,13 +5156,31 @@ void drawScheduleEdit() {
   drawConnectionDot();
   drawPlainTitle("Zone " + String(scheduleZone), scheduleAddMode ? "Add Schedule" : "Edit Schedule", C_ZONE3);
 
-  String line = fmtTime12(editHour, editMinute);
+  // Start time is edited as two separate inputs: hour of day and minute of hour.
+  // They are combined back into one scheduled start time when saving.
+  gfx->setTextSize(1);
+  gfx->setTextColor(C_SOFT_TEXT);
+  gfx->setCursor(62, 62);
+  gfx->print("Start time");
 
-  gfx->drawRoundRect(48, 82, 144, 38, 8, editField <= 1 ? C_AMBER : C_PANEL);
-  drawCenteredText(line, 91, 3, editField <= 1 ? C_AMBER : C_TEXT);
+  gfx->drawRoundRect(34, 78, 80, 42, 8, editField == 0 ? C_AMBER : C_PANEL);
+  drawCenteredText(String(editHour) + " h", 86, 2, editField == 0 ? C_AMBER : C_TEXT);
+  gfx->setTextSize(1);
+  gfx->setTextColor(C_SOFT_TEXT);
+  gfx->setCursor(58, 124);
+  gfx->print("hour");
 
-  gfx->drawRoundRect(48, 130, 144, 30, 8, editField == 2 ? C_AMBER : C_PANEL);
-  drawCenteredText(String(editDuration) + " min", 137, 2, editField == 2 ? C_AMBER : C_TEXT);
+  gfx->drawRoundRect(126, 78, 80, 42, 8, editField == 1 ? C_AMBER : C_PANEL);
+  char minuteBuf[8];
+  snprintf(minuteBuf, sizeof(minuteBuf), "%02d m", editMinute);
+  drawCenteredText(String(minuteBuf), 86, 2, editField == 1 ? C_AMBER : C_TEXT);
+  gfx->setTextSize(1);
+  gfx->setTextColor(C_SOFT_TEXT);
+  gfx->setCursor(145, 124);
+  gfx->print("minute");
+
+  gfx->drawRoundRect(48, 142, 144, 30, 8, editField == 2 ? C_AMBER : C_PANEL);
+  drawCenteredText("Run " + String(editDuration) + " min", 149, 2, editField == 2 ? C_AMBER : C_TEXT);
 
   if (!scheduleAddMode) {
     drawRoundButton(34, SAFE_BOTTOM_BUTTON_Y, 78, 26, "Delete", editField == 5 ? C_RED : C_BUTTON, editField == 5 ? C_RED : C_DIM, C_TEXT);
@@ -4992,13 +5225,13 @@ void drawDiagnostics() {
 
   String sta = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "not connected";
   String ap = WiFi.softAPIP().toString();
-  String relay = relayConnected ? "OK" : "FAIL";
+  String relay = relayConnectionIsUsable() ? "OK" : "FAIL";
   String heap = String(ESP.getFreeHeap());
 
   if (diagnosticsPage == 0) {
     drawMetricRow(86, "STA", sta.substring(0, 18), C_MINT);
     drawMetricRow(108, "AP", ap, C_MINT);
-    drawMetricRow(130, "Relay", relay, relayConnected ? C_GREEN : C_RED);
+    drawMetricRow(130, "Relay", relay, relayConnectionIsUsable() ? C_GREEN : C_RED);
     drawMetricRow(152, "Heap", heap, C_MINT);
   } else {
     drawMetricRow(86, "Touch", touchWasDown ? "down" : "idle", C_MINT);
@@ -5013,7 +5246,11 @@ void drawDiagnostics() {
 
 
 bool screenAllowsBack() {
-  return screen != SCR_HOME;
+  // The running/timer screen is the primary live status view while watering.
+  // It should not show the universal left-edge back button; navigation away is
+  // handled by the running-screen controls/rotary behavior instead.
+  if (screen == SCR_HOME || screen == SCR_RUNNING) return false;
+  return true;
 }
 
 void performBackGesture() {
@@ -5056,7 +5293,7 @@ void performBackGesture() {
 }
 
 void drawBackEdge() {
-  if (!screenAllowsBack()) return;
+  if (!screenAllowsBack() || screen == SCR_RUNNING) return;
 
   gfx->fillRoundRect(0, 40, BACK_EDGE_W, 160, 8, C_RED);
 
@@ -5133,6 +5370,22 @@ void stopDisplayedRunContext() {
 
 bool waterIsActive() {
   return isAnyZoneRunning() || spigotRun.active;
+}
+
+bool waterIsActiveForDisplay() {
+  if (waterIsActive()) {
+    lastWateringObservedMs = millis();
+    return true;
+  }
+
+  // Async relay polling can briefly clear run state while a worker request is pending
+  // or while a partial response is being reconciled. Do not bounce the UI to Home
+  // immediately; keep the running meter stable for a short grace period.
+  if (lastWateringObservedMs > 0 && millis() - lastWateringObservedMs <= RUNNING_SCREEN_GRACE_MS) {
+    return true;
+  }
+
+  return false;
 }
 
 
@@ -5242,9 +5495,10 @@ void shortPress() {
       selectCurrentZoneItem();
       break;
     case SCR_DURATION:
-      if (durationTarget == DUR_ZONE) sendManualRun(selectedZone, durationMinutes);
-      else sendSpigotRun(durationMinutes);
-      go(SCR_RUNNING);
+      bool queued = false;
+        if (durationTarget == DUR_ZONE) queued = sendManualRun(selectedZone, durationMinutes);
+        else queued = sendSpigotRun(durationMinutes);
+        if (queued) go(SCR_RUNNING);
       break;
     case SCR_RUNNING:
       stopDisplayedRunContext();
@@ -5259,11 +5513,14 @@ void shortPress() {
       }
       break;
     case SCR_SCHEDULE_EDIT:
-      if (editField < 2) {
-        // Accept this input and move to the next input.
-        editField++;
+      if (editField == 0) {
+        // Accept start-hour and move to start-minute.
+        editField = 1;
+      } else if (editField == 1) {
+        // Accept start-minute and move to run-duration minutes.
+        editField = 2;
       } else if (editField == 2) {
-        // Duration is the last form input. Press saves the edit/new schedule.
+        // Run duration minutes is the last form input. Press saves the schedule.
         if (!scheduleAddMode) deleteScheduleSlot(scheduleZone, scheduleSlot);
         sendScheduleSlot(scheduleZone, editHour, editMinute, editDuration, true);
         scheduleZonePickerMode = false;
@@ -5491,9 +5748,10 @@ void handleTouchTap(int x, int y) {
     if (x >= 44 && x <= 116 && y >= 172 && y <= 206) {
       go(SCR_ZONE_SELECT);
     } else if (x >= 124 && x <= 196 && y >= 172 && y <= 206) {
-      if (durationTarget == DUR_ZONE) sendManualRun(selectedZone, durationMinutes);
-      else sendSpigotRun(durationMinutes);
-      go(SCR_RUNNING);
+      bool queued = false;
+      if (durationTarget == DUR_ZONE) queued = sendManualRun(selectedZone, durationMinutes);
+      else queued = sendSpigotRun(durationMinutes);
+      if (queued) go(SCR_RUNNING);
     } else if (y < 120) {
       durationMinutes = constrain(durationMinutes + 1, 1, 240);
       needsRedraw = true;
@@ -5544,18 +5802,21 @@ void handleTouchTap(int x, int y) {
   }
 
   if (screen == SCR_SCHEDULE_EDIT) {
-    if (!scheduleAddMode && x >= 30 && x <= 116 && y >= 170 && y <= 208) {
+    if (!scheduleAddMode && x >= 30 && x <= 116 && y >= SAFE_BOTTOM_BUTTON_Y && y <= SAFE_BOTTOM_BUTTON_Y + 34) {
       deleteScheduleSlot(scheduleZone, scheduleSlot);
       go(SCR_SCHEDULE);
-    } else if (x >= 124 && x <= 214 && y >= 170 && y <= 208) {
+    } else if (x >= 124 && x <= 214 && y >= SAFE_BOTTOM_BUTTON_Y && y <= SAFE_BOTTOM_BUTTON_Y + 34) {
       if (!scheduleAddMode) deleteScheduleSlot(scheduleZone, scheduleSlot);
       sendScheduleSlot(scheduleZone, editHour, editMinute, editDuration, true);
       go(SCR_SCHEDULE);
-    } else if (y < 105) {
-      editField = 0;
+    } else if (y >= 72 && y <= 128 && x < 120) {
+      editField = 0; // start hour
       needsRedraw = true;
-    } else if (y < 155) {
-      editField = 2;
+    } else if (y >= 72 && y <= 128 && x >= 120) {
+      editField = 1; // start minute
+      needsRedraw = true;
+    } else if (y >= 134 && y <= 178) {
+      editField = 2; // run duration minutes
       needsRedraw = true;
     }
     return;
@@ -5745,9 +6006,12 @@ String buildRedrawStateSignature() {
   s += "|schedSlot=" + String(scheduleSlot);
   s += "|schedPicker=" + String(scheduleZonePickerMode ? 1 : 0);
   s += "|editField=" + String(editField);
-  s += "|relay=" + String(relayConnected ? 1 : 0);
+  s += "|editHour=" + String(editHour);
+  s += "|editMinute=" + String(editMinute);
+  s += "|editDuration=" + String(editDuration);
+  s += "|relay=" + String(relayConnectionIsUsable() ? 1 : 0);
   s += "|schedLoaded=" + String(scheduleLoaded ? 1 : 0);
-  s += "|water=" + String(waterIsActive() ? 1 : 0);
+  s += "|water=" + String(waterIsActiveForDisplay() ? 1 : 0);
   s += "|spigotActive=" + String(spigotRun.active ? 1 : 0);
   s += "|runningIdx=" + String(runningDisplayIndex);
 
@@ -5810,6 +6074,7 @@ void pollRelayTasksBlocking() {
 void pollRelayTasks() {
   // UI loop is non-blocking. The worker task performs relay HTTP on core 0.
   if (!relayCommandQueue || !relayWorkerReady) return;
+  if (relayIoBusy) return;
 
   uint32_t now = millis();
 
@@ -5870,7 +6135,7 @@ void wakeDisplay(bool redraw) {
 }
 
 void handleDisplaySleepTask() {
-  bool watering = waterIsActive();
+  bool watering = waterIsActiveForDisplay();
   uint32_t now = millis();
 
   if (watering) {
@@ -5883,27 +6148,53 @@ void handleDisplaySleepTask() {
   }
 }
 
+
+void expireLocalFinishedRuns() {
+  bool changed = false;
+
+  for (int i = 0; i < 5; i++) {
+    if (zoneRuns[i].active && zoneRuns[i].remainingSeconds >= 0 && localRemaining(zoneRuns[i]) <= 0) {
+      zoneRuns[i].active = false;
+      changed = true;
+    }
+  }
+
+  if (spigotRun.active && spigotRun.remainingSeconds >= 0 && localRemaining(spigotRun) <= 0) {
+    spigotRun.active = false;
+    changed = true;
+  }
+
+  if (waterIsActive()) {
+    lastWateringObservedMs = millis();
+  }
+
+  if (changed) {
+    needsRedraw = true;
+    updateZoneLeds(true);
+  }
+}
+
 void updateScreenAutoMode() {
-  bool watering = waterIsActive();
+  bool actualWatering = waterIsActive();
+  bool displayWatering = waterIsActiveForDisplay();
   uint32_t now = millis();
 
-  if (watering) {
+  if (actualWatering) {
     wakeDisplay(true);
   }
 
-  if (watering && !wasWateringActive) {
-    // A watering cycle just started. The countdown screen is the default.
+  if (displayWatering && !wasWateringActive) {
+    // A watering cycle just started, or async networking briefly hid it.
+    // The countdown screen remains the default.
     userLeftRunningScreen = false;
     setScreen(SCR_RUNNING, false);
   }
 
-  if (watering) {
+  if (displayWatering) {
     if (screen != SCR_RUNNING && userLeftRunningScreen && (now - lastUserInteractionMs >= RUNNING_RETURN_IDLE_MS)) {
-      // User navigated away, then went idle. Return to the live meter.
       userLeftRunningScreen = false;
       setScreen(SCR_RUNNING, false);
     } else if (screen == SCR_HOME && !userLeftRunningScreen) {
-      // While watering is active, Home is not the default unless the user explicitly navigated there.
       setScreen(SCR_RUNNING, false);
     }
   } else {
@@ -5913,9 +6204,9 @@ void updateScreenAutoMode() {
     }
   }
 
-  wasWateringActive = watering;
+  wasWateringActive = displayWatering;
 
-  if (!relayConnected && cfg.staSsid.length() == 0 && screen == SCR_HOME) {
+  if (!relayConnectionIsUsable() && cfg.staSsid.length() == 0 && screen == SCR_HOME) {
     setScreen(SCR_SETUP_ERROR, false);
   }
 }
@@ -6012,6 +6303,7 @@ void loop() {
 
   processInput();
   pollRelayTasks();
+  expireLocalFinishedRuns();
   updateScreenAutoMode();
   handleDisplaySleepTask();
 
