@@ -108,7 +108,7 @@ struct WeatherSnapshot {
 bool weatherLoaded = false;
 char weatherStatus[96] = "weather not loaded";
 
-const char FIRMWARE_VERSION[] = "v25-multi-zone-runs-compile-fixed";
+const char FIRMWARE_VERSION[] = "v26-stop-zone-api";
 char lastCommandId[48] = "";
 char lastCommandStatus[16] = "";
 
@@ -170,6 +170,7 @@ void handleWeatherGet();
 void updateWeatherFromOpenMeteo();
 void handleRelay();
 void handleManualRun();
+void handleStopZone();
 void handleSpigotRun();
 void handleAllOff();
 void handleBuzzerTest();
@@ -1551,6 +1552,39 @@ void handleManualRun() {
 }
 
 
+void handleStopZone() {
+  if (!server.hasArg("zone")) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing zone\"}");
+    return;
+  }
+
+  int zone = server.arg("zone").toInt();
+  if (zone < 1 || zone > ZONE_COUNT) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"bad zone; zones are 1-5\"}");
+    return;
+  }
+
+  uint8_t zoneIndex = (uint8_t)(zone - 1);
+  bool wasActive = zoneRuns[zoneIndex].active || relayState[zoneIndex];
+
+  stopZone(zoneIndex);
+
+  publishRelayStateNow();
+  publishFullStateNow();
+
+  StaticJsonDocument<192> doc;
+  doc["ok"] = true;
+  doc["zone"] = zone;
+  doc["stopped"] = wasActive;
+  doc["relayOn"] = relayState[zoneIndex];
+  doc["active"] = zoneRuns[zoneIndex].active;
+
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+
 void handleSpigotRun() {
   int minutes = server.hasArg("minutes") ? server.arg("minutes").toInt() : DEFAULT_SPIGOT_RUN_MINUTES;
   String action = server.hasArg("action") ? server.arg("action") : "on";
@@ -1640,7 +1674,7 @@ void handleApiFeatures() {
   JsonArray telemetry = doc.createNestedArray("telemetry");
   telemetry.add("clock"); telemetry.add("wifi"); telemetry.add("relays"); telemetry.add("schedules"); telemetry.add("currentRun"); telemetry.add("spigotRun"); telemetry.add("sensorData"); telemetry.add("targetLocation");
   JsonArray controls = doc.createNestedArray("controls");
-  controls.add("syncTime"); controls.add("manualRun"); controls.add("spigotRun"); controls.add("setRelay"); controls.add("allOff"); controls.add("buzzerTest"); controls.add("factoryReset");
+  controls.add("syncTime"); controls.add("manualRun"); controls.add("stopZone"); controls.add("spigotRun"); controls.add("setRelay"); controls.add("allOff"); controls.add("buzzerTest"); controls.add("factoryReset");
   String out; serializeJson(doc, out);
   server.send(200, "application/json", out);
 }
@@ -2002,6 +2036,7 @@ void setupServer() {
   server.on("/weather", HTTP_GET, handleWeatherGet);
   server.on("/api/relay", HTTP_GET, handleRelay);
   server.on("/api/manual-run", HTTP_GET, handleManualRun);
+  server.on("/api/zone/stop", HTTP_GET, handleStopZone);
   server.on("/api/spigots-run", HTTP_GET, handleSpigotRun);
   server.on("/api/schedule/add", HTTP_GET, handleScheduleAdd);
   server.on("/api/schedule/delete", HTTP_GET, handleScheduleDelete);
