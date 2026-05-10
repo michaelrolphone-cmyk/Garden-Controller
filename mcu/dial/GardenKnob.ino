@@ -2007,21 +2007,66 @@ bool replaceScheduleSlot(int zoneNumber, int slotIndex, int hour, int minute, in
   cmd.minute = constrain(minute, 0, 59);
   cmd.duration = constrain(durationMinutes, 1, 240);
   cmd.enabled = enabled;
+  // Queue a single replace command. Do not queue delete+add separately.
+  // The worker will not delete until the replacement has been added.
   showCommandPending("Saving");
   return enqueueRelayCommand(cmd, true);
 }
 
 bool replaceScheduleSlotBlocking(int zoneNumber, int slotIndex, int hour, int minute, int durationMinutes, bool enabled) {
-  int id = relayScheduleIdForZoneSlot(zoneNumber, slotIndex);
-  bool deleteOk = true;
-  if (id >= 0) {
-    String body, err;
-    int code = 0;
-    deleteOk = relayGetRaw("/api/schedule/delete?id=" + String(id), body, code, err);
+  zoneNumber = constrain(zoneNumber, 1, 5);
+  hour = constrain(hour, 0, 23);
+  minute = constrain(minute, 0, 59);
+  durationMinutes = constrain(durationMinutes, 1, 240);
+
+  int oldId = relayScheduleIdForZoneSlot(zoneNumber, slotIndex);
+  if (oldId < 0) {
+    lastCommandText = "Edit Failed bad slot";
+    clearCommandPending();
+    loadRelayState(true);
+    return false;
   }
 
-  bool addOk = sendScheduleSlotBlocking(zoneNumber, hour, minute, durationMinutes, enabled);
-  return deleteOk && addOk;
+  showCommandPending("Saving...");
+
+  // Safer edit order:
+  // 1) add the new schedule first
+  // 2) reload/verify schedules
+  // 3) delete the old schedule id only after the add succeeds
+  //
+  // This avoids the data-loss behavior where an edit deletes the old schedule
+  // and then fails to add the replacement.
+  String body, err;
+  int code = 0;
+  bool addOk = relayGetRaw(scheduleAddPath(zoneNumber, hour, minute, durationMinutes), body, code, err);
+
+  if (!addOk) {
+    lastCommandText = "Edit Failed add " + err + (code > 0 ? " HTTP " + String(code) : "");
+    clearCommandPending();
+    loadRelayState(true);
+    return false;
+  }
+
+  loadRelayState(true);
+
+  body = "";
+  err = "";
+  code = 0;
+  bool deleteOk = relayGetRaw("/api/schedule/delete?id=" + String(oldId), body, code, err);
+
+  if (!deleteOk) {
+    // New schedule was added. Do not report this as deleted-only; old row may remain
+    // as a duplicate, which is safer than losing the schedule entirely.
+    lastCommandText = "Saved; old not deleted";
+    clearCommandPending();
+    loadRelayState(true);
+    return true;
+  }
+
+  lastCommandText = "Saved";
+  clearCommandPending();
+  loadRelayState(true);
+  return true;
 }
 
 void processRelayCommandBlocking(const AsyncRelayCommand &cmd);
