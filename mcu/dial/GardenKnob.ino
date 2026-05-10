@@ -54,6 +54,7 @@ struct RunItem {
 
 struct ScheduleItem {
   bool valid = false;
+  int id = -1;
   bool enabled = true;
   int zoneNumber = 0;
   int startHour = 0;
@@ -1961,6 +1962,7 @@ enum AsyncRelayCommandType {
   RCMD_ALL_OFF,
   RCMD_SEND_SCHEDULE,
   RCMD_DELETE_SCHEDULE,
+  RCMD_REPLACE_SCHEDULE,
   RCMD_RELOAD_STATE,
   RCMD_RELOAD_SCHEDULE
 };
@@ -1995,6 +1997,33 @@ void drawUI();
 bool enqueueRelayCommand(const AsyncRelayCommand &cmd, bool front = false);
 void relayWorkerTask(void *param);
 void startRelayWorker();
+
+bool replaceScheduleSlot(int zoneNumber, int slotIndex, int hour, int minute, int durationMinutes, bool enabled) {
+  AsyncRelayCommand cmd;
+  cmd.type = RCMD_REPLACE_SCHEDULE;
+  cmd.zone = constrain(zoneNumber, 1, 5);
+  cmd.slot = slotIndex;
+  cmd.hour = constrain(hour, 0, 23);
+  cmd.minute = constrain(minute, 0, 59);
+  cmd.duration = constrain(durationMinutes, 1, 240);
+  cmd.enabled = enabled;
+  showCommandPending("Saving");
+  return enqueueRelayCommand(cmd, true);
+}
+
+bool replaceScheduleSlotBlocking(int zoneNumber, int slotIndex, int hour, int minute, int durationMinutes, bool enabled) {
+  int id = relayScheduleIdForZoneSlot(zoneNumber, slotIndex);
+  bool deleteOk = true;
+  if (id >= 0) {
+    String body, err;
+    int code = 0;
+    deleteOk = relayGetRaw("/api/schedule/delete?id=" + String(id), body, code, err);
+  }
+
+  bool addOk = sendScheduleSlotBlocking(zoneNumber, hour, minute, durationMinutes, enabled);
+  return deleteOk && addOk;
+}
+
 void processRelayCommandBlocking(const AsyncRelayCommand &cmd);
 void pollRelayTasksBlocking();
 void markRelaySuccess();
@@ -2007,7 +2036,27 @@ void requestRedrawIfUiStateChanged();
 void go(ScreenId s);
 void emergencyPress();
 bool waterIsActive();
+
+// Runtime watering state is defined later in the relay/UI state block.
+// These forward declarations let early helper functions compile.
+extern uint32_t lastWateringObservedMs;
+extern bool wasWateringActive;
+
+void clearWateringDisplayGrace() {
+  lastWateringObservedMs = 0;
+  wasWateringActive = false;
+}
+
+void clearWateringDisplayGrace();
 bool waterIsActiveForDisplay();
+bool relayPayloadConfirmsNoActiveRun(JsonDocument &doc);
+bool shouldPreserveLocalRunsAfterParse(bool hasRunData, bool oldHadLocalRun, bool parsedHasActiveRun, JsonDocument &doc);
+void locallyClearZoneRun(int zoneNumber);
+void locallyClearSpigotRun();
+bool zoneStopSuppressed(int zoneNumber);
+bool spigotStopSuppressed();
+bool relayPayloadConfirmsZoneOff(JsonDocument &doc, int zoneNumber);
+bool relayPayloadConfirmsSpigotOff(JsonDocument &doc);
 void noteUserInteraction();
 void setScreen(ScreenId s, bool userNavigation);
 void sleepDisplay();
@@ -2240,7 +2289,13 @@ uint32_t lastTimePollMs = 0;
 uint32_t lastWeatherPollMs = 0;
 uint32_t lastGoodStateMs = 0;
 static const uint32_t LOCAL_RUN_STALE_GRACE_MS = 30000;
-static const uint32_t RUNNING_SCREEN_GRACE_MS = 7000;   // prevent async poll gaps from bouncing to carousel
+static const uint32_t RUNNING_SCREEN_GRACE_MS = 7000;
+static const uint32_t EXTERNAL_STOP_CONFIRM_MS = 2500;
+static const uint32_t STOP_RECONCILE_MS = 10000;       // do not resurrect locally stopped runs while relay truth catches up
+uint32_t zoneStopSuppressUntilMs[5] = {0, 0, 0, 0, 0};
+uint32_t spigotStopSuppressUntilMs = 0;
+  // accept confirmed external stops after a short debounce
+   // prevent async poll gaps from bouncing to carousel
 uint32_t lastWateringObservedMs = 0;
   // keep last known countdown during async relay refresh gaps
 
@@ -2449,13 +2504,14 @@ void preserveRunCountdownFromOld(RunItem &dst, const RunItem &oldRun) {
 
 void restoreLocalRunSnapshot(const RunItem oldZones[5], const RunItem &oldSpigot) {
   for (int i = 0; i < 5; i++) {
+    if (zoneStopSuppressed(i + 1)) continue;
     if (runStillHasLocalTime(oldZones[i])) {
       zoneRuns[i] = oldZones[i];
       preserveRunCountdownFromOld(zoneRuns[i], oldZones[i]);
     }
   }
 
-  if (runStillHasLocalTime(oldSpigot)) {
+  if (!spigotStopSuppressed() && runStillHasLocalTime(oldSpigot)) {
     spigotRun = oldSpigot;
     spigotRun.spigot = true;
     preserveRunCountdownFromOld(spigotRun, oldSpigot);
@@ -2670,12 +2726,21 @@ void parseRunObject(JsonObjectConst obj, bool spigotHint = false) {
 }
 
 void parseSchedulesArray(JsonArrayConst arr) {
+  int sourceIndex = 0;
   for (JsonObjectConst obj : arr) {
     int zoneNumber = 0;
     if (obj["zoneIndex"].is<int>()) zoneNumber = coerceZoneNumber(obj["zoneIndex"], true);
     else if (obj["zoneNumber"].is<int>()) zoneNumber = coerceZoneNumber(obj["zoneNumber"], false);
     else if (obj["displayZone"].is<int>()) zoneNumber = coerceZoneNumber(obj["displayZone"], false);
     else if (obj["zone"].is<int>()) zoneNumber = coerceZoneNumber(obj["zone"], false);
+
+    int relayId = -1;
+    if (obj["id"].is<int>()) relayId = obj["id"].as<int>();
+    else if (obj["index"].is<int>()) relayId = obj["index"].as<int>();
+    else relayId = sourceIndex;
+
+    sourceIndex++;
+
     if (zoneNumber < 1 || zoneNumber > 5) continue;
 
     ZoneSchedule &zs = zoneSchedules[zoneNumber - 1];
@@ -2684,6 +2749,7 @@ void parseSchedulesArray(JsonArrayConst arr) {
 
     ScheduleItem &si = zs.slots[zs.count++];
     si.valid = true;
+    si.id = relayId;
     si.zoneNumber = zoneNumber;
     si.enabled = obj["enabled"].is<bool>() ? obj["enabled"].as<bool>() : true;
 
@@ -2726,6 +2792,194 @@ void parseSchedules(JsonDocument &doc) {
   for (int i = 0; i < 5; i++) {
     if (zoneSchedules[i].loaded || zoneSchedules[i].count > 0) scheduleLoaded = true;
   }
+}
+
+
+
+void locallyClearZoneRun(int zoneNumber) {
+  if (zoneNumber < 1 || zoneNumber > 5) return;
+  zoneRuns[zoneNumber - 1] = RunItem();
+  zoneRuns[zoneNumber - 1].zoneNumber = zoneNumber;
+  zoneStopSuppressUntilMs[zoneNumber - 1] = millis() + STOP_RECONCILE_MS;
+  needsRedraw = true;
+  updateZoneLeds(true);
+}
+
+void locallyClearSpigotRun() {
+  spigotRun = RunItem();
+  spigotRun.spigot = true;
+  spigotStopSuppressUntilMs = millis() + STOP_RECONCILE_MS;
+  needsRedraw = true;
+  updateZoneLeds(true);
+}
+
+bool zoneStopSuppressed(int zoneNumber) {
+  if (zoneNumber < 1 || zoneNumber > 5) return false;
+  return millis() < zoneStopSuppressUntilMs[zoneNumber - 1];
+}
+
+bool spigotStopSuppressed() {
+  return millis() < spigotStopSuppressUntilMs;
+}
+
+bool relayPayloadConfirmsZoneOff(JsonDocument &doc, int zoneNumber) {
+  if (zoneNumber < 1 || zoneNumber > 5) return false;
+  bool sawThisZone = false;
+
+  if (doc["zoneRuns"].is<JsonArrayConst>()) {
+    for (JsonObjectConst obj : doc["zoneRuns"].as<JsonArrayConst>()) {
+      int z = 0;
+      if (obj["zoneIndex"].is<int>()) z = coerceZoneNumber(obj["zoneIndex"], true);
+      else if (obj["zoneNumber"].is<int>()) z = coerceZoneNumber(obj["zoneNumber"], false);
+      else if (obj["displayZone"].is<int>()) z = coerceZoneNumber(obj["displayZone"], false);
+      else if (obj["zone"].is<int>()) z = coerceZoneNumber(obj["zone"], false);
+
+      if (z == zoneNumber) {
+        sawThisZone = true;
+        bool on = (obj["active"].is<bool>() && obj["active"].as<bool>()) ||
+                  (obj["running"].is<bool>() && obj["running"].as<bool>()) ||
+                  (obj["on"].is<bool>() && obj["on"].as<bool>());
+        if (on) return false;
+      }
+    }
+  }
+
+  if (doc["relays"].is<JsonArrayConst>()) {
+    int idx = 0;
+    for (JsonVariantConst rv : doc["relays"].as<JsonArrayConst>()) {
+      idx++;
+      if (idx != zoneNumber) continue;
+      sawThisZone = true;
+      bool on = false;
+      if (rv.is<bool>()) {
+        on = rv.as<bool>();
+      } else if (rv.is<JsonObjectConst>()) {
+        JsonObjectConst obj = rv.as<JsonObjectConst>();
+        on = obj["on"].is<bool>() ? obj["on"].as<bool>() :
+             (obj["active"].is<bool>() ? obj["active"].as<bool>() :
+             (obj["running"].is<bool>() ? obj["running"].as<bool>() : false));
+      }
+      if (on) return false;
+    }
+  }
+
+  return sawThisZone;
+}
+
+bool relayPayloadConfirmsSpigotOff(JsonDocument &doc) {
+  bool sawSpigot = false;
+
+  if (doc["currentSpigotRun"].is<JsonObjectConst>()) {
+    sawSpigot = true;
+    JsonObjectConst obj = doc["currentSpigotRun"].as<JsonObjectConst>();
+    bool on = (obj["active"].is<bool>() && obj["active"].as<bool>()) ||
+              (obj["running"].is<bool>() && obj["running"].as<bool>()) ||
+              (obj["on"].is<bool>() && obj["on"].as<bool>());
+    if (on) return false;
+  }
+
+  if (doc["spigotRun"].is<JsonObjectConst>()) {
+    sawSpigot = true;
+    JsonObjectConst obj = doc["spigotRun"].as<JsonObjectConst>();
+    bool on = (obj["active"].is<bool>() && obj["active"].as<bool>()) ||
+              (obj["running"].is<bool>() && obj["running"].as<bool>()) ||
+              (obj["on"].is<bool>() && obj["on"].as<bool>());
+    if (on) return false;
+  }
+
+  if (doc["relays"].is<JsonArrayConst>()) {
+    int idx = 0;
+    for (JsonVariantConst rv : doc["relays"].as<JsonArrayConst>()) {
+      idx++;
+      if (idx != 6) continue;
+      sawSpigot = true;
+      bool on = false;
+      if (rv.is<bool>()) {
+        on = rv.as<bool>();
+      } else if (rv.is<JsonObjectConst>()) {
+        JsonObjectConst obj = rv.as<JsonObjectConst>();
+        on = obj["on"].is<bool>() ? obj["on"].as<bool>() :
+             (obj["active"].is<bool>() ? obj["active"].as<bool>() :
+             (obj["running"].is<bool>() ? obj["running"].as<bool>() : false));
+      }
+      if (on) return false;
+    }
+  }
+
+  return sawSpigot;
+}
+
+bool relayPayloadConfirmsNoActiveRun(JsonDocument &doc) {
+  bool hasExplicitRunPayload =
+    doc["currentRun"].is<JsonObjectConst>() ||
+    doc["currentSpigotRun"].is<JsonObjectConst>() ||
+    doc["spigotRun"].is<JsonObjectConst>() ||
+    doc["zoneRuns"].is<JsonArrayConst>() ||
+    doc["relays"].is<JsonArrayConst>();
+
+  if (!hasExplicitRunPayload) return false;
+
+  if (doc["currentRun"].is<JsonObjectConst>()) {
+    JsonObjectConst obj = doc["currentRun"].as<JsonObjectConst>();
+    if ((obj["active"].is<bool>() && obj["active"].as<bool>()) ||
+        (obj["running"].is<bool>() && obj["running"].as<bool>()) ||
+        (obj["on"].is<bool>() && obj["on"].as<bool>())) return false;
+  }
+
+  if (doc["currentSpigotRun"].is<JsonObjectConst>()) {
+    JsonObjectConst obj = doc["currentSpigotRun"].as<JsonObjectConst>();
+    if ((obj["active"].is<bool>() && obj["active"].as<bool>()) ||
+        (obj["running"].is<bool>() && obj["running"].as<bool>()) ||
+        (obj["on"].is<bool>() && obj["on"].as<bool>())) return false;
+  }
+
+  if (doc["spigotRun"].is<JsonObjectConst>()) {
+    JsonObjectConst obj = doc["spigotRun"].as<JsonObjectConst>();
+    if ((obj["active"].is<bool>() && obj["active"].as<bool>()) ||
+        (obj["running"].is<bool>() && obj["running"].as<bool>()) ||
+        (obj["on"].is<bool>() && obj["on"].as<bool>())) return false;
+  }
+
+  if (doc["zoneRuns"].is<JsonArrayConst>()) {
+    for (JsonObjectConst obj : doc["zoneRuns"].as<JsonArrayConst>()) {
+      if ((obj["active"].is<bool>() && obj["active"].as<bool>()) ||
+          (obj["running"].is<bool>() && obj["running"].as<bool>()) ||
+          (obj["on"].is<bool>() && obj["on"].as<bool>())) return false;
+    }
+  }
+
+  if (doc["relays"].is<JsonArrayConst>()) {
+    int idx = 0;
+    for (JsonVariantConst rv : doc["relays"].as<JsonArrayConst>()) {
+      idx++;
+      bool on = false;
+      if (rv.is<bool>()) {
+        on = rv.as<bool>();
+      } else if (rv.is<JsonObjectConst>()) {
+        JsonObjectConst obj = rv.as<JsonObjectConst>();
+        on = obj["on"].is<bool>() ? obj["on"].as<bool>() :
+             (obj["active"].is<bool>() ? obj["active"].as<bool>() :
+             (obj["running"].is<bool>() ? obj["running"].as<bool>() : false));
+      }
+      if (idx >= 1 && idx <= 6 && on) return false;
+    }
+  }
+
+  return true;
+}
+
+bool shouldPreserveLocalRunsAfterParse(bool hasRunData, bool oldHadLocalRun, bool parsedHasActiveRun, JsonDocument &doc) {
+  if (!oldHadLocalRun) return false;
+
+  // Preserve only when the payload does not contain run truth. This protects
+  // against partial/background payloads while the async worker is busy.
+  if (!hasRunData) return true;
+
+  // If the relay API included run/relay truth and parsing found no active run,
+  // trust the relay. This is how external stops from another device are accepted.
+  if (!parsedHasActiveRun) return false;
+
+  return false;
 }
 
 void parseState(JsonDocument &doc) {
@@ -2779,14 +3033,39 @@ void parseState(JsonDocument &doc) {
   // polling, those partial responses must not blank the running display or reset
   // the LEDs. Keep counting down from the last known remaining time until a real
   // run payload refreshes it or the local timer reaches zero.
+
+  // Authoritative per-channel off truth from the relay wins over local countdown
+  // preservation. This catches stops made from another device and stops made here
+  // whose async state response arrives after the local optimistic timer.
+  for (int i = 0; i < 5; i++) {
+    if (relayPayloadConfirmsZoneOff(doc, i + 1)) {
+      zoneRuns[i] = RunItem();
+      zoneRuns[i].zoneNumber = i + 1;
+      zoneStopSuppressUntilMs[i] = millis() + STOP_RECONCILE_MS;
+      needsRedraw = true;
+    }
+  }
+
+  if (relayPayloadConfirmsSpigotOff(doc)) {
+    spigotRun = RunItem();
+    spigotRun.spigot = true;
+    spigotStopSuppressUntilMs = millis() + STOP_RECONCILE_MS;
+    needsRedraw = true;
+  }
+
   bool parsedHasActiveRun = waterIsActive();
 
-  if (!hasRunData || (oldHadLocalRun && !parsedHasActiveRun && relayConnectionIsUsable())) {
+  if (shouldPreserveLocalRunsAfterParse(hasRunData, oldHadLocalRun, parsedHasActiveRun, doc)) {
     restoreLocalRunSnapshot(oldZones, oldSpigot);
   }
 
   if (waterIsActive()) {
     lastWateringObservedMs = millis();
+  } else if (hasRunData) {
+    // The relay API supplied run truth and it says nothing is running.
+    // Treat this as authoritative, including stops made from another device.
+    clearWateringDisplayGrace();
+    needsRedraw = true;
   }
 
   parseSchedules(doc);
@@ -3132,6 +3411,7 @@ bool sendStopZone(int zoneNumber) {
   cmd.type = RCMD_STOP_ZONE;
   cmd.zone = constrain(zoneNumber, 1, 5);
   showCommandPending("Stopping Z" + String(cmd.zone));
+  locallyClearZoneRun(cmd.zone);
   return enqueueRelayCommand(cmd, true);
 }
 
@@ -3139,6 +3419,7 @@ bool sendStopSpigots() {
   AsyncRelayCommand cmd;
   cmd.type = RCMD_STOP_SPIGOTS;
   showCommandPending("Stopping Spigots");
+  locallyClearSpigotRun();
   return enqueueRelayCommand(cmd, true);
 }
 
@@ -3198,6 +3479,10 @@ void processRelayCommandBlocking(const AsyncRelayCommand &cmd) {
 
     case RCMD_DELETE_SCHEDULE:
       deleteScheduleSlotBlocking(cmd.zone, cmd.slot);
+      break;
+
+    case RCMD_REPLACE_SCHEDULE:
+      replaceScheduleSlotBlocking(cmd.zone, cmd.slot, cmd.hour, cmd.minute, cmd.duration, cmd.enabled);
       break;
 
     case RCMD_RELOAD_STATE:
@@ -3393,44 +3678,67 @@ bool sendAllOffBlocking() {
   return ok;
 }
 
-bool sendScheduleSlotBlocking(int zoneNumber, int hour, int minute, int durationMinutes, bool enabled) {
-  DynamicJsonDocument doc(512);
-  JsonObject slot = doc.createNestedObject("schedule");
-  slot["zone"] = zoneNumber;
-  slot["zoneNumber"] = zoneNumber;
-  slot["startHour"] = hour;
-  slot["startMinute"] = minute;
-  slot["runMinutes"] = durationMinutes;
-  slot["durationMinutes"] = durationMinutes;
-  slot["enabled"] = enabled;
-  String payload;
-  serializeJson(doc, payload);
 
-  showCommandPending("Sending...");
+int relayScheduleIdForZoneSlot(int zoneNumber, int slotIndex) {
+  if (zoneNumber < 1 || zoneNumber > 5 || slotIndex < 0) return -1;
+  ZoneSchedule &zs = zoneSchedules[zoneNumber - 1];
+  if (slotIndex >= zs.count) return -1;
+
+  int id = zs.slots[slotIndex].id;
+  if (id >= 0) return id;
+
+  // Last-resort fallback: slot order within the visible zone list.
+  // This is only used if the relay omitted ids/indexes.
+  return slotIndex;
+}
+
+String scheduleAddPath(int zoneNumber, int hour, int minute, int durationMinutes) {
+  char timeBuf[6];
+  snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", constrain(hour, 0, 23), constrain(minute, 0, 59));
+  return "/api/schedule/add?zone=" + String(constrain(zoneNumber, 1, 5)) +
+         "&time=" + String(timeBuf) +
+         "&minutes=" + String(constrain(durationMinutes, 1, 240));
+}
+
+bool sendScheduleSlotBlocking(int zoneNumber, int hour, int minute, int durationMinutes, bool enabled) {
+  zoneNumber = constrain(zoneNumber, 1, 5);
+  hour = constrain(hour, 0, 23);
+  minute = constrain(minute, 0, 59);
+  durationMinutes = constrain(durationMinutes, 1, 240);
+
+  showCommandPending("Saving...");
+
+  // Current relay firmware supports persistent schedule creation through:
+  // GET /api/schedule/add?zone=N&time=HH:MM&minutes=M
+  // Do not rely on POST /api/schedules for single-row edits; that endpoint expects
+  // a full schedules array and is not the simple add-slot contract.
   String body, err;
-  int code;
-  bool ok = relayPostJson("/api/schedules", payload, body, code, err);
-  if (!ok) {
-    // Fallback for relay builds that only provide simple GET schedule add.
-    String path = "/api/schedule/add?zone=" + String(zoneNumber) +
-                  "&hour=" + String(hour) +
-                  "&minute=" + String(minute) +
-                  "&minutes=" + String(durationMinutes);
-    ok = relayGetRaw(path, body, code, err);
-  }
-  lastCommandText = ok ? "Saved" : "Command Failed schedule save " + err + (code > 0 ? " HTTP " + String(code) : "");
+  int code = 0;
+  bool ok = relayGetRaw(scheduleAddPath(zoneNumber, hour, minute, durationMinutes), body, code, err);
+
+  lastCommandText = ok ? "Saved" : "Schedule Save Failed " + err + (code > 0 ? " HTTP " + String(code) : "");
   clearCommandPending();
   loadRelayState(true);
   return ok;
 }
 
 bool deleteScheduleSlotBlocking(int zoneNumber, int slotIndex) {
-  showCommandPending("Sending...");
+  showCommandPending("Deleting...");
+
+  int id = relayScheduleIdForZoneSlot(zoneNumber, slotIndex);
+  if (id < 0) {
+    lastCommandText = "Delete Failed bad slot";
+    clearCommandPending();
+    loadRelayState(true);
+    return false;
+  }
+
   String body, err;
-  int code;
-  String path = "/api/schedule/delete?zone=" + String(zoneNumber) + "&slot=" + String(slotIndex);
+  int code = 0;
+  String path = "/api/schedule/delete?id=" + String(id);
   bool ok = relayGetRaw(path, body, code, err);
-  lastCommandText = ok ? "Deleted" : "Command Failed /api/schedule/delete " + err + (code > 0 ? " HTTP " + String(code) : "");
+
+  lastCommandText = ok ? "Deleted" : "Delete Failed " + err + (code > 0 ? " HTTP " + String(code) : "");
   clearCommandPending();
   loadRelayState(true);
   return ok;
@@ -5151,36 +5459,62 @@ void drawSchedule() {
   drawSmallCentered("Press edit", SAFE_BOTTOM_HINT_Y, C_SOFT_TEXT);
 }
 
+
+int hour24To12(int hour24) {
+  hour24 = ((hour24 % 24) + 24) % 24;
+  int h = hour24 % 12;
+  return h == 0 ? 12 : h;
+}
+
+const char *hourAmPm(int hour24) {
+  hour24 = ((hour24 % 24) + 24) % 24;
+  return hour24 < 12 ? "AM" : "PM";
+}
+
+
+void drawCenteredTextInRect(const String &txt, int x, int y, int w, int h, uint8_t size, uint16_t color) {
+  gfx->setTextSize(size);
+  gfx->setTextColor(color);
+
+  int16_t x1, y1;
+  uint16_t tw, th;
+  gfx->getTextBounds(txt, 0, 0, &x1, &y1, &tw, &th);
+
+  int tx = x + (w - (int)tw) / 2 - x1;
+  int ty = y + (h - (int)th) / 2 - y1;
+
+  gfx->setCursor(tx, ty);
+  gfx->print(txt);
+}
+
 void drawScheduleEdit() {
   fillCircularBackground();
   drawConnectionDot();
   drawPlainTitle("Zone " + String(scheduleZone), scheduleAddMode ? "Add Schedule" : "Edit Schedule", C_ZONE3);
 
-  // Start time is edited as two separate inputs: hour of day and minute of hour.
-  // They are combined back into one scheduled start time when saving.
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_SOFT_TEXT);
-  gfx->setCursor(62, 62);
-  gfx->print("Start time");
+  // No extra subtitle/label here; the zone title is enough.
+  uint16_t hourBorder = editField == 0 ? C_AMBER : C_PANEL;
+  uint16_t minBorder  = editField == 1 ? C_AMBER : C_PANEL;
+  uint16_t durBorder  = editField == 2 ? C_AMBER : C_PANEL;
 
-  gfx->drawRoundRect(34, 78, 80, 42, 8, editField == 0 ? C_AMBER : C_PANEL);
-  drawCenteredText(String(editHour) + " h", 86, 2, editField == 0 ? C_AMBER : C_TEXT);
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_SOFT_TEXT);
-  gfx->setCursor(58, 124);
-  gfx->print("hour");
+  uint16_t hourColor = editField == 0 ? C_AMBER : C_TEXT;
+  uint16_t minColor  = editField == 1 ? C_AMBER : C_TEXT;
+  uint16_t durColor  = editField == 2 ? C_AMBER : C_TEXT;
 
-  gfx->drawRoundRect(126, 78, 80, 42, 8, editField == 1 ? C_AMBER : C_PANEL);
-  char minuteBuf[8];
-  snprintf(minuteBuf, sizeof(minuteBuf), "%02d m", editMinute);
-  drawCenteredText(String(minuteBuf), 86, 2, editField == 1 ? C_AMBER : C_TEXT);
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_SOFT_TEXT);
-  gfx->setCursor(145, 124);
-  gfx->print("minute");
+  gfx->drawRoundRect(28, 76, 74, 46, 9, hourBorder);
+  drawCenteredTextInRect(String(hour24To12(editHour)), 28, 76, 74, 46, 3, hourColor);
+  drawCenteredTextInRect("hour", 28, 124, 74, 12, 1, C_SOFT_TEXT);
 
-  gfx->drawRoundRect(48, 142, 144, 30, 8, editField == 2 ? C_AMBER : C_PANEL);
-  drawCenteredText("Run " + String(editDuration) + " min", 149, 2, editField == 2 ? C_AMBER : C_TEXT);
+  drawCenteredTextInRect(String(hourAmPm(editHour)), 102, 88, 36, 22, 2, C_TEXT);
+
+  gfx->drawRoundRect(138, 76, 74, 46, 9, minBorder);
+  char minuteBuf[4];
+  snprintf(minuteBuf, sizeof(minuteBuf), "%02d", editMinute);
+  drawCenteredTextInRect(String(minuteBuf), 138, 76, 74, 46, 3, minColor);
+  drawCenteredTextInRect("min", 138, 124, 74, 12, 1, C_SOFT_TEXT);
+
+  gfx->drawRoundRect(44, 142, 152, 32, 9, durBorder);
+  drawCenteredTextInRect("Run " + String(editDuration) + " min", 44, 142, 152, 32, 2, durColor);
 
   if (!scheduleAddMode) {
     drawRoundButton(34, SAFE_BOTTOM_BUTTON_Y, 78, 26, "Delete", editField == 5 ? C_RED : C_BUTTON, editField == 5 ? C_RED : C_DIM, C_TEXT);
@@ -5353,11 +5687,13 @@ void drawUI() {
 
 void stopDisplayedRunContext() {
   if (displayedRunningSpigot) {
+    locallyClearSpigotRun();
     sendStopSpigots();
     go(SCR_HOME);
     return;
   }
   if (displayedRunningZone >= 1 && displayedRunningZone <= 5) {
+    locallyClearZoneRun(displayedRunningZone);
     sendStopZone(displayedRunningZone);
     go(SCR_HOME);
     return;
@@ -5494,16 +5830,17 @@ void shortPress() {
     case SCR_ZONE_SELECT:
       selectCurrentZoneItem();
       break;
-    case SCR_DURATION:
+    case SCR_DURATION: {
       bool queued = false;
-        if (durationTarget == DUR_ZONE) queued = sendManualRun(selectedZone, durationMinutes);
-        else queued = sendSpigotRun(durationMinutes);
-        if (queued) go(SCR_RUNNING);
+      if (durationTarget == DUR_ZONE) queued = sendManualRun(selectedZone, durationMinutes);
+      else queued = sendSpigotRun(durationMinutes);
+      if (queued) go(SCR_RUNNING);
       break;
+    }
     case SCR_RUNNING:
       stopDisplayedRunContext();
       break;
-        case SCR_SCHEDULE:
+    case SCR_SCHEDULE:
       if (scheduleZonePickerMode) {
         scheduleZonePickerMode = false;
         scheduleSlot = 0;
@@ -5521,8 +5858,8 @@ void shortPress() {
         editField = 2;
       } else if (editField == 2) {
         // Run duration minutes is the last form input. Press saves the schedule.
-        if (!scheduleAddMode) deleteScheduleSlot(scheduleZone, scheduleSlot);
-        sendScheduleSlot(scheduleZone, editHour, editMinute, editDuration, true);
+        if (!scheduleAddMode) replaceScheduleSlot(scheduleZone, scheduleSlot, editHour, editMinute, editDuration, true);
+        else sendScheduleSlot(scheduleZone, editHour, editMinute, editDuration, true);
         scheduleZonePickerMode = false;
         go(SCR_SCHEDULE);
       } else if (editField == 5) {
@@ -5531,8 +5868,8 @@ void shortPress() {
         go(SCR_SCHEDULE);
       } else {
         // Save action if the user deliberately rotated to it.
-        if (!scheduleAddMode) deleteScheduleSlot(scheduleZone, scheduleSlot);
-        sendScheduleSlot(scheduleZone, editHour, editMinute, editDuration, true);
+        if (!scheduleAddMode) replaceScheduleSlot(scheduleZone, scheduleSlot, editHour, editMinute, editDuration, true);
+        else sendScheduleSlot(scheduleZone, editHour, editMinute, editDuration, true);
         scheduleZonePickerMode = false;
         go(SCR_SCHEDULE);
       }
@@ -5806,16 +6143,16 @@ void handleTouchTap(int x, int y) {
       deleteScheduleSlot(scheduleZone, scheduleSlot);
       go(SCR_SCHEDULE);
     } else if (x >= 124 && x <= 214 && y >= SAFE_BOTTOM_BUTTON_Y && y <= SAFE_BOTTOM_BUTTON_Y + 34) {
-      if (!scheduleAddMode) deleteScheduleSlot(scheduleZone, scheduleSlot);
-      sendScheduleSlot(scheduleZone, editHour, editMinute, editDuration, true);
+      if (!scheduleAddMode) replaceScheduleSlot(scheduleZone, scheduleSlot, editHour, editMinute, editDuration, true);
+      else sendScheduleSlot(scheduleZone, editHour, editMinute, editDuration, true);
       go(SCR_SCHEDULE);
-    } else if (y >= 72 && y <= 128 && x < 120) {
+    } else if (x >= 20 && x <= 110 && y >= 70 && y <= 136) {
       editField = 0; // start hour
       needsRedraw = true;
-    } else if (y >= 72 && y <= 128 && x >= 120) {
+    } else if (x >= 130 && x <= 220 && y >= 70 && y <= 136) {
       editField = 1; // start minute
       needsRedraw = true;
-    } else if (y >= 134 && y <= 178) {
+    } else if (x >= 38 && x <= 202 && y >= 136 && y <= 180) {
       editField = 2; // run duration minutes
       needsRedraw = true;
     }
@@ -6078,7 +6415,7 @@ void pollRelayTasks() {
 
   uint32_t now = millis();
 
-  uint32_t stateInterval = (isAnyZoneRunning() || spigotRun.active || screen == SCR_RUNNING) ? 1000 : 2000;
+  uint32_t stateInterval = (waterIsActiveForDisplay() || screen == SCR_RUNNING) ? 1000 : 2000;
   if (now - lastAsyncStatePollMs > stateInterval) {
     lastAsyncStatePollMs = now;
     AsyncRelayCommand cmd;
