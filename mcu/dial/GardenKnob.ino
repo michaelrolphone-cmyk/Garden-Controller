@@ -5495,9 +5495,12 @@ void handleDisplaySleepTask() {
 }
 
 void updateScreenAutoMode() {
-  if (watering) wakeDisplay(true);
   bool watering = waterIsActive();
   uint32_t now = millis();
+
+  if (watering) {
+    wakeDisplay(true);
+  }
 
   if (watering && !wasWateringActive) {
     // A watering cycle just started. The countdown screen is the default.
