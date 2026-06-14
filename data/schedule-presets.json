@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "presetSchema": "passes",
+  "defaultZones": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "presets": [
+    {
+      "id": "current-baseline",
+      "name": "Current Baseline",
+      "season": "Reference",
+      "description": "Matches the current daily pattern: 15 minute morning runs starting at 7:30am, 5 minute 2pm pulses, and 7 minute 7pm runs offset by 10 minutes.",
+      "passes": [
+        {
+          "startTime": "07:30",
+          "durationMinutes": 15,
+          "offsetMinutes": 30
+        },
+        {
+          "startTime": "14:00",
+          "durationMinutes": 5,
+          "offsetMinutes": 5
+        },
+        {
+          "startTime": "19:00",
+          "durationMinutes": 7,
+          "offsetMinutes": 10
+        }
+      ]
+    },
+    {
+      "id": "high-summer-heat",
+      "name": "High Summer Heat",
+      "season": "Summer",
+      "description": "Use for extended 90-100\u00b0F full-sun days: a deeper early-morning pass plus short afternoon and evening support pulses.",
+      "passes": [
+        {
+          "startTime": "05:30",
+          "durationMinutes": 22,
+          "offsetMinutes": 30
+        },
+        {
+          "startTime": "13:30",
+          "durationMinutes": 8,
+          "offsetMinutes": 10
+        },
+        {
+          "startTime": "19:00",
+          "durationMinutes": 8,
+          "offsetMinutes": 10
+        }
+      ]
+    },
+    {
+      "id": "germination",
+      "name": "Germination / Seedlings",
+      "season": "Spring/Summer",
+      "description": "Light, frequent surface moisture for new seed beds or tender seedlings. Reduce or skip once seeds are established.",
+      "passes": [
+        {
+          "startTime": "06:00",
+          "durationMinutes": 5,
+          "offsetMinutes": 6
+        },
+        {
+          "startTime": "10:30",
+          "durationMinutes": 5,
+          "offsetMinutes": 6
+        },
+        {
+          "startTime": "14:30",
+          "durationMinutes": 5,
+          "offsetMinutes": 6
+        },
+        {
+          "startTime": "18:30",
+          "durationMinutes": 5,
+          "offsetMinutes": 6
+        }
+      ]
+    },
+    {
+      "id": "rainy-skip",
+      "name": "Rainy / Skip Watering",
+      "season": "Any",
+      "description": "Clears the daily schedule when rain has supplied enough water or the root zone is already wet.",
+      "passes": []
+    },
+    {
+      "id": "cold-weather",
+      "name": "Cold Weather",
+      "season": "Spring/Fall",
+      "description": "A single late-morning light run after the coldest part of the day; avoids adding overnight moisture.",
+      "passes": [
+        {
+          "startTime": "10:30",
+          "durationMinutes": 7,
+          "offsetMinutes": 15
+        }
+      ]
+    },
+    {
+      "id": "fall-reduced",
+      "name": "Fall Reduced",
+      "season": "Fall",
+      "description": "Reduced water for cooler days: one moderate late-morning pass plus a short late-afternoon top-up.",
+      "passes": [
+        {
+          "startTime": "09:30",
+          "durationMinutes": 10,
+          "offsetMinutes": 20
+        },
+        {
+          "startTime": "16:30",
+          "durationMinutes": 5,
+          "offsetMinutes": 7
+        }
+      ]
+    },
+    {
+      "id": "frost-threat-flash",
+      "name": "Frost Threat Flash",
+      "season": "Spring/Fall",
+      "description": "Short pre-dawn/early-morning pulses for frost-threat events while staying inside the 4am-8pm run window. Best for emergency use only.",
+      "passes": [
+        {
+          "startTime": "04:00",
+          "durationMinutes": 4,
+          "offsetMinutes": 4
+        },
+        {
+          "startTime": "05:00",
+          "durationMinutes": 4,
+          "offsetMinutes": 4
+        },
+        {
+          "startTime": "06:00",
+          "durationMinutes": 4,
+          "offsetMinutes": 4
+        }
+      ]
+    },
+    {
+      "id": "transplant-establishment",
+      "name": "Transplant Establishment",
+      "season": "Spring/Summer",
+      "description": "Gentle repeated watering for newly planted starts while roots establish; taper down after the first week.",
+      "passes": [
+        {
+          "startTime": "06:30",
+          "durationMinutes": 8,
+          "offsetMinutes": 10
+        },
+        {
+          "startTime": "12:30",
+          "durationMinutes": 6,
+          "offsetMinutes": 8
+        },
+        {
+          "startTime": "18:00",
+          "durationMinutes": 6,
+          "offsetMinutes": 8
+        }
+      ]
+    },
+    {
+      "id": "wind-low-humidity",
+      "name": "Wind / Low Humidity",
+      "season": "Summer",
+      "description": "Early deep watering plus a late-day pulse for dry, windy days without running into the evening blackout period.",
+      "passes": [
+        {
+          "startTime": "05:45",
+          "durationMinutes": 18,
+          "offsetMinutes": 25
+        },
+        {
+          "startTime": "17:30",
+          "durationMinutes": 8,
+          "offsetMinutes": 10
+        }
+      ]
+    }
+  ]
+}
