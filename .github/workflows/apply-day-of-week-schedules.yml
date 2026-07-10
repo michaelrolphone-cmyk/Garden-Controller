@@ -1,3 +1,4 @@
+# Applies the implementation once on the feature branch.
 name: Apply weekday schedule support
 
 on:
