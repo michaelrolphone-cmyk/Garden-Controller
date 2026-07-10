@@ -326,6 +326,89 @@ void handleScheduleDaysApiPost() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
+void handleSchedulesWithDaysApiPost() {
+  if (!server.hasArg("plain")) {
+    server.send(
+      400,
+      "application/json",
+      "{\"ok\":false,\"error\":\"expected json body\"}"
+    );
+    return;
+  }
+
+  DynamicJsonDocument doc(16384);
+  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  if (error || !doc["schedules"].is<JsonArray>()) {
+    server.send(
+      400,
+      "application/json",
+      "{\"ok\":false,\"error\":\"bad json or missing schedules array\"}"
+    );
+    return;
+  }
+
+  JsonArray schedules = doc["schedules"].as<JsonArray>();
+  if (schedules.size() > MAX_DAILY_SCHEDULES) {
+    server.send(
+      400,
+      "application/json",
+      "{\"ok\":false,\"error\":\"schedule limit reached\"}"
+    );
+    return;
+  }
+
+  for (JsonObject item : schedules) {
+    int zoneNumber = item["channel"] | 0;
+    int durationSeconds = item["durationSeconds"] | 0;
+    uint8_t hour = 0;
+    uint8_t minute = 0;
+
+    if (
+      zoneNumber < 1 ||
+      zoneNumber > ZONE_COUNT ||
+      durationSeconds <= 0 ||
+      !parseStartTimeToZone(item["startTime"] | "", hour, minute)
+    ) {
+      server.send(
+        400,
+        "application/json",
+        "{\"ok\":false,\"error\":\"invalid schedule row\"}"
+      );
+      return;
+    }
+  }
+
+  applyScheduleArray(schedules);
+  reconcileScheduleDaysMasks(false);
+
+  uint8_t index = 0;
+  for (JsonObject item : schedules) {
+    if (index >= trackedScheduleCount) break;
+
+    if (!item["daysMask"].isNull()) {
+      scheduleDaysMasks[index] = normalizeScheduleDaysMask(
+        item["daysMask"].as<int>()
+      );
+    } else if (item["days"].is<const char*>()) {
+      scheduleDaysMasks[index] = parseScheduleDaysMask(
+        item["days"].as<String>()
+      );
+    } else if (item["days"].is<JsonArray>()) {
+      uint8_t mask = 0;
+      for (JsonVariant day : item["days"].as<JsonArray>()) {
+        mask |= parseScheduleDaysMask(day.as<String>());
+      }
+      scheduleDaysMasks[index] = normalizeScheduleDaysMask(mask);
+    }
+
+    index++;
+  }
+
+  saveScheduleDaysMasks();
+  publishFullStateNow();
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 const char WEEKDAY_ADMIN_CSS[] PROGMEM = R"rawliteral(
 .schedule-editor-row{border:1px solid #d8e3eb;border-radius:12px;padding:10px;margin:10px 0;background:#f8fbfd}
 .schedule-editor-fields{display:grid;grid-template-columns:90px 120px 110px 120px auto;gap:8px;align-items:end}
@@ -441,33 +524,23 @@ saveSchedules=async function(){
     channel:Number(row.querySelector('.schedule-zone').value),
     startTime:row.querySelector('.schedule-time').value,
     durationSeconds:Number(row.querySelector('.schedule-minutes').value)*60,
-    enabled:row.querySelector('.schedule-enabled').value==='on'
+    enabled:row.querySelector('.schedule-enabled').value==='on',
+    daysMask:weekdayMaskForRow(row)
   }));
 
-  const timingResponse=await fetch('/api/schedules',{
+  const response=await fetch('/api/schedules-with-days',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({schedules})
   });
 
-  if(!timingResponse.ok){
-    alert('Failed to save schedule timing');
-    return;
-  }
-
-  const daySchedules=rows.map((row,id)=>({
-    id,
-    daysMask:weekdayMaskForRow(row)
-  }));
-
-  const daysResponse=await fetch('/api/schedule-days',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({schedules:daySchedules})
-  });
-
-  if(!daysResponse.ok){
-    alert('Schedule timing saved, but watering days failed to save');
+  if(!response.ok){
+    let message='Failed to save schedules and watering days';
+    try{
+      const body=await response.json();
+      if(body&&body.error)message+=': '+body.error;
+    }catch(error){}
+    alert(message);
     return;
   }
 
@@ -571,6 +644,7 @@ void setupServer() {
   server.on("/api/config", HTTP_GET, handleApiConfigGet);
   server.on("/api/config", HTTP_POST, handleApiConfigSet);
   server.on("/api/schedules", HTTP_POST, handleApiScheduleSet);
+  server.on("/api/schedules-with-days", HTTP_POST, handleSchedulesWithDaysApiPost);
   server.on("/api/time/set", HTTP_GET, handleSetTime);
   server.on("/time", HTTP_GET, handleTimeGet);
   server.on("/weather", HTTP_GET, handleWeatherGet);
