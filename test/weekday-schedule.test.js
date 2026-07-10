@@ -42,13 +42,14 @@ describe('relay firmware weekday schedule support', () => {
     expect(wrapper).toContain('class="weekday-picker"');
     expect(wrapper).toContain("const WEEKDAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];");
     expect(wrapper).toContain("document.querySelectorAll('#adminSchedRows .schedule-editor-row')");
-    expect(wrapper).toContain("fetch('/api/schedule-days',{");
+    expect(wrapper).toContain("fetch('/api/schedule-days',{cache:'no-store'})");
     expect(wrapper).toContain("alert('Schedules and watering days saved')");
   });
 
-  test('uses the existing Save Schedules action for timing and weekday masks', () => {
-    expect(wrapper).toContain("const timingResponse=await fetch('/api/schedules'");
-    expect(wrapper).toContain("const daysResponse=await fetch('/api/schedule-days'");
+  test('uses the existing Save Schedules action for one combined timing and weekday update', () => {
+    expect(wrapper).toContain('void handleSchedulesWithDaysApiPost()');
+    expect(wrapper).toContain('server.on("/api/schedules-with-days", HTTP_POST, handleSchedulesWithDaysApiPost);');
+    expect(wrapper).toContain("const response=await fetch('/api/schedules-with-days'");
     expect(wrapper).toContain('daysMask:weekdayMaskForRow(row)');
     expect(wrapper).toContain('schedule-enabled');
   });
