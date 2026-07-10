@@ -23,17 +23,29 @@ Common values:
 - Weekends: `65`
 - No automatic days: `0`
 
-## Firmware editor
+## Captive-portal admin interface
 
-Open the relay's local page:
+Connect to the relay access point and open the existing administration page:
 
 ```text
-http://192.168.4.1/schedule-days
+http://192.168.4.1/admin
 ```
 
-The page lists every schedule with Sunday-through-Saturday checkboxes. Saving changes affects automatic schedule starts only. Manual zone runs and timed spigot runs are unchanged.
+The existing **Schedule Manager** now contains Sunday-through-Saturday checkboxes inside every schedule row. It also provides per-row presets for all days, weekdays, weekends, and no days.
 
-The masks are persisted in the ESP32 `Preferences` namespace `relay6days`. Schedule signatures are used to retain masks when rows are reordered or deleted. A new or materially changed row defaults to all days.
+The existing **Save Schedules** button saves all of the following together from the operator's perspective:
+
+- Zone
+- Start time
+- Duration
+- Enabled state
+- Watering days
+
+The previous `/schedule-days` page is no longer a separate editor. Requests to it redirect to `/admin#schedule-manager`.
+
+Manual zone runs and timed spigot runs are not restricted by the automatic-schedule weekday masks.
+
+The masks are persisted in the ESP32 `Preferences` namespace `relay6days`. Schedule signatures retain masks when rows are reordered or deleted. A new or materially changed row defaults to all days until the admin save operation assigns its selected mask.
 
 ## JSON API
 
@@ -62,4 +74,4 @@ The API accepts either `daysMask`, a day-name string, or an array of day names.
 
 ## Source layout
 
-`GardenSimpleRelay6Core.inc` is the unchanged firmware baseline from `0.1.0-BETA`. `GardenSimpleRelay6.ino` includes that core and replaces only the top-level `setup`, `loop`, and automatic schedule-check call. This keeps all existing relay, weather, remote API, display, and manual-run behavior intact while adding weekday filtering.
+`GardenSimpleRelay6Core.inc` remains the unchanged firmware baseline from `0.1.0-BETA`. `GardenSimpleRelay6.ino` wraps that core, restores the existing initialization and route set, replaces the automatic schedule check with weekday-aware execution, and injects the weekday controls into the existing captive-portal admin page.
