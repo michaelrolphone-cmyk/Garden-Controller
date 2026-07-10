@@ -1,21 +1,26 @@
 // GardenSimpleRelay6.ino
 // Weekday-aware composition layer for the existing relay firmware.
-// The unchanged v26 implementation is included below with only its setup,
-// loop, and schedule checker symbols renamed. All existing features remain
-// compiled; this layer adds per-schedule weekday masks and replaces only the
-// top-level scheduler call.
+//
+// The existing 0.1.0-BETA implementation remains in GardenSimpleRelay6Core.inc.
+// Its setup, loop, automatic schedule checker, captive-portal admin handler, and
+// route registrar are renamed while included. This file then restores the same
+// initialization and route set, adds per-schedule weekday masks, and integrates
+// weekday controls directly into the existing /admin captive-portal interface.
 
 #define setup gardenLegacySetup
 #define loop gardenLegacyLoop
 #define checkSchedule gardenLegacyCheckSchedule
+#define handleAdmin gardenLegacyHandleAdmin
+#define setupServer gardenLegacySetupServer
 #include "GardenSimpleRelay6Core.inc"
+#undef setupServer
+#undef handleAdmin
 #undef checkSchedule
 #undef loop
 #undef setup
 
 static const uint8_t ALL_WEEKDAYS_MASK = 0x7F; // bit 0=Sunday ... bit 6=Saturday
 static const char* WEEKDAY_SHORT_NAMES[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-static const char* WEEKDAY_LONG_NAMES[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
 static uint8_t scheduleDaysMasks[MAX_DAILY_SCHEDULES];
 static uint32_t scheduleDaysSignatures[MAX_DAILY_SCHEDULES];
@@ -95,6 +100,7 @@ uint32_t scheduleDaysSignature(const DailySchedule& schedule) {
     schedule.startMinute,
     schedule.runMinutes
   };
+
   for (uint8_t valueIndex = 0; valueIndex < 4; valueIndex++) {
     uint32_t value = values[valueIndex];
     for (uint8_t byteIndex = 0; byteIndex < 4; byteIndex++) {
@@ -110,11 +116,13 @@ void saveScheduleDaysMasks() {
   Preferences dayPrefs;
   dayPrefs.begin("relay6days", false);
   dayPrefs.putUChar("count", trackedScheduleCount);
+
   for (uint8_t i = 0; i < trackedScheduleCount; i++) {
     String keyBase = "s" + String(i);
     dayPrefs.putUInt((keyBase + "sig").c_str(), scheduleDaysSignatures[i]);
     dayPrefs.putUChar((keyBase + "mask").c_str(), normalizeScheduleDaysMask(scheduleDaysMasks[i]));
   }
+
   dayPrefs.end();
 }
 
@@ -128,12 +136,16 @@ void reconcileScheduleDaysMasks(bool loadPersisted = false) {
     Preferences dayPrefs;
     dayPrefs.begin("relay6days", true);
     oldCount = min((uint8_t)MAX_DAILY_SCHEDULES, dayPrefs.getUChar("count", 0));
+
     for (uint8_t i = 0; i < oldCount; i++) {
       String keyBase = "s" + String(i);
       oldSignatures[i] = dayPrefs.getUInt((keyBase + "sig").c_str(), 0);
-      oldMasks[i] = normalizeScheduleDaysMask(dayPrefs.getUChar((keyBase + "mask").c_str(), ALL_WEEKDAYS_MASK));
+      oldMasks[i] = normalizeScheduleDaysMask(
+        dayPrefs.getUChar((keyBase + "mask").c_str(), ALL_WEEKDAYS_MASK)
+      );
       oldUsed[i] = false;
     }
+
     dayPrefs.end();
   } else {
     oldCount = trackedScheduleCount;
@@ -162,7 +174,14 @@ void reconcileScheduleDaysMasks(bool loadPersisted = false) {
     }
 
     if (!matched) changed = true;
-    if (i >= trackedScheduleCount || scheduleDaysSignatures[i] != signature || scheduleDaysMasks[i] != mask) changed = true;
+    if (
+      i >= trackedScheduleCount ||
+      scheduleDaysSignatures[i] != signature ||
+      scheduleDaysMasks[i] != mask
+    ) {
+      changed = true;
+    }
+
     scheduleDaysSignatures[i] = signature;
     scheduleDaysMasks[i] = normalizeScheduleDaysMask(mask);
   }
@@ -186,14 +205,27 @@ void checkScheduleWithWeekdays() {
 
   bool startedAny = false;
   int minuteOfDay = t.tm_hour * 60 + t.tm_min;
+
   for (uint8_t i = 0; i < dailyScheduleCount; i++) {
     DailySchedule& schedule = dailySchedules[i];
-    if (!schedule.enabled || schedule.runMinutes == 0 || schedule.zoneIndex >= ZONE_COUNT || !zones[schedule.zoneIndex].enabled) continue;
+
+    if (
+      !schedule.enabled ||
+      schedule.runMinutes == 0 ||
+      schedule.zoneIndex >= ZONE_COUNT ||
+      !zones[schedule.zoneIndex].enabled
+    ) {
+      continue;
+    }
+
     if (!scheduleRunsToday(i, t.tm_wday)) continue;
 
     int scheduledMinute = schedule.startHour * 60 + schedule.startMinute;
     if (minuteOfDay == scheduledMinute) {
-      if (schedule.lastRunYearDay != t.tm_yday || schedule.lastRunMinuteOfDay != minuteOfDay) {
+      if (
+        schedule.lastRunYearDay != t.tm_yday ||
+        schedule.lastRunMinuteOfDay != minuteOfDay
+      ) {
         schedule.lastRunYearDay = t.tm_yday;
         schedule.lastRunMinuteOfDay = minuteOfDay;
         startRun(schedule.zoneIndex, schedule.runMinutes, false);
@@ -208,89 +240,39 @@ void checkScheduleWithWeekdays() {
   }
 }
 
-String scheduleDaysPage() {
-  reconcileScheduleDaysMasks(false);
-  String html;
-  html.reserve(14000);
-  html += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>");
-  html += F("<title>Watering Days</title><style>*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;background:#f4f1e8;color:#18251b}main{max-width:980px;margin:auto;padding:12px}.card{background:#fff;border:1px solid #ccd5cc;border-radius:14px;padding:14px;margin:10px 0}.schedule{border-top:1px solid #d8ded8;padding:12px 0}.days{display:flex;gap:6px;flex-wrap:wrap}.day{display:inline-flex;align-items:center;gap:4px;border:1px solid #aebaae;border-radius:8px;padding:7px;background:#f8faf8}button,a.button{display:inline-block;border:0;border-radius:9px;background:#31543a;color:#fff;padding:10px 14px;text-decoration:none;font-size:16px}.muted{color:#59665c}.actions{display:flex;gap:8px;flex-wrap:wrap}</style></head><body><main>");
-  html += F("<section class='card'><h1>Schedule Days of Week</h1><p class='muted'>Choose the days on which each automatic schedule may run. Manual zone and spigot runs are not affected.</p><p><a class='button' href='/admin'>Back to Admin</a></p></section>");
-  html += F("<form method='post' action='/schedule-days/save'><section class='card'>");
-
-  if (dailyScheduleCount == 0) {
-    html += F("<p>No schedules configured.</p>");
-  }
-
-  for (uint8_t i = 0; i < dailyScheduleCount; i++) {
-    DailySchedule& schedule = dailySchedules[i];
-    html += F("<div class='schedule'><h3>");
-    html += String(i + 1);
-    html += F(". Zone ");
-    html += String(schedule.zoneIndex + 1);
-    html += F(" · ");
-    html += compactTime(schedule.startHour, schedule.startMinute);
-    html += F(" · ");
-    html += String(schedule.runMinutes);
-    html += F(" min</h3><p class='muted'>Current: ");
-    html += scheduleDaysMaskLabel(scheduleDaysMasks[i]);
-    html += F("</p><div class='days'>");
-    for (uint8_t day = 0; day < 7; day++) {
-      html += F("<label class='day'><input type='checkbox' name='s");
-      html += String(i);
-      html += F("d");
-      html += String(day);
-      html += F("' ");
-      if (scheduleDaysMasks[i] & (1U << day)) html += F("checked ");
-      html += F(">");
-      html += WEEKDAY_LONG_NAMES[day];
-      html += F("</label>");
-    }
-    html += F("</div></div>");
-  }
-
-  html += F("<div class='actions'><button type='submit'>Save Watering Days</button><button type='button' onclick=\"document.querySelectorAll('input[type=checkbox]').forEach(x=>x.checked=true)\">Select All</button><button type='button' onclick=\"document.querySelectorAll('input[type=checkbox]').forEach(x=>x.checked=false)\">Clear All</button></div></section></form>");
-  html += F("</main></body></html>");
-  return html;
-}
-
-void handleScheduleDaysPage() {
-  server.send(200, "text/html", scheduleDaysPage());
-}
-
-void handleScheduleDaysSave() {
-  reconcileScheduleDaysMasks(false);
-  for (uint8_t i = 0; i < trackedScheduleCount; i++) {
-    uint8_t mask = 0;
-    for (uint8_t day = 0; day < 7; day++) {
-      String field = "s" + String(i) + "d" + String(day);
-      if (server.hasArg(field)) mask |= 1U << day;
-    }
-    scheduleDaysMasks[i] = normalizeScheduleDaysMask(mask);
-  }
-  saveScheduleDaysMasks();
-  server.sendHeader("Location", "/schedule-days?saved=1");
-  server.send(303, "text/plain", "");
+void handleScheduleDaysRedirect() {
+  server.sendHeader("Location", "/admin#schedule-manager", true);
+  server.send(302, "text/plain", "");
 }
 
 void handleScheduleDaysApiGet() {
   reconcileScheduleDaysMasks(false);
+
   DynamicJsonDocument doc(12288);
   doc["ok"] = true;
   doc["bitOrder"] = "Sun,Mon,Tue,Wed,Thu,Fri,Sat";
+
   JsonArray schedules = doc.createNestedArray("schedules");
   for (uint8_t i = 0; i < dailyScheduleCount; i++) {
     JsonObject item = schedules.createNestedObject();
     item["id"] = i;
     item["channel"] = dailySchedules[i].zoneIndex + 1;
-    item["startTime"] = htmlTimeValue(dailySchedules[i].startHour, dailySchedules[i].startMinute);
+    item["startTime"] = htmlTimeValue(
+      dailySchedules[i].startHour,
+      dailySchedules[i].startMinute
+    );
     item["durationSeconds"] = (uint32_t)dailySchedules[i].runMinutes * 60UL;
     item["daysMask"] = scheduleDaysMasks[i];
     item["daysLabel"] = scheduleDaysMaskLabel(scheduleDaysMasks[i]);
+
     JsonArray days = item.createNestedArray("days");
     for (uint8_t day = 0; day < 7; day++) {
-      if (scheduleDaysMasks[i] & (1U << day)) days.add(WEEKDAY_SHORT_NAMES[day]);
+      if (scheduleDaysMasks[i] & (1U << day)) {
+        days.add(WEEKDAY_SHORT_NAMES[day]);
+      }
     }
   }
+
   String body;
   serializeJson(doc, body);
   server.send(200, "application/json", body);
@@ -298,29 +280,44 @@ void handleScheduleDaysApiGet() {
 
 void handleScheduleDaysApiPost() {
   if (!server.hasArg("plain")) {
-    server.send(400, "application/json", "{\"ok\":false,\"error\":\"expected json body\"}");
+    server.send(
+      400,
+      "application/json",
+      "{\"ok\":false,\"error\":\"expected json body\"}"
+    );
     return;
   }
 
   DynamicJsonDocument doc(12288);
   DeserializationError error = deserializeJson(doc, server.arg("plain"));
   if (error || !doc["schedules"].is<JsonArray>()) {
-    server.send(400, "application/json", "{\"ok\":false,\"error\":\"bad json or missing schedules array\"}");
+    server.send(
+      400,
+      "application/json",
+      "{\"ok\":false,\"error\":\"bad json or missing schedules array\"}"
+    );
     return;
   }
 
   reconcileScheduleDaysMasks(false);
+
   for (JsonObject item : doc["schedules"].as<JsonArray>()) {
     int id = item["id"] | -1;
     if (id < 0 || id >= trackedScheduleCount) continue;
 
     if (!item["daysMask"].isNull()) {
-      scheduleDaysMasks[id] = normalizeScheduleDaysMask(item["daysMask"].as<int>());
+      scheduleDaysMasks[id] = normalizeScheduleDaysMask(
+        item["daysMask"].as<int>()
+      );
     } else if (item["days"].is<const char*>()) {
-      scheduleDaysMasks[id] = parseScheduleDaysMask(item["days"].as<String>());
+      scheduleDaysMasks[id] = parseScheduleDaysMask(
+        item["days"].as<String>()
+      );
     } else if (item["days"].is<JsonArray>()) {
       uint8_t mask = 0;
-      for (JsonVariant day : item["days"].as<JsonArray>()) mask |= parseScheduleDaysMask(day.as<String>());
+      for (JsonVariant day : item["days"].as<JsonArray>()) {
+        mask |= parseScheduleDaysMask(day.as<String>());
+      }
       scheduleDaysMasks[id] = normalizeScheduleDaysMask(mask);
     }
   }
@@ -329,24 +326,330 @@ void handleScheduleDaysApiPost() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-void registerScheduleDaysRoutes() {
-  server.on("/schedule-days", HTTP_GET, handleScheduleDaysPage);
-  server.on("/schedule-days/save", HTTP_POST, handleScheduleDaysSave);
+const char WEEKDAY_ADMIN_CSS[] PROGMEM = R"rawliteral(
+.schedule-editor-row{border:1px solid #d8e3eb;border-radius:12px;padding:10px;margin:10px 0;background:#f8fbfd}
+.schedule-editor-fields{display:grid;grid-template-columns:90px 120px 110px 120px auto;gap:8px;align-items:end}
+.schedule-editor-fields label{min-width:0}
+.schedule-editor-fields input,.schedule-editor-fields select{width:100%;min-width:0}
+.weekday-picker{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.weekday-choice{display:inline-flex;flex-direction:row;align-items:center;gap:4px;border:1px solid #b9cbd7;border-radius:999px;padding:6px 9px;background:#fff;font-size:.85rem}
+.weekday-choice input{width:auto;margin:0}
+.weekday-presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.weekday-presets button{padding:5px 8px;font-size:.8rem;background:#526f5a}
+.schedule-days-summary{font-size:.82rem;color:#4a5e6b;margin-top:7px}
+@media(max-width:760px){
+  .schedule-editor-fields{grid-template-columns:1fr 1fr}
+  .schedule-editor-fields .delete-schedule{grid-column:1/-1}
+}
+)rawliteral";
+
+const char WEEKDAY_ADMIN_SCRIPT[] PROGMEM = R"rawliteral(
+const WEEKDAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+let weekdayMasksById=new Map();
+let lastWeekdayKey='';
+
+function weekdayMaskForRow(row){
+  return [...row.querySelectorAll('.schedule-day')].reduce(
+    (mask,input)=>input.checked?(mask|Number(input.value)):mask,
+    0
+  );
+}
+
+function weekdayLabel(mask){
+  if(mask===127)return 'All days';
+  if(mask===62)return 'Weekdays';
+  if(mask===65)return 'Weekends';
+  if(mask===0)return 'No automatic watering days';
+  return WEEKDAY_NAMES.filter((_,i)=>mask&(1<<i)).join(' ');
+}
+
+function updateWeekdaySummary(row){
+  const target=row.querySelector('.schedule-days-summary');
+  if(target)target.textContent=weekdayLabel(weekdayMaskForRow(row));
+}
+
+function setRowWeekdayMask(button,mask){
+  const row=button.closest('.schedule-editor-row');
+  row.querySelectorAll('.schedule-day').forEach(input=>{
+    input.checked=Boolean(mask&Number(input.value));
+  });
+  updateWeekdaySummary(row);
+}
+
+addScheduleRow=function(v){
+  const rows=document.getElementById('adminSchedRows');
+  const row=document.createElement('div');
+  row.className='schedule-editor-row';
+
+  const zone=Number(v&&v.zone||1);
+  const time=(v&&v.timeValue)||'06:00';
+  const minutes=Number(v&&v.runMinutes||10);
+  const enabled=!(v&&v.enabled===false);
+  const id=Number(v&&v.id);
+  const mask=Number.isInteger(id)&&weekdayMasksById.has(id)
+    ?weekdayMasksById.get(id)
+    :(v&&v.daysMask!=null?Number(v.daysMask):127);
+
+  row.innerHTML=`
+    <div class="schedule-editor-fields">
+      <label>Zone
+        <input class="schedule-zone" type="number" min="1" max="5" value="${zone}">
+      </label>
+      <label>Start
+        <input class="schedule-time" type="time" value="${time}">
+      </label>
+      <label>Minutes
+        <input class="schedule-minutes" type="number" min="1" max="240" value="${minutes}">
+      </label>
+      <label>Enabled
+        <select class="schedule-enabled">
+          <option value="on"${enabled?' selected':''}>On</option>
+          <option value="off"${enabled?'':' selected'}>Off</option>
+        </select>
+      </label>
+      <button class="danger delete-schedule" type="button" onclick="this.closest('.schedule-editor-row').remove()">Delete</button>
+    </div>
+    <div class="weekday-picker">
+      ${WEEKDAY_NAMES.map((name,index)=>`
+        <label class="weekday-choice">
+          <input class="schedule-day" type="checkbox" value="${1<<index}"${mask&(1<<index)?' checked':''}>
+          ${name}
+        </label>
+      `).join('')}
+    </div>
+    <div class="weekday-presets">
+      <button type="button" onclick="setRowWeekdayMask(this,127)">All days</button>
+      <button type="button" onclick="setRowWeekdayMask(this,62)">Weekdays</button>
+      <button type="button" onclick="setRowWeekdayMask(this,65)">Weekends</button>
+      <button type="button" onclick="setRowWeekdayMask(this,0)">No days</button>
+    </div>
+    <div class="schedule-days-summary"></div>
+  `;
+
+  row.querySelectorAll('.schedule-day').forEach(input=>{
+    input.addEventListener('change',()=>updateWeekdaySummary(row));
+  });
+
+  rows.appendChild(row);
+  updateWeekdaySummary(row);
+};
+
+saveSchedules=async function(){
+  const rows=[...document.querySelectorAll('#adminSchedRows .schedule-editor-row')];
+
+  const schedules=rows.map(row=>({
+    channel:Number(row.querySelector('.schedule-zone').value),
+    startTime:row.querySelector('.schedule-time').value,
+    durationSeconds:Number(row.querySelector('.schedule-minutes').value)*60,
+    enabled:row.querySelector('.schedule-enabled').value==='on'
+  }));
+
+  const timingResponse=await fetch('/api/schedules',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({schedules})
+  });
+
+  if(!timingResponse.ok){
+    alert('Failed to save schedule timing');
+    return;
+  }
+
+  const daySchedules=rows.map((row,id)=>({
+    id,
+    daysMask:weekdayMaskForRow(row)
+  }));
+
+  const daysResponse=await fetch('/api/schedule-days',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({schedules:daySchedules})
+  });
+
+  if(!daysResponse.ok){
+    alert('Schedule timing saved, but watering days failed to save');
+    return;
+  }
+
+  await refresh(true);
+  alert('Schedules and watering days saved');
+};
+
+const refreshWithoutWeekdays=refresh;
+refresh=async function(forceScheduleRedraw){
+  let weekdayChanged=false;
+
+  try{
+    const response=await fetch('/api/schedule-days',{cache:'no-store'});
+    if(response.ok){
+      const data=await response.json();
+      const rows=data.schedules||[];
+      const nextKey=JSON.stringify(rows.map(item=>[
+        Number(item.id),
+        Number(item.daysMask)
+      ]));
+
+      weekdayChanged=nextKey!==lastWeekdayKey;
+      lastWeekdayKey=nextKey;
+      weekdayMasksById=new Map(
+        rows.map(item=>[Number(item.id),Number(item.daysMask)])
+      );
+    }
+  }catch(error){
+    console.warn('Unable to load schedule weekday masks',error);
+  }
+
+  await refreshWithoutWeekdays(Boolean(forceScheduleRedraw||weekdayChanged));
+};
+
+refresh(true);
+setInterval(()=>refresh(false),1000);
+)rawliteral";
+
+bool replaceAdminFragment(
+  String& page,
+  const String& original,
+  const String& replacement,
+  const char* label
+) {
+  if (page.indexOf(original) < 0) {
+    Serial.print("Admin weekday integration fragment missing: ");
+    Serial.println(label);
+    return false;
+  }
+
+  page.replace(original, replacement);
+  return true;
+}
+
+String buildIntegratedAdminPage() {
+  String page = String(FPSTR(ADMIN_PAGE));
+  page.reserve(page.length() + 12000);
+
+  replaceAdminFragment(
+    page,
+    "</style></head>",
+    String(FPSTR(WEEKDAY_ADMIN_CSS)) + "</style></head>",
+    "styles"
+  );
+
+  replaceAdminFragment(
+    page,
+    "<section class=\"panel\"><h2>Zones (scheduled irrigation)</h2>",
+    "<section class=\"panel\" id=\"schedule-manager\"><h2>Zones (scheduled irrigation)</h2>",
+    "schedule manager anchor"
+  );
+
+  replaceAdminFragment(
+    page,
+    "<h3>Schedule Manager</h3><p>Create, update, and delete schedule rows directly in firmware.</p>",
+    "<h3>Schedule Manager</h3><p>Create, update, and delete schedule rows directly in firmware. Select the exact Sunday-through-Saturday watering days inside each row; the same Save Schedules button stores timing, enabled state, and watering days.</p>",
+    "schedule manager instructions"
+  );
+
+  replaceAdminFragment(
+    page,
+    "refresh(true);setInterval(()=>refresh(false),1000);",
+    String(FPSTR(WEEKDAY_ADMIN_SCRIPT)),
+    "schedule manager script"
+  );
+
+  return page;
+}
+
+void handleAdmin() {
+  server.send(200, "text/html", buildIntegratedAdminPage());
+}
+
+void setupServer() {
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/admin", HTTP_GET, handleAdmin);
+  server.on("/admin/save", HTTP_POST, handleSaveAdmin);
+
+  server.on("/api/state", HTTP_GET, sendStateJson);
+  server.on("/api/features", HTTP_GET, handleApiFeatures);
+  server.on("/api/config", HTTP_GET, handleApiConfigGet);
+  server.on("/api/config", HTTP_POST, handleApiConfigSet);
+  server.on("/api/schedules", HTTP_POST, handleApiScheduleSet);
+  server.on("/api/time/set", HTTP_GET, handleSetTime);
+  server.on("/time", HTTP_GET, handleTimeGet);
+  server.on("/weather", HTTP_GET, handleWeatherGet);
+  server.on("/api/relay", HTTP_GET, handleRelay);
+  server.on("/api/manual-run", HTTP_GET, handleManualRun);
+  server.on("/api/zone/stop", HTTP_GET, handleStopZone);
+  server.on("/api/spigots-run", HTTP_GET, handleSpigotRun);
+  server.on("/api/schedule/add", HTTP_GET, handleScheduleAdd);
+  server.on("/api/schedule/delete", HTTP_GET, handleScheduleDelete);
+  server.on("/api/alloff", HTTP_GET, handleAllOff);
+  server.on("/api/buzzer-test", HTTP_GET, handleBuzzerTest);
+  server.on("/api/factory-reset", HTTP_GET, handleFactoryReset);
+  server.on("/api/remote/config", HTTP_POST, handleRemoteConfig);
+  server.on("/api/remote/test", HTTP_GET, handleRemoteTest);
+
+  server.on("/schedule-days", HTTP_GET, handleScheduleDaysRedirect);
+  server.on("/schedule-days/save", HTTP_POST, handleScheduleDaysRedirect);
   server.on("/api/schedule-days", HTTP_GET, handleScheduleDaysApiGet);
   server.on("/api/schedule-days", HTTP_POST, handleScheduleDaysApiPost);
+
+  server.on("/status", HTTP_GET, sendStateJson);
+  server.onNotFound(handleRoot);
+  server.begin();
 }
 
 void setup() {
-  gardenLegacySetup();
+  Serial.begin(115200);
+  delay(500);
+
+  loadConfig();
   reconcileScheduleDaysMasks(true);
-  registerScheduleDaysRoutes();
-  Serial.println("Weekday schedule editor: /schedule-days");
-  Serial.println("Weekday schedule API: /api/schedule-days");
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  statusPixel.begin();
+  statusPixel.setBrightness(RGB_LED_BRIGHTNESS);
+  statusPixel.clear();
+  statusPixel.show();
+
+  for (uint8_t i = 0; i < RELAY_COUNT; i++) {
+    pinMode(RELAY_PINS[i], OUTPUT);
+    digitalWrite(RELAY_PINS[i], RELAY_OFF);
+  }
+  allOff();
+
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_AP_STA);
+
+  setupGardenTimeZone();
+  setupAp();
+  connectSta(true);
+  configTzTime(gardenPosixTimeZone, "pool.ntp.org", "time.nist.gov");
+  updateWeatherFromOpenMeteo();
+
+  setupServer();
+
+  xTaskCreatePinnedToCore(
+    remoteTask,
+    "remoteTask",
+    10000,
+    nullptr,
+    1,
+    &remoteTaskHandle,
+    0
+  );
+
+  Serial.println("GardenSimpleRelay6 ready.");
+  Serial.println("Weekday controls integrated into captive portal /admin.");
+  Serial.print("AP SSID: ");
+  Serial.println(apSsid);
+  Serial.print("AP IP: ");
+  Serial.println(WiFi.softAPIP());
 }
 
 void loop() {
   dns.processNextRequest();
   server.handleClient();
+
   if (millis() - lastWeatherFetchMs >= WEATHER_REFRESH_MS) {
     lastWeatherFetchMs = millis();
     updateWeatherFromOpenMeteo();
@@ -356,18 +659,30 @@ void loop() {
   checkScheduleWithWeekdays();
   updateZoneRgbLed();
 
-  if (WiFi.status() == WL_CONNECTED && (staConnectInProgress || lastStaStatus.startsWith("connecting"))) {
+  if (
+    WiFi.status() == WL_CONNECTED &&
+    (staConnectInProgress || lastStaStatus.startsWith("connecting"))
+  ) {
     staConnectInProgress = false;
     lastStaStatus = "connected: " + WiFi.localIP().toString();
   }
 
-  if (staConnectInProgress && WiFi.status() != WL_CONNECTED && millis() - staConnectStartMs > 20000UL) {
+  if (
+    staConnectInProgress &&
+    WiFi.status() != WL_CONNECTED &&
+    millis() - staConnectStartMs > 20000UL
+  ) {
     staConnectInProgress = false;
     lastStaStatus = "connection timed out, status " + String((int)WiFi.status());
     WiFi.disconnect(false, false);
   }
 
-  if (!staConnectInProgress && WiFi.status() != WL_CONNECTED && strlen(staSsid) > 0 && millis() - lastWifiAttemptMs > 60000UL) {
+  if (
+    !staConnectInProgress &&
+    WiFi.status() != WL_CONNECTED &&
+    strlen(staSsid) > 0 &&
+    millis() - lastWifiAttemptMs > 60000UL
+  ) {
     lastWifiAttemptMs = millis();
     connectSta(false);
   }
