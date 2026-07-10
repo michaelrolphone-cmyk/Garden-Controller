@@ -1,0 +1,62 @@
+name: Bootstrap weekday schedule feature
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/bootstrap-weekday-feature.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-feature:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/day-of-week-schedules
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Extract and run feature patch
+        shell: bash
+        run: |
+          awk '
+            /python3 - <<.PY./ { capture=1; next }
+            capture && /^          PY$/ { capture=0; exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/apply-day-of-week-schedules.yml > /tmp/apply-weekdays.py
+          test -s /tmp/apply-weekdays.py
+          python3 /tmp/apply-weekdays.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Commit feature implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mcu/relay/GardenSimpleRelay6.ino test/weekday-schedule.test.js README.md
+          git diff --cached --check
+          git commit -m "Add day-of-week watering schedules [skip ci]"
+          git push origin HEAD:feature/day-of-week-schedules
+
+      - name: Remove one-time bootstrap from main
+        if: success()
+        shell: bash
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+          git rm .github/workflows/bootstrap-weekday-feature.yml
+          git commit -m "Remove weekday feature bootstrap [skip ci]"
+          git push origin main
