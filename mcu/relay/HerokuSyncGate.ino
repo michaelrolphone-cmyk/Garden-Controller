@@ -24,11 +24,12 @@ void initVariant() {
   }
 
   // Extended routes must be inserted before the reliable and compatibility
-  // layers. Post-init starts the fallback network/time task after mesh and
-  // reliable schedule persistence have been loaded.
+  // layers. Post-init starts time fallback and bounded catch-up only after mesh
+  // and reliable schedule persistence have been loaded.
   slaveInternetTimePreInit();
   meshReliablePreInit();
   meshEarlyInit();
   meshReliablePostInit();
   slaveInternetTimePostInit();
+  slaveScheduleCatchupPostInit();
 }
