@@ -93,12 +93,16 @@ static void slaveCatchupAfterClockRecovery() {
 static void slaveCatchupTask(void* parameter) {
   (void)parameter;
   for (;;) {
-    if (meshIsSlave()) {
+    if (meshIsSlave() && meshLegacyNeutralized) {
       bool valid = clockIsValid();
       if (valid && !slaveCatchupPreviousClockValid) {
         slaveCatchupAfterClockRecovery();
       }
       slaveCatchupPreviousClockValid = valid;
+    } else {
+      // Do not consume the false-to-true clock transition before the Slave
+      // runtime has disabled legacy schedules and initialized all six relays.
+      slaveCatchupPreviousClockValid = false;
     }
     vTaskDelay(pdMS_TO_TICKS(500));
   }
