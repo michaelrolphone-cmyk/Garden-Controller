@@ -49,15 +49,25 @@ describe('relay firmware zone, weekday, and spigot schedule support', () => {
 
   test('publishes and synchronizes spigot schedules with Heroku', () => {
     expect(wrapper).toContain('publishAllSchedulesNow()');
+    expect(wrapper).toContain('doc["includesSpigotSchedules"] = true;');
     expect(wrapper).toContain('"/api/microcontroller/schedules"');
     expect(wrapper).toContain('"/api/firmware/spigot-schedules"');
     expect(wrapper).toContain('spigotScheduleSyncTask');
+  });
+
+  test('protects local schedules from restart and concurrent synchronization loss', () => {
+    expect(wrapper).toContain('xSemaphoreCreateRecursiveMutex()');
+    expect(wrapper).toContain('spigotScheduleRevision == publishedRevision');
+    expect(wrapper).toContain('server schedule state empty; republishing local schedules');
+    expect(start).toContain('spigotSchedulesAuthoritative');
+    expect(start).toContain('authoritative: spigotSchedulesAuthoritative');
   });
 
   test('Heroku accepts channel 6 while preserving zone schedule commands', () => {
     expect(start).toContain('channel > MASTER_VALVE_CHANNEL');
     expect(start).toContain("findRoute(app, '/api/schedules', 'post')");
     expect(start).toContain("findRoute(app, '/gui/schedules', 'post')");
+    expect(start).toContain("findRoute(app, '/gui/schedules/:id/delete', 'post')");
     expect(start).toContain("app.get('/api/firmware/spigot-schedules'");
     expect(start).toContain('preservedSpigots');
   });
