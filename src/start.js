@@ -212,7 +212,11 @@ function installScheduleRouteSupport(app, state) {
   if (apiDeleteRoute) {
     const originalApiDeleteHandler = apiDeleteRoute.stack[apiDeleteRoute.stack.length - 1].handle;
     replaceAuthenticatedRoute(apiDeleteRoute, (req, res, next) => {
-      spigotSchedulesAuthoritative = true;
+      const originalJson = res.json.bind(res);
+      res.json = (payload) => {
+        if (res.statusCode < 400) spigotSchedulesAuthoritative = true;
+        return originalJson(payload);
+      };
       return originalApiDeleteHandler(req, res, next);
     });
   }
@@ -221,7 +225,11 @@ function installScheduleRouteSupport(app, state) {
   if (guiDeleteRoute) {
     const originalGuiDeleteHandler = guiDeleteRoute.stack[guiDeleteRoute.stack.length - 1].handle;
     replaceAuthenticatedRoute(guiDeleteRoute, (req, res, next) => {
-      spigotSchedulesAuthoritative = true;
+      const originalRedirect = res.redirect.bind(res);
+      res.redirect = (...args) => {
+        spigotSchedulesAuthoritative = true;
+        return originalRedirect(...args);
+      };
       return originalGuiDeleteHandler(req, res, next);
     });
   }
@@ -238,7 +246,13 @@ function installScheduleRouteSupport(app, state) {
       (schedule) => schedule.channel === MASTER_VALVE_CHANNEL
     );
     const includesSpigotSchedules = req.body?.includesSpigotSchedules === true;
-    if (includesSpigotSchedules) spigotSchedulesAuthoritative = true;
+    if (includesSpigotSchedules) {
+      const error = validateSchedules(incoming);
+      if (error) {
+        return res.status(400).json({ error: 'Invalid schedule timing', detail: error });
+      }
+      spigotSchedulesAuthoritative = true;
+    }
     const preservedSpigots = includesSpigotSchedules
       ? incomingSpigots
       : state.schedules.filter((schedule) => schedule.channel === MASTER_VALVE_CHANNEL);
