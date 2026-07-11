@@ -42,12 +42,19 @@ describe('slave Internet time fallback', () => {
     expect(fallback).toContain('master unavailable; local schedules using retained clock');
   });
 
-  test('reports clock validity and source to the master', () => {
+  test('starts a new six-hour window after each successful Internet sync', () => {
+    expect(catchup).toContain('slaveCatchupSeenInternetSyncEpoch');
+    expect(catchup).toContain('slaveTimeMasterLostSinceMs = millis();');
+    expect(catchup).toContain('instead of repeatedly switching networks every retry cycle');
+  });
+
+  test('reports clock validity and source to the master promptly', () => {
     expect(fallback).toContain('server.on("/api/slaves/time-status"');
     expect(fallback).toContain('doc["clockValid"] = clockIsValid()');
     expect(fallback).toContain('doc["timeSource"] = slaveTimeSource');
     expect(fallback).toContain('clock["valid"] = observation.clockValid');
     expect(fallback).toContain('Clock status not yet reported');
+    expect(catchup).toContain('slaveTimeLastStatusReportMs = millis() - SLAVE_TIME_STATUS_REPORT_MS');
   });
 
   test('surfaces invalid clock state instead of silently skipping schedules', () => {
@@ -58,6 +65,7 @@ describe('slave Internet time fallback', () => {
 
   test('catches up a recently missed schedule after clock acquisition', () => {
     expect(catchup).toContain('SLAVE_CLOCK_CATCHUP_WINDOW_MINUTES = 60');
+    expect(catchup).toContain('meshIsSlave() && meshLegacyNeutralized');
     expect(catchup).toContain('slaveCatchupAfterClockRecovery');
     expect(catchup).toContain('minuteOfDay + schedule.runMinutes > 20 * 60');
     expect(catchup).toContain('slaveCatchupAnyRelayActive()');
