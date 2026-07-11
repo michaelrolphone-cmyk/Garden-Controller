@@ -9,3 +9,4 @@ void meshReliablePreInit();
 void meshEarlyInit();
 void meshReliablePostInit();
 void slaveInternetTimePostInit();
+void slaveScheduleCatchupPostInit();
