@@ -13,7 +13,9 @@
 #define checkSchedule gardenLegacyCheckSchedule
 #define handleAdmin gardenLegacyHandleAdmin
 #define setupServer gardenLegacySetupServer
+#define remoteTask gardenLegacyRemoteTask
 #include "GardenSimpleRelay6Core.inc"
+#undef remoteTask
 #undef setupServer
 #undef handleAdmin
 #undef checkSchedule
@@ -40,7 +42,6 @@ static SpigotSchedule spigotSchedules[MAX_DAILY_SCHEDULES];
 static uint8_t spigotScheduleCount = 0;
 static bool spigotSchedulesDirty = false;
 static uint32_t spigotScheduleRevision = 0;
-static TaskHandle_t spigotScheduleSyncTaskHandle = nullptr;
 static SemaphoreHandle_t spigotScheduleMutex = nullptr;
 static const uint32_t SPIGOT_SCHEDULE_SYNC_INTERVAL_MS = 10000UL;
 
@@ -562,13 +563,23 @@ bool syncSpigotSchedulesFromRemote() {
   return true;
 }
 
-void spigotScheduleSyncTask(void* param) {
+void remoteTask(void* param) {
   (void)param;
-  vTaskDelay(pdMS_TO_TICKS(3000));
+  uint32_t lastSpigotSyncMs = millis() - SPIGOT_SCHEDULE_SYNC_INTERVAL_MS;
 
   for (;;) {
-    syncSpigotSchedulesFromRemote();
-    vTaskDelay(pdMS_TO_TICKS(SPIGOT_SCHEDULE_SYNC_INTERVAL_MS));
+    if (remoteReady()) {
+      uint32_t nowMs = millis();
+      if (nowMs - lastSpigotSyncMs >= SPIGOT_SCHEDULE_SYNC_INTERVAL_MS) {
+        lastSpigotSyncMs = nowMs;
+        syncSpigotSchedulesFromRemote();
+      }
+
+      serviceRemoteApi();
+      vTaskDelay(pdMS_TO_TICKS(100));
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(REMOTE_OFFLINE_DELAY_MS));
+    }
   }
 }
 
@@ -1095,16 +1106,6 @@ void setup() {
     nullptr,
     1,
     &remoteTaskHandle,
-    0
-  );
-
-  xTaskCreatePinnedToCore(
-    spigotScheduleSyncTask,
-    "spigotScheduleSync",
-    8192,
-    nullptr,
-    1,
-    &spigotScheduleSyncTaskHandle,
     0
   );
 
