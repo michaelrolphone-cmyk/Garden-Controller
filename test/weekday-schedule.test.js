@@ -14,6 +14,7 @@ describe('relay firmware zone, weekday, and spigot schedule support', () => {
     expect(wrapper).toContain('#define loop gardenLegacyLoop');
     expect(wrapper).toContain('#define handleAdmin gardenLegacyHandleAdmin');
     expect(wrapper).toContain('#define setupServer gardenLegacySetupServer');
+    expect(wrapper).toContain('#define remoteTask gardenLegacyRemoteTask');
     expect(core).toContain('const char FIRMWARE_VERSION[] = "v26-stop-zone-api";');
   });
 
@@ -52,7 +53,8 @@ describe('relay firmware zone, weekday, and spigot schedule support', () => {
     expect(wrapper).toContain('doc["includesSpigotSchedules"] = true;');
     expect(wrapper).toContain('"/api/microcontroller/schedules"');
     expect(wrapper).toContain('"/api/firmware/spigot-schedules"');
-    expect(wrapper).toContain('spigotScheduleSyncTask');
+    expect(wrapper).toContain('syncSpigotSchedulesFromRemote();');
+    expect(wrapper).toContain('serviceRemoteApi();');
   });
 
   test('protects local schedules from restart and concurrent synchronization loss', () => {
