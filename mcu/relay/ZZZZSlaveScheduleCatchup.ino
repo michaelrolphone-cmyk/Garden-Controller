@@ -8,6 +8,7 @@
 static const uint16_t SLAVE_CLOCK_CATCHUP_WINDOW_MINUTES = 60;
 static bool slaveCatchupPreviousClockValid = false;
 static int slaveCatchupEvaluatedDateKey = -1;
+static uint32_t slaveCatchupSeenInternetSyncEpoch = 0;
 static TaskHandle_t slaveCatchupTaskHandle = nullptr;
 
 static bool slaveCatchupAnyRelayActive() {
@@ -94,6 +95,14 @@ static void slaveCatchupTask(void* parameter) {
   (void)parameter;
   for (;;) {
     if (meshIsSlave() && meshLegacyNeutralized) {
+      if (slaveTimeLastInternetSyncEpoch > 0 &&
+          slaveTimeLastInternetSyncEpoch != slaveCatchupSeenInternetSyncEpoch) {
+        slaveCatchupSeenInternetSyncEpoch = slaveTimeLastInternetSyncEpoch;
+        // Start a fresh resynchronization interval from the confirmed NTP
+        // response instead of repeatedly switching networks every retry cycle.
+        slaveTimeMasterLostSinceMs = millis();
+      }
+
       bool valid = clockIsValid();
       if (valid && !slaveCatchupPreviousClockValid) {
         slaveCatchupAfterClockRecovery();
@@ -111,6 +120,7 @@ static void slaveCatchupTask(void* parameter) {
 void slaveScheduleCatchupPostInit() {
   slaveCatchupPreviousClockValid = false;
   slaveCatchupEvaluatedDateKey = -1;
+  slaveCatchupSeenInternetSyncEpoch = slaveTimeLastInternetSyncEpoch;
   // Make the first clock report eligible immediately after the slave reaches
   // the master instead of waiting the normal reporting interval.
   slaveTimeLastStatusReportMs = millis() - SLAVE_TIME_STATUS_REPORT_MS;
