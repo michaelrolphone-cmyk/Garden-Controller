@@ -111,6 +111,9 @@ static void slaveCatchupTask(void* parameter) {
 void slaveScheduleCatchupPostInit() {
   slaveCatchupPreviousClockValid = false;
   slaveCatchupEvaluatedDateKey = -1;
+  // Make the first clock report eligible immediately after the slave reaches
+  // the master instead of waiting the normal reporting interval.
+  slaveTimeLastStatusReportMs = millis() - SLAVE_TIME_STATUS_REPORT_MS;
   xTaskCreatePinnedToCore(
       slaveCatchupTask,
       "slaveCatchup",
