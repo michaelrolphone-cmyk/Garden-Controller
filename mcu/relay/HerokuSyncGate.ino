@@ -23,8 +23,10 @@ void initVariant() {
     settings.end();
   }
 
-  // Register role-aware routes and start the local master/slave service before
-  // the sketch setup registers its legacy routes. WebServer resolves handlers
-  // in registration order, so these role-aware handlers remain authoritative.
+  // Reliable routes must be inserted before the compatibility mesh routes.
+  // The post-init phase runs after the existing mesh preferences are loaded so
+  // it can migrate old remote schedules and disable master-side execution.
+  meshReliablePreInit();
   meshEarlyInit();
+  meshReliablePostInit();
 }
