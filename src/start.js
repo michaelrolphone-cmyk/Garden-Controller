@@ -142,6 +142,7 @@ function replaceAuthenticatedRoute(route, handler) {
 }
 
 function installScheduleRouteSupport(app, state) {
+  let spigotSchedulesAuthoritative = false;
   const apiRoute = findRoute(app, '/api/schedules', 'post');
   const originalApiHandler = apiRoute.stack[apiRoute.stack.length - 1].handle;
 
@@ -160,6 +161,7 @@ function installScheduleRouteSupport(app, state) {
       });
     }
 
+    spigotSchedulesAuthoritative = true;
     const zoneSchedules = fullSchedules.filter((schedule) => schedule.channel <= ZONE_CHANNELS);
     const originalBody = req.body;
     const originalJson = res.json.bind(res);
@@ -191,6 +193,7 @@ function installScheduleRouteSupport(app, state) {
 
     const originalBody = req.body;
     const originalRedirect = res.redirect.bind(res);
+    spigotSchedulesAuthoritative = true;
     const zoneSchedules = fullSchedules.filter((schedule) => schedule.channel <= ZONE_CHANNELS);
 
     req.body = guiBodyFromSchedules(zoneSchedules);
@@ -205,6 +208,24 @@ function installScheduleRouteSupport(app, state) {
     return result;
   });
 
+  const apiDeleteRoute = findRoute(app, '/api/schedules/:id', 'delete');
+  if (apiDeleteRoute) {
+    const originalApiDeleteHandler = apiDeleteRoute.stack[apiDeleteRoute.stack.length - 1].handle;
+    replaceAuthenticatedRoute(apiDeleteRoute, (req, res, next) => {
+      spigotSchedulesAuthoritative = true;
+      return originalApiDeleteHandler(req, res, next);
+    });
+  }
+
+  const guiDeleteRoute = findRoute(app, '/gui/schedules/:id/delete', 'post');
+  if (guiDeleteRoute) {
+    const originalGuiDeleteHandler = guiDeleteRoute.stack[guiDeleteRoute.stack.length - 1].handle;
+    replaceAuthenticatedRoute(guiDeleteRoute, (req, res, next) => {
+      spigotSchedulesAuthoritative = true;
+      return originalGuiDeleteHandler(req, res, next);
+    });
+  }
+
   const firmwareSchedulesRoute = findRoute(app, '/api/microcontroller/schedules', 'post');
   const originalFirmwareSchedulesHandler =
     firmwareSchedulesRoute.stack[firmwareSchedulesRoute.stack.length - 1].handle;
@@ -216,7 +237,9 @@ function installScheduleRouteSupport(app, state) {
     const incomingSpigots = incoming.filter(
       (schedule) => schedule.channel === MASTER_VALVE_CHANNEL
     );
-    const preservedSpigots = incomingSpigots.length
+    const includesSpigotSchedules = req.body?.includesSpigotSchedules === true;
+    if (includesSpigotSchedules) spigotSchedulesAuthoritative = true;
+    const preservedSpigots = includesSpigotSchedules
       ? incomingSpigots
       : state.schedules.filter((schedule) => schedule.channel === MASTER_VALVE_CHANNEL);
     const originalBody = req.body;
@@ -276,6 +299,7 @@ function installScheduleRouteSupport(app, state) {
 
   app.get('/api/firmware/spigot-schedules', apiAuth, (_req, res) => {
     res.json({
+      authoritative: spigotSchedulesAuthoritative,
       schedules: state.schedules
         .filter((schedule) => Number(schedule.channel) === MASTER_VALVE_CHANNEL)
         .map((schedule, index) => normalizeSchedule(schedule, index))
@@ -289,19 +313,28 @@ function installGuiSpigotSchedulePatch() {
 
   express.response.send = function sendWithSpigotScheduleGuiPatch(body) {
     if (this.req?.path === '/gui' && typeof body === 'string') {
+      const channelSixScript = `<script>
+        (() => {
+          const enableSpigotScheduleChannels = () => {
+            document.querySelectorAll('input[name*="[channel]"]').forEach((input) => {
+              input.max = '6';
+              input.title = 'Zones 1-5 or channel 6 for Spigots';
+            });
+          };
+          enableSpigotScheduleChannels();
+          new MutationObserver(enableSpigotScheduleChannels).observe(document.body, {
+            childList: true,
+            subtree: true
+          });
+        })();
+      </script>`;
+
       body = body
-        .replace(
-          /(<input name="schedule\[\d+\]\[channel\]" type="number" min="1" max=")5(")/g,
-          (_match, before, after) => `${before}6${after}`
-        )
-        .replace(
-          /(<input name="schedule\[' \+ nextIndex \+ '\]\[channel\]" type="number" min="1" max=")5(")/g,
-          (_match, before, after) => `${before}6${after}`
-        )
         .replace(
           'Edit the complete schedule list and save it as one update.',
           'Edit the complete schedule list and save it as one update. Channel 6 schedules the Spigots.'
-        );
+        )
+        .replace('</body>', `${channelSixScript}</body>`);
     }
     return originalSend.call(this, body);
   };
