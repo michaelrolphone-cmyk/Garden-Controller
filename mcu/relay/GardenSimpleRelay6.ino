@@ -1,3 +1,6 @@
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
 // GardenSimpleRelay6.ino
 // Weekday-aware schedules for zones 1-5 plus independently timed spigot schedules.
 //
@@ -36,8 +39,27 @@ static uint8_t trackedScheduleCount = 0;
 static SpigotSchedule spigotSchedules[MAX_DAILY_SCHEDULES];
 static uint8_t spigotScheduleCount = 0;
 static bool spigotSchedulesDirty = false;
+static uint32_t spigotScheduleRevision = 0;
 static TaskHandle_t spigotScheduleSyncTaskHandle = nullptr;
+static SemaphoreHandle_t spigotScheduleMutex = nullptr;
 static const uint32_t SPIGOT_SCHEDULE_SYNC_INTERVAL_MS = 10000UL;
+
+class SpigotScheduleGuard {
+ public:
+  bool acquired;
+
+  SpigotScheduleGuard()
+    : acquired(
+        spigotScheduleMutex == nullptr ||
+        xSemaphoreTakeRecursive(spigotScheduleMutex, pdMS_TO_TICKS(1000)) == pdTRUE
+      ) {}
+
+  ~SpigotScheduleGuard() {
+    if (spigotScheduleMutex != nullptr && acquired) {
+      xSemaphoreGiveRecursive(spigotScheduleMutex);
+    }
+  }
+};
 
 uint8_t normalizeScheduleDaysMask(int value) {
   return (uint8_t)(value & ALL_WEEKDAYS_MASK);
@@ -226,6 +248,8 @@ bool zoneScheduleRunsToday(uint8_t scheduleIndex, int weekDay) {
 }
 
 void clearSpigotSchedules() {
+  SpigotScheduleGuard guard;
+  if (!guard.acquired) return;
   spigotScheduleCount = 0;
   for (uint8_t i = 0; i < MAX_DAILY_SCHEDULES; i++) {
     spigotSchedules[i].enabled = false;
@@ -245,6 +269,9 @@ bool addSpigotSchedule(
   bool enabled,
   uint8_t daysMask
 ) {
+  SpigotScheduleGuard guard;
+  if (!guard.acquired) return false;
+
   if (
     hour > 23 ||
     minute > 59 ||
@@ -267,6 +294,8 @@ bool addSpigotSchedule(
 }
 
 void saveSpigotSchedules() {
+  SpigotScheduleGuard guard;
+  if (!guard.acquired) return;
   Preferences spigotPrefs;
   spigotPrefs.begin("relay6spig", false);
   spigotPrefs.putUChar("count", spigotScheduleCount);
@@ -285,6 +314,8 @@ void saveSpigotSchedules() {
 }
 
 void loadSpigotSchedules() {
+  SpigotScheduleGuard guard;
+  if (!guard.acquired) return;
   clearSpigotSchedules();
 
   Preferences spigotPrefs;
@@ -320,6 +351,8 @@ void addDaysArray(JsonObject item, uint8_t daysMask) {
 }
 
 void addCombinedScheduleArray(JsonDocument& doc, const char* key = "schedules") {
+  SpigotScheduleGuard guard;
+  if (!guard.acquired) return;
   JsonArray schedules = doc.createNestedArray(key);
 
   for (uint8_t i = 0; i < dailyScheduleCount; i++) {
@@ -353,17 +386,29 @@ bool publishAllSchedulesNow() {
   if (!remoteReady()) return false;
 
   DynamicJsonDocument doc(16384);
-  addCombinedScheduleArray(doc);
+  uint32_t publishedRevision = 0;
+  {
+    SpigotScheduleGuard guard;
+    if (!guard.acquired) return false;
+    publishedRevision = spigotScheduleRevision;
+    doc["includesSpigotSchedules"] = true;
+    addCombinedScheduleArray(doc);
+  }
 
   String body;
   String response;
   int code = -1;
   serializeJson(doc, body);
   bool ok = remotePostJson("/api/microcontroller/schedules", body, response, code);
+
   if (ok) {
-    spigotSchedulesDirty = false;
-    saveSpigotSchedules();
+    SpigotScheduleGuard guard;
+    if (guard.acquired && spigotScheduleRevision == publishedRevision) {
+      spigotSchedulesDirty = false;
+      saveSpigotSchedules();
+    }
   }
+
   return ok;
 }
 
@@ -417,6 +462,12 @@ bool applyCombinedScheduleArray(JsonArray schedules, String& errorOut, bool mark
   applyScheduleArray(zoneSchedules);
   reconcileScheduleDaysMasks(false);
 
+  SpigotScheduleGuard guard;
+  if (!guard.acquired) {
+    errorOut = "schedule storage busy";
+    return false;
+  }
+
   clearSpigotSchedules();
   uint8_t zoneIndex = 0;
 
@@ -439,12 +490,8 @@ bool applyCombinedScheduleArray(JsonArray schedules, String& errorOut, bool mark
 
   saveScheduleDaysMasks();
   spigotSchedulesDirty = markLocalDirty;
+  if (markLocalDirty) spigotScheduleRevision++;
   saveSpigotSchedules();
-
-  if (markLocalDirty) {
-    publishAllSchedulesNow();
-  }
-
   return true;
 }
 
@@ -465,6 +512,22 @@ bool syncSpigotSchedulesFromRemote() {
   DeserializationError error = deserializeJson(doc, response);
   if (error || !doc["schedules"].is<JsonArray>()) {
     lastRemoteStatus = "spigot schedule sync JSON failed";
+    return false;
+  }
+
+  bool authoritative = doc["authoritative"] | false;
+  if (!authoritative) {
+    lastRemoteStatus = "server schedule state empty; republishing local schedules";
+    return publishAllSchedulesNow();
+  }
+
+  SpigotScheduleGuard guard;
+  if (!guard.acquired) {
+    lastRemoteStatus = "spigot schedule storage busy";
+    return false;
+  }
+  if (spigotSchedulesDirty) {
+    lastRemoteStatus = "local spigot schedule changed during sync";
     return false;
   }
 
@@ -515,62 +578,67 @@ void checkScheduleWithWeekdays() {
   struct tm currentTime;
   if (!getLocalTime(&currentTime, 20)) return;
 
-  reconcileScheduleDaysMasks(false);
-
   bool startedAny = false;
   int minuteOfDay = currentTime.tm_hour * 60 + currentTime.tm_min;
 
-  for (uint8_t i = 0; i < dailyScheduleCount; i++) {
-    DailySchedule& schedule = dailySchedules[i];
+  {
+    SpigotScheduleGuard guard;
+    if (!guard.acquired) return;
 
-    if (
-      !schedule.enabled ||
-      schedule.runMinutes == 0 ||
-      schedule.zoneIndex >= ZONE_COUNT ||
-      !zones[schedule.zoneIndex].enabled ||
-      !zoneScheduleRunsToday(i, currentTime.tm_wday)
-    ) {
-      continue;
+    reconcileScheduleDaysMasks(false);
+
+    for (uint8_t i = 0; i < dailyScheduleCount; i++) {
+      DailySchedule& schedule = dailySchedules[i];
+
+      if (
+        !schedule.enabled ||
+        schedule.runMinutes == 0 ||
+        schedule.zoneIndex >= ZONE_COUNT ||
+        !zones[schedule.zoneIndex].enabled ||
+        !zoneScheduleRunsToday(i, currentTime.tm_wday)
+      ) {
+        continue;
+      }
+
+      int scheduledMinute = schedule.startHour * 60 + schedule.startMinute;
+      if (
+        minuteOfDay == scheduledMinute &&
+        (
+          schedule.lastRunYearDay != currentTime.tm_yday ||
+          schedule.lastRunMinuteOfDay != minuteOfDay
+        )
+      ) {
+        schedule.lastRunYearDay = currentTime.tm_yday;
+        schedule.lastRunMinuteOfDay = minuteOfDay;
+        startRun(schedule.zoneIndex, schedule.runMinutes, false);
+        startedAny = true;
+      }
     }
 
-    int scheduledMinute = schedule.startHour * 60 + schedule.startMinute;
-    if (
-      minuteOfDay == scheduledMinute &&
-      (
-        schedule.lastRunYearDay != currentTime.tm_yday ||
-        schedule.lastRunMinuteOfDay != minuteOfDay
-      )
-    ) {
-      schedule.lastRunYearDay = currentTime.tm_yday;
-      schedule.lastRunMinuteOfDay = minuteOfDay;
-      startRun(schedule.zoneIndex, schedule.runMinutes, false);
-      startedAny = true;
-    }
-  }
+    for (uint8_t i = 0; i < spigotScheduleCount; i++) {
+      SpigotSchedule& schedule = spigotSchedules[i];
 
-  for (uint8_t i = 0; i < spigotScheduleCount; i++) {
-    SpigotSchedule& schedule = spigotSchedules[i];
+      if (
+        !schedule.enabled ||
+        schedule.runMinutes == 0 ||
+        (schedule.daysMask & (1U << currentTime.tm_wday)) == 0
+      ) {
+        continue;
+      }
 
-    if (
-      !schedule.enabled ||
-      schedule.runMinutes == 0 ||
-      (schedule.daysMask & (1U << currentTime.tm_wday)) == 0
-    ) {
-      continue;
-    }
-
-    int scheduledMinute = schedule.startHour * 60 + schedule.startMinute;
-    if (
-      minuteOfDay == scheduledMinute &&
-      (
-        schedule.lastRunYearDay != currentTime.tm_yday ||
-        schedule.lastRunMinuteOfDay != minuteOfDay
-      )
-    ) {
-      schedule.lastRunYearDay = currentTime.tm_yday;
-      schedule.lastRunMinuteOfDay = minuteOfDay;
-      startSpigotRun(schedule.runMinutes);
-      startedAny = true;
+      int scheduledMinute = schedule.startHour * 60 + schedule.startMinute;
+      if (
+        minuteOfDay == scheduledMinute &&
+        (
+          schedule.lastRunYearDay != currentTime.tm_yday ||
+          schedule.lastRunMinuteOfDay != minuteOfDay
+        )
+      ) {
+        schedule.lastRunYearDay = currentTime.tm_yday;
+        schedule.lastRunMinuteOfDay = minuteOfDay;
+        startSpigotRun(schedule.runMinutes);
+        startedAny = true;
+      }
     }
   }
 
@@ -613,27 +681,37 @@ void handleScheduleDaysApiPost() {
 
   reconcileScheduleDaysMasks(false);
 
-  for (JsonObject item : doc["schedules"].as<JsonArray>()) {
-    int id = item["id"] | -1;
-    if (id < 0) continue;
-
-    if (id < trackedScheduleCount) {
-      scheduleDaysMasks[id] = daysMaskFromJson(item, scheduleDaysMasks[id]);
-      continue;
+  {
+    SpigotScheduleGuard guard;
+    if (!guard.acquired) {
+      server.send(503, "application/json", "{\"ok\":false,\"error\":\"schedule storage busy\"}");
+      return;
     }
 
-    int spigotIndex = id - trackedScheduleCount;
-    if (spigotIndex >= 0 && spigotIndex < spigotScheduleCount) {
-      spigotSchedules[spigotIndex].daysMask = daysMaskFromJson(
-        item,
-        spigotSchedules[spigotIndex].daysMask
-      );
+    for (JsonObject item : doc["schedules"].as<JsonArray>()) {
+      int id = item["id"] | -1;
+      if (id < 0) continue;
+
+      if (id < trackedScheduleCount) {
+        scheduleDaysMasks[id] = daysMaskFromJson(item, scheduleDaysMasks[id]);
+        continue;
+      }
+
+      int spigotIndex = id - trackedScheduleCount;
+      if (spigotIndex >= 0 && spigotIndex < spigotScheduleCount) {
+        spigotSchedules[spigotIndex].daysMask = daysMaskFromJson(
+          item,
+          spigotSchedules[spigotIndex].daysMask
+        );
+      }
     }
+
+    saveScheduleDaysMasks();
+    spigotSchedulesDirty = true;
+    spigotScheduleRevision++;
+    saveSpigotSchedules();
   }
 
-  saveScheduleDaysMasks();
-  spigotSchedulesDirty = true;
-  saveSpigotSchedules();
   publishAllSchedulesNow();
   server.send(200, "application/json", "{\"ok\":true}");
 }
@@ -662,6 +740,7 @@ void handleSchedulesWithDaysApiPost() {
     return;
   }
 
+  publishAllSchedulesNow();
   publishFullStateNow();
   server.send(200, "application/json", "{\"ok\":true}");
 }
@@ -974,6 +1053,11 @@ void setupServer() {
 void setup() {
   Serial.begin(115200);
   delay(500);
+
+  spigotScheduleMutex = xSemaphoreCreateRecursiveMutex();
+  if (spigotScheduleMutex == nullptr) {
+    Serial.println("WARNING: spigot schedule mutex allocation failed");
+  }
 
   loadConfig();
   reconcileScheduleDaysMasks(true);
