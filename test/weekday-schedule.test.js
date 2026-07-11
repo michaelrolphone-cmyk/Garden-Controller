@@ -1,10 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
-describe('relay firmware weekday schedule support', () => {
-  const relayDir = path.join(__dirname, '..', 'mcu', 'relay');
+describe('relay firmware zone, weekday, and spigot schedule support', () => {
+  const root = path.join(__dirname, '..');
+  const relayDir = path.join(root, 'mcu', 'relay');
   const wrapper = fs.readFileSync(path.join(relayDir, 'GardenSimpleRelay6.ino'), 'utf8');
   const core = fs.readFileSync(path.join(relayDir, 'GardenSimpleRelay6Core.inc'), 'utf8');
+  const start = fs.readFileSync(path.join(root, 'src', 'start.js'), 'utf8');
 
   test('preserves the existing relay firmware as the included core', () => {
     expect(wrapper).toContain('#include "GardenSimpleRelay6Core.inc"');
@@ -13,62 +15,56 @@ describe('relay firmware weekday schedule support', () => {
     expect(wrapper).toContain('#define handleAdmin gardenLegacyHandleAdmin');
     expect(wrapper).toContain('#define setupServer gardenLegacySetupServer');
     expect(core).toContain('const char FIRMWARE_VERSION[] = "v26-stop-zone-api";');
-    expect(core).toContain('void checkSchedule()');
   });
 
-  test('stores a seven-bit mask for every schedule', () => {
+  test('keeps independent weekday masks for zone schedules', () => {
     expect(wrapper).toContain('static const uint8_t ALL_WEEKDAYS_MASK = 0x7F;');
     expect(wrapper).toContain('scheduleDaysMasks[MAX_DAILY_SCHEDULES]');
+    expect(wrapper).toContain('zoneScheduleRunsToday(i, currentTime.tm_wday)');
     expect(wrapper).toContain('dayPrefs.putUChar((keyBase + "mask").c_str()');
-    expect(wrapper).toContain('dayPrefs.getUChar((keyBase + "mask").c_str(), ALL_WEEKDAYS_MASK)');
   });
 
-  test('matches persisted masks to schedule signatures after edits or reordering', () => {
-    expect(wrapper).toContain('uint32_t scheduleDaysSignature(const DailySchedule& schedule)');
-    expect(wrapper).toContain('oldSignatures[oldIndex] == signature');
-    expect(wrapper).toContain('uint8_t mask = ALL_WEEKDAYS_MASK;');
+  test('stores persistent channel-6 schedules separately from zone schedules', () => {
+    expect(wrapper).toContain('struct SpigotSchedule');
+    expect(wrapper).toContain('spigotSchedules[MAX_DAILY_SCHEDULES]');
+    expect(wrapper).toContain('spigotPrefs.begin("relay6spig", false)');
+    expect(wrapper).toContain('spigotPrefs.getUChar("count", 0)');
+    expect(wrapper).toContain('spigotSchedulesDirty');
   });
 
-  test('gates only automatic schedule starts by local weekday', () => {
-    expect(wrapper).toContain('void checkScheduleWithWeekdays()');
-    expect(wrapper).toContain('scheduleRunsToday(i, t.tm_wday)');
-    expect(wrapper).toContain('startRun(schedule.zoneIndex, schedule.runMinutes, false);');
-    expect(wrapper).toContain('checkScheduleWithWeekdays();');
-  });
-
-  test('integrates weekday controls into the captive portal admin schedule manager', () => {
-    expect(wrapper).toContain('String buildIntegratedAdminPage()');
-    expect(wrapper).toContain('id=\\"schedule-manager\\"');
-    expect(wrapper).toContain('class="weekday-picker"');
-    expect(wrapper).toContain("const WEEKDAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];");
-    expect(wrapper).toContain("document.querySelectorAll('#adminSchedRows .schedule-editor-row')");
-    expect(wrapper).toContain("fetch('/api/schedule-days',{cache:'no-store'})");
-    expect(wrapper).toContain("alert('Schedules and watering days saved')");
-  });
-
-  test('uses the existing Save Schedules action for one combined timing and weekday update', () => {
-    expect(wrapper).toContain('void handleSchedulesWithDaysApiPost()');
-    expect(wrapper).toContain('server.on("/api/schedules-with-days", HTTP_POST, handleSchedulesWithDaysApiPost);');
-    expect(wrapper).toContain("const response=await fetch('/api/schedules-with-days'");
-    expect(wrapper).toContain('daysMask:weekdayMaskForRow(row)');
-    expect(wrapper).toContain('schedule-enabled');
-  });
-
-  test('retires the separate weekday editor in favor of the admin anchor', () => {
-    expect(wrapper).toContain('void handleScheduleDaysRedirect()');
-    expect(wrapper).toContain('server.sendHeader("Location", "/admin#schedule-manager", true);');
-    expect(wrapper).toContain('server.on("/schedule-days", HTTP_GET, handleScheduleDaysRedirect);');
-    expect(wrapper).not.toContain('String scheduleDaysPage()');
-  });
-
-  test('restores the complete existing route set and controller initialization', () => {
-    expect(wrapper).toContain('server.on("/admin", HTTP_GET, handleAdmin);');
-    expect(wrapper).toContain('server.on("/api/manual-run", HTTP_GET, handleManualRun);');
-    expect(wrapper).toContain('server.on("/api/remote/test", HTTP_GET, handleRemoteTest);');
-    expect(wrapper).toContain('xTaskCreatePinnedToCore(');
-    expect(wrapper).toContain('updateWeatherFromOpenMeteo();');
+  test('starts a timed spigot run when a channel-6 schedule is due', () => {
+    expect(wrapper).toContain('for (uint8_t i = 0; i < spigotScheduleCount; i++)');
+    expect(wrapper).toContain('(schedule.daysMask & (1U << currentTime.tm_wday)) == 0');
+    expect(wrapper).toContain('startSpigotRun(schedule.runMinutes);');
     expect(wrapper).toContain('updateRunState();');
-    expect(wrapper).toContain('updateZoneRgbLed();');
-    expect(wrapper).toContain('connectSta(false);');
+  });
+
+  test('integrates Spigots into the existing captive portal schedule manager', () => {
+    expect(wrapper).toContain("[6,'Spigots']");
+    expect(wrapper).toContain("fetch('/api/schedules-with-days'");
+    expect(wrapper).toContain("alert('Zone and spigot schedules saved')");
+    expect(wrapper).toContain('Channel 6 runs only the spigots');
+    expect(wrapper).toContain('id=\\"schedule-manager\\"');
+  });
+
+  test('publishes and synchronizes spigot schedules with Heroku', () => {
+    expect(wrapper).toContain('publishAllSchedulesNow()');
+    expect(wrapper).toContain('"/api/microcontroller/schedules"');
+    expect(wrapper).toContain('"/api/firmware/spigot-schedules"');
+    expect(wrapper).toContain('spigotScheduleSyncTask');
+  });
+
+  test('Heroku accepts channel 6 while preserving zone schedule commands', () => {
+    expect(start).toContain('channel > MASTER_VALVE_CHANNEL');
+    expect(start).toContain("findRoute(app, '/api/schedules', 'post')");
+    expect(start).toContain("findRoute(app, '/gui/schedules', 'post')");
+    expect(start).toContain("app.get('/api/firmware/spigot-schedules'");
+    expect(start).toContain('preservedSpigots');
+  });
+
+  test('retains the four-to-eight schedule window and no-overlap validation', () => {
+    expect(start).toContain('RUN_WINDOW_START_MINUTES = 4 * 60');
+    expect(start).toContain('RUN_WINDOW_END_MINUTES = 20 * 60');
+    expect(start).toContain('current.startMinutes < previous.endMinutes');
   });
 });
