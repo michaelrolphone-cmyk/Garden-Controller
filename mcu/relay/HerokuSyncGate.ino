@@ -23,10 +23,13 @@ void initVariant() {
     settings.end();
   }
 
-  // Reliable routes must be inserted before the compatibility mesh routes.
-  // The post-init phase runs after the existing mesh preferences are loaded so
-  // it can migrate old remote schedules and disable master-side execution.
+  // Extended routes must be inserted before the reliable and compatibility
+  // layers. Post-init starts time fallback and bounded catch-up only after mesh
+  // and reliable schedule persistence have been loaded.
+  slaveInternetTimePreInit();
   meshReliablePreInit();
   meshEarlyInit();
   meshReliablePostInit();
+  slaveInternetTimePostInit();
+  slaveScheduleCatchupPostInit();
 }

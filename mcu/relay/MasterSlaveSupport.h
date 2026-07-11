@@ -4,6 +4,9 @@ struct ReliableSchedule;
 struct ReliableRunEvent;
 struct ReliableObservedRun;
 
-void meshEarlyInit();
+void slaveInternetTimePreInit();
 void meshReliablePreInit();
+void meshEarlyInit();
 void meshReliablePostInit();
+void slaveInternetTimePostInit();
+void slaveScheduleCatchupPostInit();
