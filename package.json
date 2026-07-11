@@ -2,9 +2,9 @@
   "name": "garden-controller",
   "version": "1.0.0",
   "description": "Heroku-ready API and GUI for ESP32-S3 6-channel relay controller",
-  "main": "src/server.js",
+  "main": "src/start.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node src/start.js",
     "test": "jest --runInBand"
   },
   "engines": {
