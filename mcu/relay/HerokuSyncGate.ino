@@ -8,7 +8,9 @@ static const char SYNC_PREF_NAMESPACE[] = "relay6";
 static const char SYNC_ENABLED_KEY[] = "remoteEn";
 static const char SYNC_INITIALIZED_KEY[] = "syncManaged";
 
-// Called by the ESP32 Arduino core before setup().
+// Called by the ESP32 Arduino core before setup(). This phase is intentionally
+// limited to persisted safety settings, route precedence, and role information.
+// No relay, WiFi, heartbeat, scheduler, or time-service task starts here.
 void initVariant() {
   remoteEnabled = false;
 
@@ -23,13 +25,14 @@ void initVariant() {
     settings.end();
   }
 
-  // Extended routes must be inserted before the reliable and compatibility
-  // layers. Post-init starts time fallback and bounded catch-up only after mesh
-  // and reliable schedule persistence have been loaded.
+  // Authoritative routes must still be inserted before setupServer() registers
+  // the compatibility routes. The mesh role is also needed before setupAp() so
+  // a slave uses its non-conflicting recovery subnet.
   slaveInternetTimePreInit();
   meshReliablePreInit();
-  meshEarlyInit();
-  meshReliablePostInit();
-  slaveInternetTimePostInit();
-  slaveScheduleCatchupPostInit();
+  meshPreSetupInitNoTask();
+
+  // A passive coordinator waits for the normal sketch setup to finish before
+  // starting any service that can touch relays, WiFi, schedules, or the clock.
+  gardenArmPostSetupServices();
 }
