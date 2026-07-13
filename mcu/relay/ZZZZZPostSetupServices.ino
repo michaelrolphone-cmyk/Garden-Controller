@@ -120,9 +120,14 @@ static void gardenStartPostSetupServices() {
 static void gardenPostSetupGateTask(void* parameter) {
   (void)parameter;
   while (!gardenCoreSetupReady()) {
+    // loadConfig() runs during setup and may reload a previously enabled cloud
+    // setting. Keep Slave mode locally isolated until the full slave runtime is
+    // allowed to start after setup.
+    if (meshIsSlave()) remoteEnabled = false;
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 
+  if (meshIsSlave()) remoteEnabled = false;
   gardenStartPostSetupServices();
   gardenPostSetupGateTaskHandle = nullptr;
   vTaskDelete(nullptr);
