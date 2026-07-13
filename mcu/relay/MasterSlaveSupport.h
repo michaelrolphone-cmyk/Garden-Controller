@@ -6,7 +6,8 @@ struct ReliableObservedRun;
 
 void slaveInternetTimePreInit();
 void meshReliablePreInit();
-void meshEarlyInit();
+void meshPreSetupInitNoTask();
+void gardenArmPostSetupServices();
 void meshReliablePostInit();
 void slaveInternetTimePostInit();
 void slaveScheduleCatchupPostInit();
