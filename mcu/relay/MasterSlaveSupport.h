@@ -12,4 +12,5 @@ void meshReliablePostInit();
 void slaveInternetTimePostInit();
 void masterClockRecoveryPostInit();
 void scheduleIntervalReconciliationPostInit();
+void scheduleIntervalReconcileNow();
 void timeSyncMaintenancePostInit();
