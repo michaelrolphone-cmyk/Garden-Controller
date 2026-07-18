@@ -29,17 +29,17 @@ Defaults:
 
 All values are configurable from `/admin`.
 
-## Recently missed schedule catch-up
+## Schedule recovery after time synchronization
 
-The normal slave scheduler uses exact start minutes. A cold boot can finish NTP synchronization shortly after a scheduled minute. To prevent that acquisition delay from silently dropping watering, the firmware evaluates one bounded catch-up after the clock becomes valid:
+Slave schedules are fixed start/end intervals rather than one-shot start events. As soon as the clock becomes valid, the slave compares current local time with every persisted schedule:
 
-- Maximum lateness: 60 minutes
-- Only a schedule selected for the current weekday is eligible
-- A schedule already run that day is not repeated
-- Catch-up does not start while any slave relay is active
-- An exact-minute schedule has priority
-- The caught-up run must still finish by 8:00 p.m.
-- Catch-up starts are written to the same durable run-event journal as normal schedule starts
+- If current time is inside an interval, the relay is turned on immediately.
+- The relay timer is set only to the seconds remaining before the original end.
+- Repeated reconciliation does not restart or extend the interval.
+- If the interval has already ended, it is not replayed.
+- At the end time, a schedule-controlled relay is turned off.
+
+This behavior also applies after reboot and after a forward or backward clock correction.
 
 ## Status and fault reporting
 
@@ -66,4 +66,5 @@ The slave's local admin page also reports critical states, including:
 - Relay state and remaining time remain heartbeat-confirmed.
 - Start and stop events are retained until the master acknowledges them.
 - Schedule snapshots remain persisted on the slave during all network transitions.
+- A successful Internet sync begins a new resynchronization interval.
 - Factory reset clears fallback WiFi credentials, NTP settings, and last-sync metadata.
