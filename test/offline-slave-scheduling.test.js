@@ -8,13 +8,21 @@ describe('offline-resilient slave scheduling', () => {
     'utf8'
   );
   const gate = fs.readFileSync(path.join(relayDir, 'HerokuSyncGate.ino'), 'utf8');
+  const startup = fs.readFileSync(path.join(relayDir, 'ZZZZZPostSetupServices.ino'), 'utf8');
   const header = fs.readFileSync(path.join(relayDir, 'MasterSlaveSupport.h'), 'utf8');
+  const intervals = fs.readFileSync(
+    path.join(relayDir, 'ZZZZZZZScheduleIntervalReconciliation.ino'),
+    'utf8'
+  );
 
-  test('initializes reliable routes before compatibility routes and finalizes after mesh load', () => {
+  test('registers reliable routes before setup and loads runtime state after setup', () => {
     expect(header).toContain('void meshReliablePreInit();');
     expect(header).toContain('void meshReliablePostInit();');
-    expect(gate.indexOf('meshReliablePreInit();')).toBeLessThan(gate.indexOf('meshEarlyInit();'));
-    expect(gate.indexOf('meshEarlyInit();')).toBeLessThan(gate.indexOf('meshReliablePostInit();'));
+    expect(gate.indexOf('meshReliablePreInit();')).toBeLessThan(
+      gate.indexOf('meshPreSetupInitNoTask();')
+    );
+    expect(gate).not.toContain('meshReliablePostInit();');
+    expect(startup).toContain('meshReliablePostInit();');
   });
 
   test('stores versioned schedule snapshots on both master and slave', () => {
@@ -23,13 +31,20 @@ describe('offline-resilient slave scheduling', () => {
     expect(reliable).toContain('reliableMasterScheduleRevision');
     expect(reliable).toContain('reliableSlaveScheduleRevision');
     expect(reliable).toContain('reliableApplySlaveScheduleSnapshot');
-    expect(reliable).toContain('reliableServiceSlaveSchedules');
   });
 
   test('master distributes schedules but does not execute slave schedule occurrences', () => {
     expect(reliable).toContain('meshScheduleCount = 0;');
     expect(reliable).toContain('never executes slave');
     expect(reliable).not.toContain('meshServiceMasterSchedules();');
+  });
+
+  test('slave relays are reconciled against absolute schedule intervals', () => {
+    expect(intervals).toContain('intervalReconcileSlave');
+    expect(intervals).toContain('intervalRemainingForSchedule');
+    expect(intervals).toContain('end - current');
+    expect(intervals).toContain('reliableStopSlaveRelay(relay, "completed")');
+    expect(intervals).toContain('meshSlaveRuns[relayIndex].durationMs = remainingMs');
   });
 
   test('journals actual slave starts and stops until acknowledged', () => {
@@ -48,10 +63,10 @@ describe('offline-resilient slave scheduling', () => {
     expect(reliable).toContain('reportedRemainingSeconds');
   });
 
-  test('synchronizes slave time from the master before local schedule execution', () => {
+  test('synchronizes slave time from the master before local interval execution', () => {
     expect(reliable).toContain('reliableSyncClock');
     expect(reliable).toContain('masterTime');
-    expect(reliable).toContain('clockIsValid()');
+    expect(intervals).toContain('if (clockIsValid())');
   });
 
   test('factory reset clears all reliable schedule and run namespaces', () => {
