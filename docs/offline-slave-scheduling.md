@@ -12,14 +12,25 @@ The master remains the configuration authority, but each slave is the execution 
 
 A disconnected slave continues to evaluate its persisted schedules using its local clock. Heartbeats copy the master's valid epoch to the slave so the slave clock remains aligned while connected. If the device has never obtained valid time, automatic runs remain disabled rather than running at an unknown time.
 
+## Interval execution
+
+Each schedule defines an absolute local-time start and end. The slave continuously reconciles every relay with those intervals:
+
+- inside an enabled interval, the relay must be on;
+- the timer contains only the time remaining until the original end;
+- outside the interval, a schedule-controlled relay must be off;
+- repeated evaluations do not extend the end time;
+- after reboot or clock recovery, an interval still in progress resumes for only its remaining portion;
+- an interval that already ended is never replayed later.
+
 ## Run truth and reporting
 
 The master does not start slave schedule timers and does not mark a slave zone active when a schedule becomes due. The slave:
 
 - starts the physical relay locally;
-- owns the expiration timer;
+- owns the interval deadline;
 - writes an immutable start event to a persistent run journal;
-- writes a separate stop event when the relay expires or is stopped;
+- writes a separate stop event when the interval ends or the relay is stopped;
 - keeps unacknowledged events through network interruptions and restarts;
 - sends the journal in heartbeats until the master acknowledges it.
 
@@ -31,14 +42,14 @@ The heartbeat also carries the current relay state and remaining time. This curr
 - The slave continues running its previously applied schedule revision.
 - On reconnect, the slave first reports actual current relay state and any queued run events.
 - The master acknowledges the run journal and returns the latest schedule snapshot if required.
-- The slave applies the new revision atomically and confirms it on a later heartbeat.
+- The slave applies the new revision and immediately reconciles the current interval.
 
 ## Preferences namespaces
 
 | Namespace | Contents |
 |---|---|
 | `r6masterdist` | Master schedule collection and target revision |
-| `r6slavesched` | Slave-local schedule snapshot, revision, assignment, and duplicate-run guards |
+| `r6slavesched` | Slave-local schedule snapshot, revision, assignment, and interval markers |
 | `r6runlog` | Unacknowledged start/stop events and active-run metadata |
 | `r6observed` | Master's latest acknowledged run observations and slave-applied revisions |
 
