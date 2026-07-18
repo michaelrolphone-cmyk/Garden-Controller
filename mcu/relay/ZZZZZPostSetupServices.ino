@@ -102,6 +102,7 @@ static void gardenStartPostSetupServices() {
 
   masterClockRecoveryPostInit();
   scheduleIntervalReconciliationPostInit();
+  timeSyncMaintenancePostInit();
 
   gardenPostSetupServicesStarted = true;
   if (!(reliableReady && timeReady && meshReady)) {
