@@ -77,9 +77,19 @@ static bool gardenCreateTaskIfMissing(
 static void gardenStartPostSetupServices() {
   if (gardenPostSetupServicesStarted) return;
 
+  // Neutralize the legacy five-zone/master-valve runtime before the reliable
+  // slave scheduler can run. GPIO and WiFi are safe at this point.
+  if (meshIsSlave()) meshNeutralizeLegacyControllerForSlave();
+
   // Load durable mesh/schedule state and start network services only after the
   // core controller has made GPIO, WiFi, schedules, and time safe to use.
   meshReliablePostInit();
+
+  // Perform the first absolute-interval pass synchronously. This sets fixed
+  // remaining deadlines and marks active occurrences before legacy exact-minute
+  // scheduler loops can issue a full-duration start.
+  scheduleIntervalReconcileNow();
+
   slaveInternetTimePostInit();
 
   // Retry a failed task allocation once with the already-loaded state. This
