@@ -10,5 +10,5 @@ void meshPreSetupInitNoTask();
 void gardenArmPostSetupServices();
 void meshReliablePostInit();
 void slaveInternetTimePostInit();
-void slaveScheduleCatchupPostInit();
 void masterClockRecoveryPostInit();
+void scheduleIntervalReconciliationPostInit();
