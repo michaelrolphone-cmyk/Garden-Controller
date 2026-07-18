@@ -24,6 +24,11 @@ static void timeSyncMaintenanceTask(void* parameter) {
 void timeSyncMaintenancePostInit() {
   if (timeSyncMaintenanceTaskHandle != nullptr) return;
   timeSyncMaintenanceSeenEpoch = slaveTimeLastInternetSyncEpoch;
+  if (meshIsSlave()) {
+    // Preserve the previous immediate startup/reconnect clock report behavior.
+    slaveTimeLastStatusReportMs =
+        millis() - SLAVE_TIME_STATUS_REPORT_MS;
+  }
   BaseType_t created = xTaskCreatePinnedToCore(
       timeSyncMaintenanceTask,
       "timeMaintenance",
