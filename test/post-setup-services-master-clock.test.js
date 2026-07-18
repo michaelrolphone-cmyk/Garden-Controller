@@ -6,6 +6,7 @@ describe('post-setup services and master clock recovery', () => {
   const gate = fs.readFileSync(path.join(relayDir, 'HerokuSyncGate.ino'), 'utf8');
   const startup = fs.readFileSync(path.join(relayDir, 'ZZZZZPostSetupServices.ino'), 'utf8');
   const masterClock = fs.readFileSync(path.join(relayDir, 'ZZZZZZMasterClockRecovery.ino'), 'utf8');
+  const intervals = fs.readFileSync(path.join(relayDir, 'ZZZZZZZScheduleIntervalReconciliation.ino'), 'utf8');
 
   test('initVariant does not start hardware-touching services', () => {
     expect(gate).toContain('meshPreSetupInitNoTask();');
@@ -35,8 +36,9 @@ describe('post-setup services and master clock recovery', () => {
     );
     expect(startup).toContain('meshReliablePostInit();');
     expect(startup).toContain('slaveInternetTimePostInit();');
-    expect(startup).toContain('slaveScheduleCatchupPostInit();');
+    expect(startup).not.toContain('slaveScheduleCatchupPostInit();');
     expect(startup).toContain('masterClockRecoveryPostInit();');
+    expect(startup).toContain('scheduleIntervalReconciliationPostInit();');
   });
 
   test('slave cloud access remains disabled throughout setup', () => {
@@ -53,27 +55,19 @@ describe('post-setup services and master clock recovery', () => {
     expect(masterClock).toContain('CRITICAL: master clock invalid');
   });
 
-  test('clock recovery queues both local zones and spigots', () => {
-    expect(masterClock).toContain('MASTER_CLOCK_CATCHUP_WINDOW_MINUTES = 60');
-    expect(masterClock).toContain('MASTER_CATCHUP_ZONE');
-    expect(masterClock).toContain('MASTER_CATCHUP_SPIGOT');
-    expect(masterClock).toContain('dailySchedules[i]');
-    expect(masterClock).toContain('spigotSchedules[i]');
-    expect(masterClock).toContain('masterCatchupBuildPending');
+  test('clock recovery no longer creates delayed full-duration catch-up runs', () => {
+    expect(masterClock).not.toContain('MASTER_CLOCK_CATCHUP_WINDOW_MINUTES');
+    expect(masterClock).not.toContain('MasterCatchupOccurrence');
+    expect(masterClock).not.toContain('startRun(');
+    expect(masterClock).not.toContain('startSpigotRun(');
   });
 
-  test('catch-up execution is sequential and avoids future regular schedules', () => {
-    expect(masterClock).toContain('masterClockAnyLocalRunActive()');
-    expect(masterClock).toContain('masterClockExactScheduleDue');
-    expect(masterClock).toContain('masterClockNextScheduledMinute');
-    expect(masterClock).toContain('endMinute > 20 * 60');
-    expect(masterClock).toContain('startRun(schedule.zoneIndex');
-    expect(masterClock).toContain('startSpigotRun(schedule.runMinutes)');
-  });
-
-  test('a clock that becomes valid during setup still triggers reconciliation', () => {
-    expect(startup).toContain('gardenClockWasValidBeforeSetup = clockIsValid();');
-    expect(masterClock).toContain('!gardenClockWasValidBeforeSetup && clockIsValid()');
-    expect(masterClock).toContain('currentEpoch > masterClockLastEpoch + 90UL');
+  test('relay recovery is based on current schedule intervals', () => {
+    expect(intervals).toContain('intervalRemainingForSchedule');
+    expect(intervals).toContain('end - current');
+    expect(intervals).toContain('intervalReconcileMaster');
+    expect(intervals).toContain('intervalReconcileSlave');
+    expect(intervals).toContain('remainingSeconds');
+    expect(intervals).not.toContain('CATCHUP_WINDOW');
   });
 });
