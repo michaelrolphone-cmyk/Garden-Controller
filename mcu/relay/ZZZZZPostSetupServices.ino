@@ -77,11 +77,10 @@ static bool gardenCreateTaskIfMissing(
 static void gardenStartPostSetupServices() {
   if (gardenPostSetupServicesStarted) return;
 
-  // These functions load their durable state and attempt to create their
-  // service tasks. They are intentionally invoked only after setup is ready.
+  // Load durable mesh/schedule state and start network services only after the
+  // core controller has made GPIO, WiFi, schedules, and time safe to use.
   meshReliablePostInit();
   slaveInternetTimePostInit();
-  slaveScheduleCatchupPostInit();
 
   // Retry a failed task allocation once with the already-loaded state. This
   // avoids a device appearing healthy while a critical scheduler task is absent.
@@ -95,11 +94,6 @@ static void gardenStartPostSetupServices() {
       slaveTimeTask,
       "slaveTime",
       8192);
-  bool catchupReady = gardenCreateTaskIfMissing(
-      slaveCatchupTaskHandle,
-      slaveCatchupTask,
-      "slaveCatchup",
-      6144);
   bool meshReady = gardenCreateTaskIfMissing(
       meshTaskHandle,
       meshTask,
@@ -107,9 +101,10 @@ static void gardenStartPostSetupServices() {
       12288);
 
   masterClockRecoveryPostInit();
+  scheduleIntervalReconciliationPostInit();
 
   gardenPostSetupServicesStarted = true;
-  if (!(reliableReady && timeReady && catchupReady && meshReady)) {
+  if (!(reliableReady && timeReady && meshReady)) {
     meshLastStatus = "CRITICAL: one or more post-setup services failed to start";
     slaveTimeStatus = "CRITICAL: watering service task allocation failed";
   } else if (meshIsSlave()) {
