@@ -2,7 +2,7 @@
 
 ## Startup lifecycle
 
-`initVariant()` now performs only work that must happen before the normal Arduino `setup()`:
+`initVariant()` performs only work that must happen before the normal Arduino `setup()`:
 
 - initialize the persisted Heroku synchronization default
 - load the persisted Master/Slave role
@@ -14,17 +14,18 @@ The gate does not operate relays, WiFi, schedules, heartbeats, or time services.
 
 After that point it starts:
 
-- reliable slave schedule execution and run reporting
+- reliable slave schedule distribution and run reporting
 - slave Internet-time fallback
-- slave schedule catch-up
 - compatibility mesh heartbeat/timer service
 - master clock recovery
+- absolute schedule-interval reconciliation
+- time-fallback maintenance
 
 Slave mode keeps Heroku synchronization disabled while setup is still running, even if the base configuration reloads an older enabled value.
 
 ## Master clock recovery
 
-Master mode no longer relies only on the passive `configTzTime()` call.
+Master mode does not rely only on the passive `configTzTime()` call.
 
 When the clock is invalid it:
 
@@ -35,18 +36,22 @@ When the clock is invalid it:
 5. returns to the normal station network after synchronization;
 6. reports a critical clock fault through the existing mesh administration state when no valid time path is available.
 
-## Missed local watering reconciliation
+## Absolute interval reconciliation
 
-When an invalid master clock becomes valid, or a forward correction skips more than 90 seconds, the master examines local zone and spigot schedules from the previous 60 minutes.
+A schedule is treated as a fixed local-time interval:
 
-Eligible occurrences are queued chronologically. Catch-up runs:
+```text
+scheduled start <= current time < scheduled end
+```
 
-- are executed one at a time;
-- wait for any current watering run to finish;
-- allow an exact-minute regular schedule to take priority;
-- wait rather than overlap a regular schedule that would begin during the catch-up duration;
-- never start when the full run cannot finish by 20:00;
-- revalidate the schedule before starting so edited or disabled rows are discarded;
-- publish actual relay state after the catch-up run starts.
+During every reconciliation pass:
 
-A clock that was already valid before setup does not trigger catch-up solely because of a soft reboot, reducing duplicate watering risk.
+- a relay whose schedule interval contains the current time is kept on;
+- its timer is set only to the remaining time before the original scheduled end;
+- a schedule-controlled relay is turned off when the interval ends;
+- reevaluating the same interval is idempotent and does not extend watering;
+- a clock that becomes valid during an interval immediately restores the relay for only the remaining portion;
+- an interval that has already ended is not replayed later;
+- local zone, local spigot, and slave-zone schedules use the same rule.
+
+The previous delayed full-duration catch-up queues were removed.
