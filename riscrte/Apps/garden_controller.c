@@ -1,16 +1,11 @@
 /* Garden Controller RiscRTE application.
- * Reference runtime: michaelrolphone-cmyk/T5S3-Reader master 7e6509d2.
- * Entry is app_main, same as Apps/gps.c. Hardware stays behind the two
- * installed driver capabilities; this ELF never writes GPIO.
- * Knob: rotate selects zone 1-5, click starts a 15 minute run, click again
- * stops it, long press is all-off. Relay 6 follows any zone. */
+ * Uses generic switch.relay. Zone and master-follow policy stay in this app. */
 #include "../../include/garden_policy.h"
 #include "../Drivers/garden_encoder/GardenEncoderApi.h"
-#include "../Drivers/garden_relay6/GardenRelayApi.h"
+#include "../Drivers/relay/RelayApi.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
 typedef struct { uint32_t buttons; bool exit_requested; } t5_app_input_t;
 #define T5_APP_BUTTON_BACK 1u
 typedef struct {
@@ -18,17 +13,15 @@ typedef struct {
     uint32_t (*millis)(void);
     uint32_t (*micros)(void);
 } t5_app_api_v1;
-
 static garden_policy_t policy;
 static uint8_t selected_zone = 1;
-static const garden_relay_api_v1 *relay;
+static const relay_api_v1 *relay;
 static const garden_encoder_api_v1 *encoder;
 static const t5_app_api_v1 *app;
-
 static void push_mask(void) {
     if (relay && relay->set_mask) relay->set_mask(relay->context, garden_policy_relay_mask(&policy));
 }
-void garden_app_bind(const garden_relay_api_v1 *relay_api, const garden_encoder_api_v1 *encoder_api, const t5_app_api_v1 *app_api) {
+void garden_app_bind(const relay_api_v1 *relay_api, const garden_encoder_api_v1 *encoder_api, const t5_app_api_v1 *app_api) {
     relay = relay_api; encoder = encoder_api; app = app_api;
 }
 void garden_app_on_minute(uint8_t hour, uint8_t minute) {
