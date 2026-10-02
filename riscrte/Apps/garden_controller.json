@@ -1,7 +1,7 @@
 {
   "type": "application",
   "id": "garden_controller",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "min_firmware_version": "1.3.49",
   "display_name": "Garden Controller",
   "file_name": "garden_controller.elf",
@@ -10,7 +10,8 @@
   "requires": [
     {"capability": "switch.relay", "api": 1},
     {"capability": "sound.buzzer", "api": 1},
-    {"capability": "input.quadrature", "api": 1}
+    {"capability": "input.quadrature", "api": 1},
+    {"capability": "input.button", "api": 1}
   ],
   "status": "not-hardware-qualified"
 }

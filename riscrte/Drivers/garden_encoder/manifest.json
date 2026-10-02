@@ -1,13 +1,14 @@
 {
   "type": "driver",
   "id": "garden-encoder",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "driver_abi": 2,
   "architecture": "xtensa-esp32s3",
   "file_name": "driver.elf",
   "requires": [],
   "provides": [{"capability": "input.quadrature", "api": 1}],
-  "board": "elecrow-crowpanel-1.28-rotary",
-  "pins": {"a": 45, "b": 42, "button": 41, "edges_per_detent": 2, "debounce_us": 800},
-  "status": "not-hardware-qualified"
+  "board": "elecrow-crowpanel-128",
+  "pins": {"a": 45, "b": 42},
+  "status": "not-hardware-qualified",
+  "notes": "Quadrature only. Knob button GPIO 41 is the input.button profile."
 }
