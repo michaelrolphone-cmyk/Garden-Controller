@@ -1,6 +1,6 @@
-/* garden-relay6 RiscRTE driver ELF for the 6-channel irrigation board.
- * Owns the GPIO outputs. Does not interpret schedules. Safe-off is mandatory
- * on quiesce/stop so an unload cannot leave a valve open. */
+/* garden-relay6 RiscRTE driver ELF for a 6-channel relay bank.
+ * Owns the GPIO outputs. Does not interpret what a channel switches.
+ * Safe-off is mandatory on quiesce/stop so an unload cannot leave a contact closed. */
 #include "GardenRelayApi.h"
 #include "../../sdk/RiscProviderV2.h"
 #include <string.h>
@@ -117,7 +117,7 @@ static void stop(void) {
 }
 static const risc_driver_v2 driver = {
     RISC_PROVIDER_DRIVER_ABI_V2, sizeof(risc_driver_v2),
-    "garden-relay6", "irrigation.relay", GARDEN_RELAY_API_V1,
+    "garden-relay6", "switch.relay", GARDEN_RELAY_API_V1,
     &api, start, stop, quiesce
 };
 __attribute__((visibility("default")))
