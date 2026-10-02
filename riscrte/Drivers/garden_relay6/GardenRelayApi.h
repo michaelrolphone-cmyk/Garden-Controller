@@ -1,10 +1,10 @@
 #pragma once
-/* irrigation.relay@1. Pins are owned by this driver, not by the app.
- * Castle Hills relay board, from mcu/relay/GardenSimpleRelay6Core.inc:
- *   relays 1..6 on GPIO 1, 2, 41, 42, 45, 46, active HIGH
- *   passive buzzer on GPIO 21, 5% duty chirp
- * Channel 6 is the master valve. The app decides when it is on; this driver
- * only drives the requested mask and forces every output off on stop. */
+/* switch.relay@1. Generic contact bank. The driver does not know what a
+ * channel switches. Callers own policy: irrigation, lights, pumps, locks.
+ * This board profile, from mcu/relay/GardenSimpleRelay6Core.inc:
+ *   channels 1..6 on GPIO 1, 2, 41, 42, 45, 46, active HIGH
+ *   optional indicator on GPIO 21, 5% duty chirp
+ * Quiesce and stop force every output off. */
 #include <stdbool.h>
 #include <stdint.h>
 #define GARDEN_RELAY_API_V1 1u

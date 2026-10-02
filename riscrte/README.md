@@ -10,15 +10,17 @@ This package does not replace the Arduino sketches in `mcu/`. Those remain the f
 
 | id | version | provides | board |
 | --- | --- | --- | --- |
-| garden_controller | 0.1.0 | app | knob panel + relay board |
-| garden-relay6 | 0.1.0 | irrigation.relay@1 | Castle Hills 6-channel board |
+| garden_controller | 0.1.1 | app | knob panel + relay board |
+| garden-relay6 | 0.1.1 | switch.relay@1 | 6-channel relay board |
 | garden-encoder | 0.1.0 | input.quadrature@1 | Elecrow CrowPanel 1.28 rotary |
 
-Relay pins, active-high, from `mcu/relay/GardenSimpleRelay6Core.inc`: GPIO 1, 2, 41, 42, 45, 46. Buzzer GPIO 21, 5% duty. Relays 1-5 are zones. Relay 6 is the master valve and is not a schedule channel. Master is on while any zone or spigot run is on. Overlapping zone runs are kept.
+`switch.relay` is a generic contact bank. It does not encode irrigation, valves, or zones. The garden app is one caller: it maps channels 1-5 to zones and channel 6 to a master/spigot follow. Another app can use the same capability for any switching.
 
-Encoder pins from `mcu/dial/GardenKnob.ino`: A 45, B 42, button 41, pull-up, 2 edges per detent, 800 us debounce. Direction matches the field ISR (`A==B` increments). Long press is 1.5 s and is all-off.
+Board pins, active-high, from `mcu/relay/GardenSimpleRelay6Core.inc`: GPIO 1, 2, 41, 42, 45, 46. Indicator GPIO 21, 5% duty. `quiesce` forces outputs off.
 
-The app never writes GPIO. Removing either driver ELF removes that capability. `quiesce` forces relay outputs off before unload.
+Encoder pins from `mcu/dial/GardenKnob.ino`: A 45, B 42, button 41, pull-up, 2 edges per detent, 800 us debounce. Direction matches the field ISR (`A==B` increments). Long press is 1.5 s and is all-off in this app only.
+
+The app never writes GPIO. Removing either driver ELF removes that capability.
 
 ## Host check
 

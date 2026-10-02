@@ -1,14 +1,14 @@
 {
   "type": "application",
   "id": "garden_controller",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "min_firmware_version": "1.3.49",
   "display_name": "Garden Controller",
   "file_name": "garden_controller.elf",
   "icon": "solid:f06c",
   "category": ["Garden", "Utilities"],
   "requires": [
-    {"capability": "irrigation.relay", "api": 1},
+    {"capability": "switch.relay", "api": 1},
     {"capability": "input.quadrature", "api": 1}
   ],
   "status": "not-hardware-qualified"
