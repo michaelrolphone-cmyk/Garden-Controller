@@ -1,8 +1,8 @@
 /* Garden Controller RiscRTE application.
- * Relay and LED are generic capabilities. Zone policy stays in this app. */
+ * Relay and buzzer are generic capabilities. Zone policy stays in this app. */
 #include "../../include/garden_policy.h"
+#include "../Drivers/buzzer/BuzzerApi.h"
 #include "../Drivers/garden_encoder/GardenEncoderApi.h"
-#include "../Drivers/led/LedApi.h"
 #include "../Drivers/relay/RelayApi.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -17,17 +17,17 @@ typedef struct {
 static garden_policy_t policy;
 static uint8_t selected_zone = 1;
 static const relay_api_v1 *relay;
-static const led_api_v1 *led;
+static const buzzer_api_v1 *buzzer;
 static const garden_encoder_api_v1 *encoder;
 static const t5_app_api_v1 *app;
 static void push_mask(void) {
     if (relay && relay->set_mask) relay->set_mask(relay->context, garden_policy_relay_mask(&policy));
 }
 static void indicate(void) {
-    if (led && led->blink) led->blink(led->context, 0, 50, 950, 8);
+    if (buzzer && buzzer->chirp) buzzer->chirp(buzzer->context, 0);
 }
-void garden_app_bind(const relay_api_v1 *relay_api, const led_api_v1 *led_api, const garden_encoder_api_v1 *encoder_api, const t5_app_api_v1 *app_api) {
-    relay = relay_api; led = led_api; encoder = encoder_api; app = app_api;
+void garden_app_bind(const relay_api_v1 *relay_api, const buzzer_api_v1 *buzzer_api, const garden_encoder_api_v1 *encoder_api, const t5_app_api_v1 *app_api) {
+    relay = relay_api; buzzer = buzzer_api; encoder = encoder_api; app = app_api;
 }
 void garden_app_on_minute(uint8_t hour, uint8_t minute) {
     garden_policy_apply_due(&policy, hour, minute);
@@ -57,7 +57,7 @@ uint8_t garden_app_selected_zone(void) { return selected_zone; }
 uint8_t garden_app_mask(void) { return garden_policy_relay_mask(&policy); }
 void app_main(void) {
     garden_policy_init(&policy);
-    if (!relay || !led || !encoder || !app || !app->poll || !app->millis) return;
+    if (!relay || !buzzer || !encoder || !app || !app->poll || !app->millis) return;
     uint32_t last_sec = app->millis();
     for (;;) {
         t5_app_input_t input;
@@ -70,5 +70,5 @@ void app_main(void) {
     }
     garden_policy_all_off(&policy);
     push_mask();
-    if (led && led->set) led->set(led->context, 0, false);
+    if (buzzer && buzzer->set) buzzer->set(buzzer->context, 0, false);
 }
