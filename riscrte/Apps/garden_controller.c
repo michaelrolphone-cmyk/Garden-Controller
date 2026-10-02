@@ -1,6 +1,7 @@
 /* Garden Controller RiscRTE application.
- * Relay and buzzer are generic capabilities. Zone policy stays in this app. */
+ * Relay, buzzer, knob, and button are generic capabilities. Zone policy stays here. */
 #include "../../include/garden_policy.h"
+#include "../Drivers/button/ButtonApi.h"
 #include "../Drivers/buzzer/BuzzerApi.h"
 #include "../Drivers/garden_encoder/GardenEncoderApi.h"
 #include "../Drivers/relay/RelayApi.h"
@@ -19,6 +20,7 @@ static uint8_t selected_zone = 1;
 static const relay_api_v1 *relay;
 static const buzzer_api_v1 *buzzer;
 static const garden_encoder_api_v1 *encoder;
+static const button_api_v1 *button;
 static const t5_app_api_v1 *app;
 static void push_mask(void) {
     if (relay && relay->set_mask) relay->set_mask(relay->context, garden_policy_relay_mask(&policy));
@@ -26,8 +28,8 @@ static void push_mask(void) {
 static void indicate(void) {
     if (buzzer && buzzer->chirp) buzzer->chirp(buzzer->context, 0);
 }
-void garden_app_bind(const relay_api_v1 *relay_api, const buzzer_api_v1 *buzzer_api, const garden_encoder_api_v1 *encoder_api, const t5_app_api_v1 *app_api) {
-    relay = relay_api; buzzer = buzzer_api; encoder = encoder_api; app = app_api;
+void garden_app_bind(const relay_api_v1 *relay_api, const buzzer_api_v1 *buzzer_api, const garden_encoder_api_v1 *encoder_api, const button_api_v1 *button_api, const t5_app_api_v1 *app_api) {
+    relay = relay_api; buzzer = buzzer_api; encoder = encoder_api; button = button_api; app = app_api;
 }
 void garden_app_on_minute(uint8_t hour, uint8_t minute) {
     garden_policy_apply_due(&policy, hour, minute);
@@ -35,15 +37,16 @@ void garden_app_on_minute(uint8_t hour, uint8_t minute) {
 }
 void garden_app_step(uint32_t now_us, bool one_second) {
     if (encoder && encoder->poll) encoder->poll(encoder->context, now_us);
+    if (button && button->poll) button->poll(button->context, now_us);
     if (encoder && encoder->take_detents) {
         int32_t d = encoder->take_detents(encoder->context);
         while (d > 0) { selected_zone = (uint8_t)(selected_zone % GARDEN_ZONE_COUNT + 1); d--; }
         while (d < 0) { selected_zone = selected_zone == 1 ? GARDEN_ZONE_COUNT : (uint8_t)(selected_zone - 1); d++; }
     }
-    if (encoder && encoder->take_long_press && encoder->take_long_press(encoder->context)) {
+    if (button && button->take_long_press && button->take_long_press(button->context, 0)) {
         garden_policy_all_off(&policy);
         indicate();
-    } else if (encoder && encoder->take_click && encoder->take_click(encoder->context)) {
+    } else if (button && button->take_click && button->take_click(button->context, 0)) {
         if (policy.zone_on[selected_zone - 1]) garden_policy_stop_zone(&policy, selected_zone);
         else {
             garden_policy_start_zone(&policy, selected_zone, GARDEN_DEFAULT_RUN_SEC);
@@ -57,7 +60,7 @@ uint8_t garden_app_selected_zone(void) { return selected_zone; }
 uint8_t garden_app_mask(void) { return garden_policy_relay_mask(&policy); }
 void app_main(void) {
     garden_policy_init(&policy);
-    if (!relay || !buzzer || !encoder || !app || !app->poll || !app->millis) return;
+    if (!relay || !buzzer || !encoder || !button || !app || !app->poll || !app->millis) return;
     uint32_t last_sec = app->millis();
     for (;;) {
         t5_app_input_t input;
