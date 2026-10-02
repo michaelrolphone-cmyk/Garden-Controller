@@ -1,13 +1,14 @@
 {
   "type": "driver",
   "id": "garden-relay6",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "driver_abi": 2,
   "architecture": "xtensa-esp32s3",
-  "file_name": "driver.elf",
-  "requires": [],
-  "provides": [{"capability": "switch.relay", "api": 1}],
+  "file_name": "board_profile.h",
+  "requires": [{"capability": "switch.relay", "api": 1}],
+  "provides": [{"capability": "board.relay-profile", "api": 1}],
   "board": "castle-hills-relay6",
-  "pins": {"relays": [1, 2, 41, 42, 45, 46], "active": "high", "buzzer": 21},
-  "status": "not-hardware-qualified"
+  "pins": {"relays": [1, 2, 41, 42, 45, 46], "active": "high", "indicator": 21},
+  "status": "not-hardware-qualified",
+  "notes": "Board profile only. switch.relay is published by the generic relay driver."
 }
