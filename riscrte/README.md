@@ -15,8 +15,10 @@ The Arduino sketches in `mcu/` are unchanged.
 | garden-encoder | 0.1.1 | `input.quadrature@1`, pins A 45 and B 42 only |
 | garden_controller | 0.1.5 | app policy |
 
-`button` does not know what a press means. A profile supplies pins, active level, debounce, and long-press time. The CrowPanel knob button is GPIO 41, active-low, 30 ms debounce, 1.5 s long press. The quadrature driver no longer claims that pin.
-
-Host check: `cc -Wall -Wextra -I riscrte/sdk -o /tmp/button-check riscrte/test/button_check.c riscrte/test/button_tu.c`
+Field pins:
+- Relay contacts: GPIO 1, 2, 41, 42, 45, 46, active-high.
+- Relay status LED: GPIO 38. CrowPanel LED ring: GPIO 48. Neither is the buzzer.
+- Buzzer: GPIO 21, active-high, 5% chirp.
+- Knob button: GPIO 41, active-low. BOOT button: GPIO 0, active-low.
 
 Not hardware-qualified.
