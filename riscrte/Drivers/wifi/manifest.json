@@ -8,5 +8,5 @@
   "requires": [],
   "provides": [{"capability": "net.wifi", "api": 1}],
   "status": "not-hardware-qualified",
-  "notes": "Generic station link. Radio is this provider. Another radio can provide the same capability."
+  "notes": "Added capability. No station-link capability exists in RiscRTE-Drivers."
 }

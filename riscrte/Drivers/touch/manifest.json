@@ -1,12 +1,15 @@
 {
   "type": "driver",
   "id": "touch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "driver_abi": 2,
   "architecture": "xtensa-esp32s3",
   "file_name": "driver.elf",
-  "requires": [],
-  "provides": [{"capability": "input.touch", "api": 1}],
+  "requires": [
+    {"capability": "i2c.bus", "api": 1},
+    {"capability": "platform.clock", "api": 1}
+  ],
+  "provides": [{"capability": "input.touch.raw", "api": 1}],
   "status": "not-hardware-qualified",
-  "notes": "Generic pointer. Bus address and pins come from a profile."
+  "notes": "CST816D profile. Same capability as gt911-touch."
 }

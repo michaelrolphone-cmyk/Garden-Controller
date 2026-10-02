@@ -8,5 +8,5 @@
   "requires": [],
   "provides": [{"capability": "indicator.pixel", "api": 1}],
   "status": "not-hardware-qualified",
-  "notes": "Generic addressable pixels. Pin and count come from a profile. Wire timing is this provider, not the capability."
+  "notes": "Added capability. No addressable-pixel capability exists in RiscRTE-Drivers."
 }
