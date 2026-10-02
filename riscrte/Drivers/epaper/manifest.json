@@ -1,0 +1,12 @@
+{
+  "type": "driver",
+  "id": "epaper",
+  "version": "0.1.0",
+  "driver_abi": 2,
+  "architecture": "xtensa-esp32s3",
+  "file_name": "driver.elf",
+  "requires": [],
+  "provides": [{"capability": "display.epaper", "api": 1}],
+  "status": "not-hardware-qualified",
+  "notes": "Generic reflective panel. Size and SPI pins come from a profile."
+}

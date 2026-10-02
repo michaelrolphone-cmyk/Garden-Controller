@@ -1,0 +1,12 @@
+{
+  "type": "driver",
+  "id": "pixel",
+  "version": "0.1.0",
+  "driver_abi": 2,
+  "architecture": "xtensa-esp32s3",
+  "file_name": "driver.elf",
+  "requires": [],
+  "provides": [{"capability": "indicator.pixel", "api": 1}],
+  "status": "not-hardware-qualified",
+  "notes": "Generic addressable pixels. Pin and count come from a profile. Wire timing is this provider, not the capability."
+}
