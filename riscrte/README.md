@@ -1,11 +1,7 @@
-# Garden Controller as a RiscRTE application
+# Garden Controller RiscRTE app
 
-Capability names match `RiscRTE-Drivers` where that repo already has a provider. See `CAPABILITIES.md`.
+`garden_controller` 0.2.0 is an installable app. The firmware calls `app_main`. The app calls `t5_app_get_api` and `t5_provider_capability_get_api()->acquire`, the same entry used by `Apps/camera_utility.c` in T5S3-Reader. There is no `garden_app_bind`.
 
-`touch` publishes `input.touch.raw@1` and requires `i2c.bus@1` plus `platform.clock@1`. `panel` and `epaper` both publish `display.output@1`. `storage` publishes `storage.volume@1`.
+Required installed drivers: `switch.relay@1`, `sound.buzzer@1`, `input.quadrature@1`, `input.button@1`. Each driver claims its field pins inside `start`. The loader does not bind a port.
 
-Added because the runtime has no provider: `switch.relay`, `indicator.led`, `indicator.pixel`, `sound.buzzer`, `input.button`, `input.quadrature`, `net.wifi`.
-
-Not present because these boards have no such hardware: `camera.capture`, `position.gnss`, `usb.host`.
-
-Not hardware-qualified. Panel and e-paper still do not send the Arduino init sequences.
+This tree is source. It is not a built ELF and it is not hardware-qualified. Build with the T5S3-Reader native app toolchain and `-DGARDEN_RTE_TARGET_ESP32S3` for the driver GPIO claim.

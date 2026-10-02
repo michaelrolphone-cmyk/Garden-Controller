@@ -1,7 +1,7 @@
 {
   "type": "application",
   "id": "garden_controller",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "min_firmware_version": "1.3.49",
   "display_name": "Garden Controller",
   "file_name": "garden_controller.elf",
@@ -11,9 +11,8 @@
     {"capability": "switch.relay", "api": 1},
     {"capability": "sound.buzzer", "api": 1},
     {"capability": "input.quadrature", "api": 1},
-    {"capability": "input.button", "api": 1},
-    {"capability": "display.output", "api": 1},
-    {"capability": "input.touch.raw", "api": 1}
+    {"capability": "input.button", "api": 1}
   ],
-  "status": "not-hardware-qualified"
+  "status": "not-hardware-qualified",
+  "notes": "app_main leases capabilities. No garden_app_bind. Display and touch are not required to launch."
 }
