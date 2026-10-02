@@ -1,0 +1,15 @@
+{
+  "type": "application",
+  "id": "garden-relay",
+  "version": "0.1.0",
+  "min_firmware_version": "1.3.49",
+  "display_name": "Garden Relay",
+  "file_name": "garden-relay.elf",
+  "icon": "solid:f043",
+  "category": ["Garden"],
+  "requires": [
+    {"capability": "switch.relay", "api": 1},
+    {"capability": "sound.buzzer", "api": 1}
+  ],
+  "status": "not-hardware-qualified"
+}
