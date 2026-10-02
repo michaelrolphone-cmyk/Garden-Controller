@@ -16,5 +16,5 @@ static const epaper_api_v1 api = { EPAPER_API_V1, sizeof(epaper_api_v1), NULL, w
 static bool start(const risc_provider_dependency_v1 *d, size_t n) { (void)d; if (running || n || !have_profile || !have_port) return false; running = true; return true; }
 static bool quiesce(void) { refreshing = false; return true; }
 static void stop(void) { running = false; refreshing = false; }
-static const risc_driver_v2 driver = { RISC_PROVIDER_DRIVER_ABI_V2, sizeof(risc_driver_v2), "epaper", "display.epaper", EPAPER_API_V1, &api, start, stop, quiesce };
+static const risc_driver_v2 driver = { RISC_PROVIDER_DRIVER_ABI_V2, sizeof(risc_driver_v2), "epaper", "display.output", EPAPER_API_V1, &api, start, stop, quiesce };
 __attribute__((visibility("default"))) const risc_driver_v2 *t5_driver_get(uint32_t abi) { return abi == RISC_PROVIDER_DRIVER_ABI_V2 ? &driver : NULL; }
