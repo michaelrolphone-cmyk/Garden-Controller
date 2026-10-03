@@ -1,68 +1,52 @@
-#include <T5AppApi.h>
-#include <T5ProviderCapabilityApi.h>
-#include "garden_policy.h"
+/* Relay boot app for generic RiscRTE. risc_runtime_get_api comes from
+ * riscrte/Apps/RiscRuntimeV1.h, copied byte-for-byte from
+ * michaelrolphone-cmyk/RiscRTE sdk/app/RiscRuntimeV1.h at
+ * feat/minimal-runtime e27d3d089086d79f06edeff4c2bd35f6e6243444
+ * (same blob as RiscRTE-T-Watch-S3 sdk/app/RiscRuntimeV1.h on
+ * codex/watch-clock-app 3157fdc6f0e65caa3f81e5f3305927b2b27ca675).
+ * Holds switch.relay@1 and sound.buzzer@1 and stays resident.
+ * Does not start a zone, and does not energize a relay or the buzzer.
+ * Returning from app_main would idle the runtime, so the success path yields. */
+#include "RiscRuntimeV1.h"
 #include "../Drivers/buzzer/BuzzerApi.h"
 #include "../Drivers/relay/RelayApi.h"
-#include <stdio.h>
-#include <string.h>
 
-static const t5_app_api_v1 *app;
-static const t5_provider_capability_api_v1 *providers;
-static const relay_api_v1 *relay;
-static const buzzer_api_v1 *buzzer;
-static t5_provider_capability_lease_t relay_lease;
-static t5_provider_capability_lease_t buzzer_lease;
-static garden_policy_t policy;
-
-static bool lease_one(const char *capability, uint32_t version, t5_provider_capability_lease_t *lease, const void **out) {
-    *lease = T5_PROVIDER_CAPABILITY_LEASE_INVALID;
-    *out = NULL;
-    if (!providers->acquire(capability, version, lease, out) || !*out) {
-        printf("GARDEN_RELAY missing %s\n", capability);
-        return false;
-    }
-    return true;
+static bool relay_valid(const relay_api_v1 *relay) {
+    return relay && relay->api_version == RELAY_API_V1 &&
+           relay->struct_size >= sizeof(*relay) && relay->context &&
+           relay->channel_count && relay->set_channel && relay->set_mask &&
+           relay->get_mask;
 }
 
-static void release_all(void) {
-    if (relay && relay->set_mask) relay->set_mask(relay->context, 0);
-    if (buzzer && buzzer->set) buzzer->set(buzzer->context, 0, false);
-    if (relay_lease) providers->release(relay_lease);
-    if (buzzer_lease) providers->release(buzzer_lease);
+static bool buzzer_valid(const buzzer_api_v1 *buzzer) {
+    return buzzer && buzzer->api_version == BUZZER_API_V1 &&
+           buzzer->struct_size >= sizeof(*buzzer) && buzzer->context &&
+           buzzer->channel_count && buzzer->set && buzzer->is_on;
 }
 
-void app_main(void) {
-    app = t5_app_get_api(T5_APP_ABI_VERSION);
-    providers = t5_provider_capability_get_api(T5_PROVIDER_CAPABILITY_API_VERSION);
-    if (!app || !app->poll || !app->millis || !providers || !providers->acquire || !providers->release) {
-        printf("GARDEN_RELAY unavailable-api\n");
+__attribute__((visibility("default"))) void app_main(void) {
+    const risc_runtime_api_v1 *runtime = risc_runtime_get_api(1);
+    if (!runtime || runtime->api_version != 1 ||
+        runtime->struct_size < RISC_RUNTIME_CAPABILITIES_V1_SIZE ||
+        !runtime->health || !runtime->yield_ms || !runtime->diagnostic ||
+        !runtime->acquire || !runtime->release) return;
+
+    risc_runtime_capability_v1 relay_grant = {.struct_size = sizeof(relay_grant)};
+    risc_runtime_capability_v1 buzzer_grant = {.struct_size = sizeof(buzzer_grant)};
+    bool has_relay = runtime->acquire("switch.relay", 1, 0, &relay_grant);
+    bool has_buzzer = runtime->acquire("sound.buzzer", 1, 0, &buzzer_grant);
+    const relay_api_v1 *relay = has_relay ? relay_grant.api : NULL;
+    const buzzer_api_v1 *buzzer = has_buzzer ? buzzer_grant.api : NULL;
+    risc_runtime_health_v1 health = {.struct_size = sizeof(health)};
+    /* Table checks only. set_mask, set, chirp, and pattern would drive pins. */
+    if (!has_relay || !relay_valid(relay) || !has_buzzer || !buzzer_valid(buzzer) ||
+        !runtime->health(&health)) {
+        runtime->diagnostic("GARDEN_RELAY error=grant-or-api");
+        if (has_buzzer) runtime->release(&buzzer_grant);
+        if (has_relay) runtime->release(&relay_grant);
         return;
     }
-    const void *borrowed = NULL;
-    if (!lease_one("switch.relay", RELAY_API_V1, &relay_lease, &borrowed)) return;
-    relay = borrowed;
-    if (!lease_one("sound.buzzer", BUZZER_API_V1, &buzzer_lease, &borrowed)) { release_all(); return; }
-    buzzer = borrowed;
-    if (!relay->set_mask) { release_all(); return; }
-    garden_policy_init(&policy);
-    garden_policy_start_zone(&policy, 1, GARDEN_DEFAULT_RUN_SEC);
-    relay->set_mask(relay->context, garden_policy_relay_mask(&policy));
-    if (buzzer->chirp) buzzer->chirp(buzzer->context, 0);
-    printf("GARDEN_RELAY running\n");
-    uint32_t last = app->millis();
-    for (;;) {
-        t5_app_input_t input;
-        memset(&input, 0, sizeof(input));
-        if (!app->poll(&input, 50) || input.exit_requested || (input.buttons & T5_APP_BUTTON_BACK)) break;
-        uint32_t now = app->millis();
-        if ((uint32_t)(now - last) >= 1000u) {
-            garden_policy_tick(&policy);
-            relay->set_mask(relay->context, garden_policy_relay_mask(&policy));
-            last = now;
-        }
-    }
-    garden_policy_all_off(&policy);
-    relay->set_mask(relay->context, 0);
-    release_all();
-    printf("GARDEN_RELAY stopped\n");
+    runtime->diagnostic("GARDEN_RELAY ready channels=off");
+    /* yield_ms clamps to 50ms. Stay mapped so the default app does not idle. */
+    for (;;) runtime->yield_ms(50);
 }

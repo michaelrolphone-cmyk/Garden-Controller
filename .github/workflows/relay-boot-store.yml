@@ -1,0 +1,47 @@
+name: Garden relay boot store
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  relay-boot-store:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the ESP32-S3 toolchain and SPIFFS tool
+        run: |
+          python -m pip install platformio==6.1.19
+          pio pkg install --global --tool "espressif/toolchain-xtensa-esp32s3@8.4.0+2021r2-patch5"
+          pio pkg install --global --tool "platformio/tool-mkspiffs@2.230.0"
+      - name: Build driver packages
+        run: python scripts/build_packages.py --drivers-only
+      - name: Verify driver package identities
+        run: python scripts/check_packages.py
+      - name: Build the relay boot application
+        run: python scripts/build_relay_app.py
+      - name: Build and verify the host boot store
+        run: |
+          python scripts/build_relay_deployment.py
+          python scripts/verify_relay_deployment.py dist/relay-deployments/garden-relay-*.zip
+          tool="$(find "$HOME/.platformio/packages" -type f -name 'mkspiffs_espressif32_arduino' | head -n 1)"
+          test -n "$tool"
+          python scripts/build_relay_store.py dist/relay-deployments/garden-relay-*.zip --mkspiffs "$tool"
+          echo "Host image only. This workflow does not flash and does not claim a hardware run."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: garden-relay-boot-store
+          path: |
+            dist/relay/default.elf
+            dist/relay/default.json
+            dist/relay/build-record.json
+            dist/relay-deployments/*.zip
+            dist/relay-deployments/catalog.json
+            dist/relay-images/*
+          if-no-files-found: error

@@ -1,0 +1,20 @@
+{
+  "type": "application",
+  "id": "garden-relay",
+  "version": "0.1.0",
+  "architecture": "xtensa-esp32s3",
+  "display_name": "Garden Relay",
+  "description": "Boot app for the relay board. Acquires switch.relay and sound.buzzer, health-checks, and leaves every channel off.",
+  "file_name": "default.elf",
+  "entry": "app_main",
+  "requires": [
+    {
+      "capability": "switch.relay",
+      "api": 1
+    },
+    {
+      "capability": "sound.buzzer",
+      "api": 1
+    }
+  ]
+}
