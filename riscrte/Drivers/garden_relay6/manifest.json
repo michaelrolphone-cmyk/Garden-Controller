@@ -1,35 +1,23 @@
 {
   "type": "driver",
   "id": "garden-relay6",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "driver_abi": 2,
   "architecture": "xtensa-esp32s3",
   "file_name": "driver.elf",
   "requires": [
     {
       "capability": "platform.board",
-      "api": 1
+      "api": 2
     }
   ],
   "provides": [
     {
-      "capability": "board.garden",
+      "capability": "hardware.catalog",
       "api": 1
     }
   ],
-  "board": "castle-hills-relay6",
-  "pins": {
-    "relays": [
-      1,
-      2,
-      41,
-      42,
-      45,
-      46
-    ],
-    "active": "high",
-    "indicator": 21
-  },
   "status": "contract-tested-runtime-backfill-required",
-  "notes": "See riscrte/CAPABILITY_BACKFILL.md for contracts, board authorization and integration prerequisites."
+  "notes": "See riscrte/CAPABILITY_BACKFILL.md for contracts, board authorization and integration prerequisites.",
+  "hardware_manifest": "hardware.json"
 }

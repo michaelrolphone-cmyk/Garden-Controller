@@ -1,3 +1,3 @@
-#define BOARD_ID 2u
+#include "hardware_json.h"
 #define DRIVER_ID "garden-crowpanel"
 #include "../common/board.h"

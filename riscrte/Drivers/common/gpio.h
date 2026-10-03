@@ -1,10 +1,11 @@
 #pragma once
-#include "dependency.h"
+#include "hardware.h"
 #include "RiscPlatformClockV1.h"
 static const garden_gpio_v1 *gpio;
 static const risc_platform_clock_api_v1 *timer;
 static uint64_t pins[49];
 static bool io_fault;
+static bool gpio_output_initial, gpio_input_pullup=true;
 static inline bool gpio_dependencies(const risc_provider_dependency_v1 *d, size_t n) {
     for (size_t i=0;i<49;i++) if (pins[i]) return false;
     gpio=garden_dependency(d,n,"platform.gpio",sizeof(*gpio));
@@ -14,9 +15,9 @@ static inline bool gpio_dependencies(const risc_provider_dependency_v1 *d, size_
 }
 static inline bool gpio_claim(uint8_t pin, bool output, bool initial) {
     if (!gpio || pin>=49 || pins[pin]) return false;
-    return gpio->claim(gpio->context,pin,output,initial,!output,&pins[pin]) && pins[pin];
+    return gpio->claim(gpio->context,pin,output,initial,!output && gpio_input_pullup,&pins[pin]) && pins[pin];
 }
-static inline bool gpio_output(uint8_t pin) { return gpio_claim(pin,true,false); }
+static inline bool gpio_output(uint8_t pin) { return gpio_claim(pin,true,gpio_output_initial); }
 static inline bool gpio_input(uint8_t pin) { return gpio_claim(pin,false,false); }
 static inline void gpio_write(uint8_t pin,bool level) {
     if (pin>=49 || !pins[pin] || !gpio->write(gpio->context,pins[pin],level)) io_fault=true;

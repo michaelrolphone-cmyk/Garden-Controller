@@ -1,12 +1,12 @@
 #include "PixelApi.h"
 #include "../common/gpio.h"
 static bool running;
-static uint8_t pin,count_value,brightness;
+static uint8_t pin,count_value,brightness,order;
 static uint8_t frame[PIXEL_CHANNELS_MAX*3];
 static uint8_t count(void *c) { (void)c; return running ? count_value : 0; }
 static bool set_rgb(void *c,uint8_t i,uint8_t r,uint8_t g,uint8_t b) {
     (void)c; if (!running || i>=count_value) return false;
-    frame[i*3]=g; frame[i*3+1]=r; frame[i*3+2]=b; return true;
+    frame[i*3]=order?r:g; frame[i*3+1]=order?g:r; frame[i*3+2]=b; return true;
 }
 static bool set_brightness(void *c,uint8_t percent) { (void)c; if (!running || percent>100) return false; brightness=percent; return true; }
 static bool transmit(void) {
@@ -27,9 +27,9 @@ static bool show(void *c) { (void)c; return running && transmit(); }
 static const pixel_api_v1 api={1,sizeof(api),NULL,count,set_rgb,set_brightness,show};
 static bool start(const risc_provider_dependency_v1 *d,size_t n) {
     if (running || !gpio_dependencies(d,n)) return false;
-    uint32_t b=garden_board(d,n);
-    if (b!=GARDEN_BOARD_RELAY && b!=GARDEN_BOARD_DIAL) return false;
-    pin=b==GARDEN_BOARD_RELAY?38:48; count_value=b==GARDEN_BOARD_RELAY?1:5;
+    const risc_hw_pixel_v1 *config=hardware_config(d,n,"protocol,ws2812-800khz","pixel.ws2812",sizeof(*config));
+    if (!config || !hw_pin(config->pin) || !config->count || config->count>PIXEL_CHANNELS_MAX || config->order>1) return false;
+    pin=(uint8_t)config->pin; count_value=config->count; order=config->order; gpio_output_initial=false;
     if (!gpio_output(pin)) return false;
     memset(frame,0,sizeof(frame)); brightness=100;
     running=transmit(); return running;

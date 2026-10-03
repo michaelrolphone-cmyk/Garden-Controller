@@ -8,5 +8,6 @@ with tempfile.TemporaryDirectory(prefix='garden-contracts-') as tmp:
     for folder,case,board in CASES:
         output=Path(tmp)/folder
         command=[os.environ.get('CC','cc'),'-std=c11','-g','-fsanitize=undefined','-fno-omit-frame-pointer',f'-DTEST_ID={case}',f'-DTEST_BOARD={board}',f'-DDRIVER_SOURCE="{folder}/driver.c"',f'-I{ROOT}/riscrte/sdk',f'-I{ROOT}/riscrte/Drivers',str(ROOT/'riscrte/test/contracts/driver_check.c'),'-o',str(output)]
-        subprocess.run(command,check=True)
-        subprocess.run([str(output)],check=True,timeout=30)
+        for variant in [0,1]:
+            subprocess.run(command+[f'-DALT_MAP={variant}'],check=True)
+            subprocess.run([str(output)],check=True,timeout=30)

@@ -1,5 +1,6 @@
 #include "WifiApi.h"
-#include "../common/dependency.h"
+#include "../common/hardware.h"
+static risc_hw_radio_v1 hardware;
 static const garden_radio_v1 *radio;
 static uint64_t claim;
 static bool running;
@@ -10,7 +11,7 @@ static bool bounded(const char *s,size_t maximum) {
 }
 static bool connect(void *c,const char *ssid,const char *password) {
     (void)c;
-    return running && ssid && ssid[0] && bounded(ssid,32) && bounded(password,63) &&
+    return running && (hardware.features&1) && ssid && ssid[0] && bounded(ssid,32) && bounded(password,63) &&
         radio->join(radio->context,claim,ssid,password);
 }
 static void disconnect(void *c) { (void)c; if (running) (void)radio->leave(radio->context,claim); }
@@ -25,7 +26,7 @@ static int8_t rssi(void *c) {
 }
 static bool start_ap(void *c,const char *ssid,const char *password,const wifi_ipv4_v1 *config) {
     (void)c;
-    if (!running || !ssid || !ssid[0] || !bounded(ssid,32) || !bounded(password,63) || !config) return false;
+    if (!running || !(hardware.features&2) || !ssid || !ssid[0] || !bounded(ssid,32) || !bounded(password,63) || !config) return false;
     size_t length=strlen(password); if (length && length<8) return false;
     return radio->start_ap(radio->context,claim,ssid,password,config->address,config->gateway,config->netmask);
 }
@@ -36,6 +37,9 @@ static bool addresses(void *c,wifi_ipv4_v1 *station,wifi_ipv4_v1 *ap) {
 static const wifi_api_v1 api={1,sizeof(api),NULL,connect,disconnect,status,rssi,start_ap,stop_ap,addresses};
 static bool start(const risc_provider_dependency_v1 *d,size_t n) {
     if (claim || running) return false;
+    const risc_hw_radio_v1 *next=hardware_config(d,n,"espressif,esp32s3-wifi","radio.integrated",sizeof(*next));
+    if(!next || next->unit>3 || !next->features || (next->features&~3u)) return false;
+    hardware=*next;
     radio=garden_dependency(d,n,"platform.radio",sizeof(*radio));
     if (!radio || !radio->claim || !radio->join || !radio->state || !radio->leave || !radio->release || !radio->start_ap || !radio->stop_ap || !radio->addresses) return false;
     running=radio->claim(radio->context,&claim) && claim;

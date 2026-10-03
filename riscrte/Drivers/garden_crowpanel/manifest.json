@@ -1,21 +1,22 @@
 {
   "type": "driver",
   "id": "garden-crowpanel",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "driver_abi": 2,
   "architecture": "xtensa-esp32s3",
   "file_name": "driver.elf",
   "requires": [
     {
       "capability": "platform.board",
-      "api": 1
+      "api": 2
     }
   ],
   "provides": [
     {
-      "capability": "board.garden",
+      "capability": "hardware.catalog",
       "api": 1
     }
   ],
-  "status": "contract-tested-runtime-backfill-required"
+  "status": "contract-tested-runtime-backfill-required",
+  "hardware_manifest": "hardware.json"
 }

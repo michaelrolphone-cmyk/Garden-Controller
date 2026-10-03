@@ -1,7 +1,7 @@
 #pragma once
 #include "GardenPlatformV1.h"
 #include <string.h>
-static const void *garden_dependency(const risc_provider_dependency_v1 *d, size_t n,
+static inline const void *garden_dependency(const risc_provider_dependency_v1 *d, size_t n,
                                      const char *name, size_t size) {
     const void *result = NULL;
     if ((!d && n) || n > 16) return NULL;
@@ -13,8 +13,4 @@ static const void *garden_dependency(const risc_provider_dependency_v1 *d, size_
         result = d[i].api;
     }
     return result;
-}
-static inline uint32_t garden_board(const risc_provider_dependency_v1 *d, size_t n) {
-    const garden_board_v1 *b = garden_dependency(d,n,"board.garden",sizeof(*b));
-    return b ? b->board : 0;
 }

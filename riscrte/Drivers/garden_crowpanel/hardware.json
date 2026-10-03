@@ -1,0 +1,190 @@
+{
+  "schema": "riscrte.board-hardware",
+  "schema_version": 1,
+  "board_id": "elecrow-crowpanel-128",
+  "revision": "unspecified",
+  "buses": [
+    {
+      "instance_id": 1,
+      "kind": "spi",
+      "controller": 2,
+      "frequency_hz": 10000000,
+      "mode": 0,
+      "pins": {
+        "sclk": 10,
+        "mosi": 11,
+        "miso": -1
+      }
+    },
+    {
+      "instance_id": 2,
+      "kind": "i2c",
+      "controller": 0,
+      "frequency_hz": 400000,
+      "mode": 0,
+      "pins": {
+        "sda": 6,
+        "scl": 7
+      }
+    }
+  ],
+  "devices": [
+    {
+      "instance_id": 1,
+      "chip": {
+        "vendor": "generic",
+        "model": "gpio-button-bank",
+        "revision": "unspecified"
+      },
+      "compatible": "generic,gpio-button-bank",
+      "config_type": "gpio.bank",
+      "config_version": 1,
+      "config": {
+        "pins": [
+          41
+        ],
+        "active_high": false,
+        "pull_up": true,
+        "debounce_us": 30000,
+        "long_press_us": 1500000,
+        "click_min_us": 30000
+      }
+    },
+    {
+      "instance_id": 2,
+      "chip": {
+        "vendor": "generic",
+        "model": "quadrature-encoder",
+        "revision": "unspecified"
+      },
+      "compatible": "generic,quadrature-encoder",
+      "config_type": "input.quadrature",
+      "config_version": 1,
+      "config": {
+        "a": 45,
+        "b": 42,
+        "pull_up": true,
+        "edges_per_detent": 2,
+        "direction": 1,
+        "debounce_us": 800,
+        "button_instance_id": 1
+      },
+      "bindings": {
+        "input.button": 1
+      }
+    },
+    {
+      "instance_id": 3,
+      "chip": {
+        "vendor": "generic",
+        "model": "gpio-led-bank",
+        "revision": "unspecified"
+      },
+      "compatible": "generic,gpio-led-bank",
+      "config_type": "gpio.bank",
+      "config_version": 1,
+      "config": {
+        "pins": [
+          40
+        ],
+        "active_high": true,
+        "pull_up": false,
+        "debounce_us": 0,
+        "long_press_us": 0,
+        "click_min_us": 0
+      }
+    },
+    {
+      "instance_id": 4,
+      "chip": {
+        "vendor": "protocol",
+        "model": "ws2812-800khz",
+        "revision": "unspecified"
+      },
+      "compatible": "protocol,ws2812-800khz",
+      "config_type": "pixel.ws2812",
+      "config_version": 1,
+      "config": {
+        "pin": 48,
+        "count": 5,
+        "order": 0
+      }
+    },
+    {
+      "instance_id": 5,
+      "chip": {
+        "vendor": "galaxycore",
+        "model": "gc9a01",
+        "revision": "unspecified"
+      },
+      "compatible": "galaxycore,gc9a01",
+      "config_type": "display.spi",
+      "config_version": 1,
+      "config": {
+        "bus_instance_id": 1,
+        "width": 240,
+        "height": 240,
+        "offset_x": 0,
+        "offset_y": 0,
+        "rotation": 0,
+        "cs": 9,
+        "dc": 3,
+        "reset": 14,
+        "backlight": 46,
+        "busy": -1,
+        "reset_active_high": false,
+        "busy_active_high": false,
+        "backlight_active_high": true,
+        "power_pins": [
+          1,
+          2
+        ],
+        "power_active_high": [
+          true,
+          true
+        ],
+        "reset_assert_ms": 200,
+        "reset_recovery_ms": 200
+      }
+    },
+    {
+      "instance_id": 6,
+      "chip": {
+        "vendor": "hynitron",
+        "model": "cst816d",
+        "revision": "unspecified"
+      },
+      "compatible": "hynitron,cst816d",
+      "config_type": "touch.i2c",
+      "config_version": 1,
+      "config": {
+        "bus_instance_id": 2,
+        "width": 240,
+        "height": 240,
+        "address": 21,
+        "reset": 13,
+        "irq": 5,
+        "reset_active_high": false,
+        "irq_active_high": false,
+        "irq_pull_up": true,
+        "reset_assert_ms": 10,
+        "reset_recovery_ms": 50
+      }
+    },
+    {
+      "instance_id": 7,
+      "chip": {
+        "vendor": "espressif",
+        "model": "esp32s3-wifi",
+        "revision": "unspecified"
+      },
+      "compatible": "espressif,esp32s3-wifi",
+      "config_type": "radio.integrated",
+      "config_version": 1,
+      "config": {
+        "unit": 0,
+        "features": 3
+      }
+    }
+  ]
+}

@@ -115,6 +115,8 @@ def write_package(kind: str, source: dict, files: dict[str, bytes], out_dir: Pat
     if kind == "driver":
         manifest["driver_abi"] = source["driver_abi"]
         manifest["provides"] = source["provides"]
+        for key in ("hardware_compatibility", "hardware_manifest"):
+            if key in source: manifest[key] = source[key]
     blob = stored_zip([(".package.json", (json.dumps(manifest, indent=2) + "\n").encode("ascii")), *files.items()])
     prefix = "application" if kind == "application" else "driver"
     name = f"{prefix}-{identity}-{version}-{ARCH}.rte.zip"
@@ -134,6 +136,7 @@ def write_package(kind: str, source: dict, files: dict[str, bytes], out_dir: Pat
 
 
 def build(gcc: str, firmware_include: Path, drivers_only: bool = False) -> None:
+    subprocess.run([os.sys.executable, str(ROOT / "scripts/hardware_manifests.py")], check=True)
     rows = []
     driver_dir = ROOT / "dist/release-packages"
     app_dir = ROOT / "dist/release-app-packages"
@@ -150,7 +153,10 @@ def build(gcc: str, firmware_include: Path, drivers_only: bool = False) -> None:
         seen_ids.add(source["id"])
         elf = driver_dir / name / "driver.elf"
         compile_elf(gcc, [source_dir / "driver.c"], elf, False, includes)
-        rows.append(write_package("driver", source, {"driver.elf": elf.read_bytes()}, driver_dir))
+        files = {"driver.elf": elf.read_bytes()}
+        if "hardware_manifest" in source:
+            files[source["hardware_manifest"]] = (source_dir / source["hardware_manifest"]).read_bytes()
+        rows.append(write_package("driver", source, files, driver_dir))
     policy = ROOT / "riscrte/include/garden_policy.c"
     for name in (() if drivers_only else APPS):
         source = load_json(ROOT / "riscrte/Apps" / f"{name}.json")
@@ -158,6 +164,7 @@ def build(gcc: str, firmware_include: Path, drivers_only: bool = False) -> None:
         compile_elf(gcc, [ROOT / "riscrte/Apps" / f"{name}.c", policy], elf, True, includes)
         rows.append(write_package("application", source, {source["file_name"]: elf.read_bytes()}, app_dir))
     for directory, kind in ((driver_dir, "driver"), (app_dir, "application")):
+        directory.mkdir(parents=True, exist_ok=True)
         catalog = {"schema": 1, "release": os.environ.get("RISC_PACKAGE_RELEASE", "garden-controller"), "packages": [row for row in rows if row["kind"] == kind]}
         (directory / "package-catalog.json").write_text(json.dumps(catalog, indent=2) + "\n")
     index = {

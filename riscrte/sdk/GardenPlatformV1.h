@@ -3,11 +3,7 @@
  * All layouts use the target C ABI. See CAPABILITY_BACKFILL.md. */
 #include "RiscProviderV2.h"
 #define GARDEN_PLATFORM_API_V1 1u
-#define GARDEN_BOARD_RELAY 1u
-#define GARDEN_BOARD_DIAL 2u
-#define GARDEN_BOARD_PAPER 3u
-/* Immutable authorized board selection. Installing a package is not a grant. */
-typedef struct { uint32_t api_version, struct_size, board; } garden_board_v1;
+#include "RiscHardwareConfigV1.h"
 /* GPIO claims are exclusive across GPIO/PWM/SPI/I2C/waveform providers.
  * claim sets the initial output latch BEFORE enabling output. False has no
  * effect. Tokens are never reused; release false retains ownership. */
@@ -20,7 +16,8 @@ typedef struct {
     bool (*pwm)(void *, uint64_t token, uint32_t hz, uint16_t duty, uint16_t maximum);
     bool (*release)(void *, uint64_t token);
     /* Raw pulse durations, alternating high/low, nanoseconds, maximum 768
-     * durations; synchronous, bounded 20ms, no retained pointer. */
+     * durations; zero durations skip a level without a pulse. Retains the final phase level (even count LOW, odd HIGH).
+     * Synchronous, bounded 20ms, no retained pointer. */
     bool (*waveform)(void *, uint64_t token, const uint32_t *durations_ns, size_t count);
 } garden_gpio_v1;
 /* SPI bus owner claims controller/pins and arbitrates complete transactions.

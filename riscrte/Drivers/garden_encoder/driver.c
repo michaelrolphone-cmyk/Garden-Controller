@@ -6,11 +6,7 @@ static const button_api_v1 *buttons;
 #include "../../sdk/RiscProviderV2.h"
 #include "../common/gpio.h"
 
-#define ENCODER_A_PIN 45
-#define ENCODER_B_PIN 42
-#define ENCODER_EDGES_PER_DETENT 2
-#define ENCODER_DEBOUNCE_US 800u
-
+static risc_hw_quadrature_v1 config;
 typedef struct {
     bool (*claim_input)(uint8_t pin);
     bool (*read)(uint8_t pin);
@@ -24,11 +20,7 @@ static int detent_accum;
 static uint32_t last_edge_us;
 static bool last_a;
 
-bool garden_encoder_bind_port(const garden_gpio_in_port_t *next) {
-    if (running || !next || !next->claim_input || !next->read || !next->release) return false;
-    port = *next;
-    return true;
-}
+
 
 static int32_t take_detents(void *context) { (void)context; int32_t n = running ? detent_accum : 0; detent_accum = 0; return n; }
 static bool button_pressed(void *context) { (void)context; return running && buttons->is_down(buttons->context,0); }
@@ -38,14 +30,14 @@ static void poll(void *context, uint32_t now_us) {
     (void)context;
     if (!running) return;
     buttons->poll(buttons->context,now_us);
-    bool a = port.read(ENCODER_A_PIN);
-    bool b = port.read(ENCODER_B_PIN);
+    bool a = port.read(config.a);
+    bool b = port.read(config.b);
     if (a != last_a) {
-        if ((uint32_t)(now_us - last_edge_us) >= ENCODER_DEBOUNCE_US) {
+        if ((uint32_t)(now_us - last_edge_us) >= config.debounce_us) {
             last_edge_us = now_us;
-            edge_accum += (a == b) ? 1 : -1;
-            if (edge_accum >= ENCODER_EDGES_PER_DETENT) { if (detent_accum < INT32_MAX) detent_accum++; edge_accum = 0; }
-            else if (edge_accum <= -ENCODER_EDGES_PER_DETENT) { if (detent_accum > INT32_MIN) detent_accum--; edge_accum = 0; }
+            edge_accum += ((a == b) ? 1 : -1)*config.direction;
+            if (edge_accum >= config.edges_per_detent) { if (detent_accum < INT32_MAX) detent_accum++; edge_accum = 0; }
+            else if (edge_accum <= -config.edges_per_detent) { if (detent_accum > INT32_MIN) detent_accum--; edge_accum = 0; }
         }
         last_a = a;
     }
@@ -55,19 +47,24 @@ static const garden_encoder_api_v1 api = {
     take_detents, button_pressed, take_click, take_long_press, poll
 };
 static bool start(const risc_provider_dependency_v1 *deps, size_t count) {
-    if (running || !gpio_dependencies(deps,count)) return false;
-    if (garden_board(deps,count) != GARDEN_BOARD_DIAL) return false;
+    if (running || !gpio_clean()) return false;
+    const risc_hw_quadrature_v1 *next=hardware_config(deps,count,"generic,quadrature-encoder","input.quadrature",sizeof(*next));
+    if (!next || !hw_pin(next->a) || !hw_pin(next->b) || next->a==next->b || next->pull_up>1 || next->reserved ||
+        !next->edges_per_detent || next->edges_per_detent>16 || !next->debounce_us || next->debounce_us>1000000 ||
+        (next->direction!=1 && next->direction!=-1) || !next->button_instance_id) return false;
+    config=*next; gpio_input_pullup=config.pull_up;
+    if (!gpio_dependencies(deps,count)) return false;
     buttons=garden_dependency(deps,count,"input.button",sizeof(*buttons));
     if (!buttons || !buttons->is_down || !buttons->take_click || !buttons->take_long_press || !buttons->poll || !buttons->channel_count || !buttons->channel_count(buttons->context)) return false;
     port = (garden_gpio_in_port_t){gpio_input, gpio_read, gpio_release};
 
     if (!port.claim_input || !port.read || !port.release) return false;
-    if (!port.claim_input(ENCODER_A_PIN)) return false;
-    if (!port.claim_input(ENCODER_B_PIN)) {
-        port.release(ENCODER_A_PIN);
+    if (!port.claim_input(config.a)) return false;
+    if (!port.claim_input(config.b)) {
+        port.release(config.a);
         return false;
     }
-    last_a = port.read(ENCODER_A_PIN);
+    last_a = port.read(config.a);
     edge_accum = detent_accum = 0;
     last_edge_us = 0;
     running = !io_fault;

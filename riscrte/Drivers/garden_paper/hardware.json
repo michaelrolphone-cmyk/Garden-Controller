@@ -1,0 +1,87 @@
+{
+  "schema": "riscrte.board-hardware",
+  "schema_version": 1,
+  "board_id": "garden-paper-gdey075t7",
+  "revision": "unspecified",
+  "buses": [
+    {
+      "instance_id": 1,
+      "kind": "spi",
+      "controller": 2,
+      "frequency_hz": 10000000,
+      "mode": 0,
+      "pins": {
+        "sclk": 5,
+        "mosi": 4,
+        "miso": 19
+      }
+    }
+  ],
+  "devices": [
+    {
+      "instance_id": 1,
+      "chip": {
+        "vendor": "gooddisplay",
+        "model": "gdey075t7",
+        "revision": "unspecified"
+      },
+      "compatible": "gooddisplay,gdey075t7",
+      "config_type": "display.spi",
+      "config_version": 1,
+      "config": {
+        "bus_instance_id": 1,
+        "width": 800,
+        "height": 480,
+        "offset_x": 0,
+        "offset_y": 0,
+        "rotation": 0,
+        "cs": 7,
+        "dc": 3,
+        "reset": 6,
+        "backlight": -1,
+        "busy": 2,
+        "reset_active_high": false,
+        "busy_active_high": false,
+        "backlight_active_high": true,
+        "power_pins": [],
+        "power_active_high": [],
+        "reset_assert_ms": 10,
+        "reset_recovery_ms": 10
+      }
+    },
+    {
+      "instance_id": 2,
+      "chip": {
+        "vendor": "sd-association",
+        "model": "sd-spi",
+        "revision": "unspecified"
+      },
+      "compatible": "sd-association,sd-spi",
+      "config_type": "storage.sd-spi",
+      "config_version": 1,
+      "config": {
+        "bus_instance_id": 1,
+        "cs": 20,
+        "detect": -1,
+        "write_protect": -1,
+        "detect_active_high": false,
+        "write_protect_active_high": true
+      }
+    },
+    {
+      "instance_id": 3,
+      "chip": {
+        "vendor": "espressif",
+        "model": "esp32s3-wifi",
+        "revision": "unspecified"
+      },
+      "compatible": "espressif,esp32s3-wifi",
+      "config_type": "radio.integrated",
+      "config_version": 1,
+      "config": {
+        "unit": 0,
+        "features": 3
+      }
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 static const garden_spi_v1 *spi;
 static uint64_t spi_claim;
 static bool spi_held;
-static uint32_t spi_timeout_ms=20;
+static uint32_t spi_timeout_ms=20,spi_max_hz=10000000;
 static inline bool spi_dependencies(const risc_provider_dependency_v1 *d,size_t n) {
     if (spi_claim || !gpio_dependencies(d,n)) return false;
     spi=garden_dependency(d,n,"spi.bus",sizeof(*spi));
@@ -11,7 +11,7 @@ static inline bool spi_dependencies(const risc_provider_dependency_v1 *d,size_t 
 }
 static inline bool spi_begin(uint32_t hz) {
     if (spi_held) return false;
-    spi_held=spi->begin(spi->context,spi_claim,hz,0,spi_timeout_ms); return spi_held;
+    spi_held=spi->begin(spi->context,spi_claim,hz<spi_max_hz?hz:spi_max_hz,0,spi_timeout_ms); return spi_held;
 }
 static inline bool spi_end(void) {
     if (!spi_held) return true;

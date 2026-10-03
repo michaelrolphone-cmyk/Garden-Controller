@@ -7,6 +7,7 @@ provide. They fail admission when dependencies are unavailable. No hardware
 qualification or full Garden app migration is claimed.
 
 ```
+python3 scripts/test_hardware_manifests.py
 python3 scripts/test_contracts.py
 python3 scripts/build_packages.py --drivers-only
 python3 scripts/check_packages.py
@@ -21,3 +22,8 @@ watering zone automatically.
 
 One `.rte.zip` is built per manifest ID, with ABI metadata and generic catalogs.
 No release, flash, serial session or launcher is part of this work.
+
+Board catalogs describe physical devices and wiring; reusable chip ELFs receive
+`hardware.device@1` typed configurations. See the [shared mapping proposal](hardware/CONTRACT.md).
+Hardware matching, scoped dependency injection and independent ELF instances
+remain explicit Reader runtime prerequisites.

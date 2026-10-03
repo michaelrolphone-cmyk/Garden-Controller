@@ -33,6 +33,8 @@ static atomic_flag state_lock = ATOMIC_FLAG_INIT;
 static bool lock_state(void) { return !atomic_flag_test_and_set_explicit(&state_lock,memory_order_acquire); }
 static void unlock_state(void) { atomic_flag_clear_explicit(&state_lock,memory_order_release); }
 
+static risc_hw_i2c_touch_v1 config;
+static bool have_config;
 static const risc_i2c_bus_api_v1 *bus;
 static const risc_platform_clock_api_v1 *clock_api;
 static uint64_t bus_claim;
@@ -238,15 +240,23 @@ static bool snapshot_locked(void *context, risc_touch_snapshot_v1 *out) {
 }
 
 static bool start(const risc_provider_dependency_v1 *d,size_t n) {
-    if (bus || bus_claim || !gpio_dependencies(d,n) || garden_board(d,n)!=GARDEN_BOARD_DIAL) return false;
+    if (bus || bus_claim) return false;
+    const risc_hw_i2c_touch_v1 *next=hardware_config(d,n,"hynitron,cst816d","touch.i2c",sizeof(*next));
+    if (!next || !hw_bus(&next->bus,RISC_HW_BUS_I2C) || next->address<8 || next->address>0x77 || !next->width || !next->height || next->width>4096 || next->height>4096 ||
+        !hw_pin(next->reset) || !hw_pin(next->irq) || next->reset_active_high>1 || next->irq_active_high>1 || next->irq_pull_up>1 ||
+        !next->reset_assert_ms || next->reset_assert_ms>500 || !next->reset_recovery_ms || next->reset_recovery_ms>500) return false;
+    int16_t used[]={next->bus.sda,next->bus.scl,next->reset,next->irq};if(!hw_unique(used,4)) return false;
+    if (!gpio_dependencies(d,n)) return false;
+    config=*next;have_config=true;
     const risc_i2c_bus_api_v1 *candidate=garden_dependency(d,n,"i2c.bus",sizeof(*candidate));
     if (!candidate || !candidate->claim_device || !candidate->transact || !candidate->release_device) return false;
     bus=candidate; clock_api=timer;
-    if (!gpio_output(13) || !gpio_input(5)) return false;
-    gpio_write(13,false); timer->sleep_ms(timer->context,10);
-    gpio_write(13,true); timer->sleep_ms(timer->context,50);
-    if (io_fault || !bus->claim_device(bus->context,0x15,&bus_claim) || !bus_claim) return false;
-    surface_width=surface_height=240; contact_count=0; touch_buttons=0;
+    gpio_output_initial=config.reset_active_high;gpio_input_pullup=config.irq_pull_up;
+    if (!gpio_output(config.reset) || !gpio_input(config.irq)) return false;
+    gpio_write(config.reset,config.reset_active_high); timer->sleep_ms(timer->context,config.reset_assert_ms);
+    gpio_write(config.reset,!config.reset_active_high); timer->sleep_ms(timer->context,config.reset_recovery_ms);
+    if (io_fault || !bus->claim_device(bus->context,config.address,&bus_claim) || !bus_claim) return false;
+    surface_width=config.width;surface_height=config.height; contact_count=0; touch_buttons=0;
     snapshot_timestamp_ms=monotonic_ms();
     for (size_t i=0;i<RISC_TOUCH_MAX_SUBSCRIBERS;i++) subscribers[i]=(touch_subscriber){0};
     bool report=false; return service_one(&report);
@@ -259,10 +269,10 @@ static bool quiesce_locked(void) {
     if (bus_claim && (!bus || !bus->release_device(bus->context, bus_claim)))
         return false;
     bus_claim = 0;
-    gpio_release(5); gpio_release(13);
+    if(have_config) { gpio_release(config.irq); gpio_release(config.reset); }
     if (!gpio_clean()) return false;
     bus = NULL;
-    clock_api = NULL;
+    clock_api = NULL;have_config=false;
     contact_count = 0;
     touch_buttons = 0;
     surface_width = surface_height = 0;

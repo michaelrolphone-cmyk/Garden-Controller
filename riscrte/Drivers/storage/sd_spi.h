@@ -1,5 +1,7 @@
 /* SD SPI protocol owned by this ELF: commands, addressing, tokens and CRC. */
 #include "../common/spi.h"
+static risc_hw_sd_spi_v1 config;
+static bool have_config;
 static uint32_t sd_sectors;
 static bool sd_high_capacity;
 static uint8_t crc7(const uint8_t *p,size_t n) {
@@ -46,6 +48,7 @@ static bool sd_simple(uint8_t cmd,uint32_t arg,uint8_t expected,uint8_t *extra,s
 }
 static bool sd_initialize(void) {
     sd_sectors=0;
+    if(config.detect>=0 && gpio_read(config.detect)!=config.detect_active_high) return false;
     if (!spi->idle_clocks(spi->context,spi_claim,400000,80) || !sd_simple(0,0,1,NULL,0)) return false;
     uint8_t r7[4]; bool v2=sd_simple(8,0x1aa,1,r7,4);
     if (v2 && (r7[2]!=1 || r7[3]!=0xaa)) return false;
@@ -84,6 +87,7 @@ static bool sd_read(uint32_t lba,uint8_t *out) {
     return spi_end() && ok;
 }
 static bool sd_write(uint32_t lba,const uint8_t *bytes) {
+    if(config.write_protect>=0 && gpio_read(config.write_protect)==config.write_protect_active_high) return false;
     if (lba>=sd_sectors || (!sd_high_capacity && lba>UINT32_MAX/512) || !spi_begin(10000000)) return false;
     uint8_t r=0xff,token=0xfe; uint16_t sum=crc16(bytes,512); uint8_t crc[2]={(uint8_t)(sum>>8),(uint8_t)sum};
     bool ok=sd_command(24,sd_high_capacity?lba:lba*512,&r) && !r &&

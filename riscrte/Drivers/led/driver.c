@@ -22,21 +22,8 @@ static bool have_port;
 
 
 
-bool led_bind_port(const led_gpio_port_t *next) {
-    if (running || !next || !next->claim_output || !next->write || !next->release) return false;
-    port = *next;
-    have_port = true;
-    return true;
-}
-bool led_bind_profile(const led_profile_t *next) {
-    if (running || !next || next->channel_count == 0 || next->channel_count > LED_CHANNELS_MAX) return false;
-    for (uint8_t i = 0; i < next->channel_count; i++) {
-        for (uint8_t j = 0; j < i; j++) if (next->pins[i] == next->pins[j]) return false;
-    }
-    profile = *next;
-    have_profile = true;
-    return true;
-}
+
+
 static void write_channel(uint8_t index, bool on) {
     bool level = profile.active_high ? on : !on;
     port.write(profile.pins[index], level);
@@ -48,12 +35,12 @@ static bool set(void *context, uint8_t channel, bool on) {
     (void)context;
     if (!running || channel >= profile.channel_count) return false;
     write_channel(channel, on);
-    return true;
+    return !io_fault;
 }
 static bool set_duty(void *context, uint8_t channel, uint8_t percent) {
     (void)context;
     if (!running || channel >= profile.channel_count || percent > 100) return false;
-    if (!gpio->pwm(gpio->context,pins[profile.pins[channel]],1000,percent,100)) return false;
+    if (!gpio->pwm(gpio->context,pins[profile.pins[channel]],1000,profile.active_high?percent:100-percent,100)) return false;
     duty[channel] = percent;
     if (percent) mask |= (uint8_t)(1u<<channel); else mask &= (uint8_t)~(1u<<channel);
     return true;
@@ -61,9 +48,11 @@ static bool set_duty(void *context, uint8_t channel, uint8_t percent) {
 static bool blink(void *context,uint8_t channel,uint16_t on_us,uint16_t off_us,uint8_t count) {
     (void)context;
     if (!running || channel>=profile.channel_count || !count || (uint64_t)(on_us+off_us)*count>20000) return false;
-    uint32_t pulses[510];
-    for (size_t i=0;i<count;i++) { pulses[i*2]=(uint32_t)on_us*1000; pulses[i*2+1]=(uint32_t)off_us*1000; }
-    bool ok=gpio->waveform(gpio->context,pins[profile.pins[channel]],pulses,(size_t)count*2);
+    uint32_t pulses[512];
+    size_t offset=profile.active_high?0:1; pulses[0]=0;
+    for (size_t i=0;i<count;i++) { pulses[offset+i*2]=(uint32_t)on_us*1000; pulses[offset+i*2+1]=(uint32_t)off_us*1000; }
+    size_t length=(size_t)count*2+offset;
+    bool ok=gpio->waveform(gpio->context,pins[profile.pins[channel]],pulses,length);
     write_channel(channel,false); return ok && !io_fault;
 }
 static uint8_t get_mask(void *context) { (void)context; return running ? mask : 0; }
@@ -72,10 +61,15 @@ static const led_api_v1 api = {
     channel_count, set, set_duty, blink, get_mask
 };
 static bool start(const risc_provider_dependency_v1 *deps, size_t count) {
-    if (running || !gpio_dependencies(deps,count)) return false;
-    if (garden_board(deps,count) != GARDEN_BOARD_DIAL) return false;
+    if (running || !gpio_clean()) return false;
+    const risc_hw_gpio_bank_v1 *config=hardware_config(deps,count,"generic,gpio-led-bank","gpio.bank",sizeof(*config));
+    if (!hw_bank(config,8)) return false;
+    profile.channel_count=config->count;
+    for(size_t i=0;i<config->count;i++) profile.pins[i]=(uint8_t)config->pins[i];
+    profile.active_high=config->active_high;
+    gpio_output_initial=!config->active_high; gpio_input_pullup=config->pull_up; have_profile=true;
+    if (!gpio_dependencies(deps,count)) return false;
     port = (led_gpio_port_t){gpio_output, gpio_write, gpio_release, gpio_delay}; have_port = true;
-    profile = (led_profile_t){ .channel_count=1, .pins={40}, .active_high=true }; have_profile=true;
 
     if (!have_port) return false;
     for (uint8_t i = 0; i < profile.channel_count; i++) {

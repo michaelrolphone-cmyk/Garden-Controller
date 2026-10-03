@@ -25,6 +25,8 @@ jobs:
           pio pkg install --global --tool "espressif/toolchain-xtensa-esp32s3@8.4.0+2021r2-patch5"
       - name: Fetch firmware app headers
         run: git clone --depth 1 https://github.com/michaelrolphone-cmyk/T5S3-Reader.git third_party/T5S3-Reader
+      - name: Physical hardware manifest fixtures
+        run: python scripts/test_hardware_manifests.py
       - name: Host capability contract fixtures
         run: python scripts/test_contracts.py
       - name: Build app and driver ELFs

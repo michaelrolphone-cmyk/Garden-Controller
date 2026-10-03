@@ -5,8 +5,8 @@
 #else
 static bool mock_exchange(void *c,uint64_t t,const uint8_t *tx,uint8_t *rx,size_t n) {
     (void)c;assert(t && n<=512);if(rx)memset(rx,0xff,n);
-    if (tx && !mock_levels[3] && n==1) mock_command=*tx;
-    else if (tx && mock_levels[3] && ((TEST_ID==7 && mock_command==0x2c)||(TEST_ID==8 && mock_command==0x13))) {
+    if (tx && !mock_levels[mock_dc] && n==1) mock_command=*tx;
+    else if (tx && mock_levels[mock_dc] && ((TEST_ID==7 && mock_command==0x2c)||(TEST_ID==8 && mock_command==0x13))) {
         if(!mock_spi_bytes){mock_first[0]=tx[0];mock_first[1]=tx[1];}
         mock_last[0]=tx[n-2];mock_last[1]=tx[n-1];mock_spi_bytes+=n;mock_rows++;
     }
@@ -16,7 +16,7 @@ static bool mock_exchange(void *c,uint64_t t,const uint8_t *tx,uint8_t *rx,size_
 int main(void) {
     const risc_driver_v2 *d=t5_driver_get(2);assert(d && !t5_driver_get(1));
     assert(!d->start(NULL,0));assert(d->quiesce());d->stop();
-    mock_board.board=TEST_BOARD;
+    mock_board.board_id=TEST_BOARD==1?"castle-hills-relay6":TEST_BOARD==2?"elecrow-crowpanel-128":"garden-paper-gdey075t7";
 #if TEST_ID==9
     fixture_disk();
 #endif
@@ -27,16 +27,16 @@ int main(void) {
     mock_gpio.struct_size=old_gpio_size;mock_board.struct_size=old_board_size;mock_radio.struct_size=old_radio_size;
     assert(d->start(mock_deps,MOCK_N));assert(!d->start(mock_deps,MOCK_N));
 #if TEST_ID==1
-    const relay_api_v1 *a=d->capability;assert(a->channel_count(NULL)==6);assert(a->chirp(NULL));assert(a->set_mask(NULL,0x25));assert(mock_levels[1] && mock_levels[41] && mock_levels[46]);assert(!a->set_channel(NULL,6,true));
-    mock_write_fail=true;assert(!d->quiesce());assert(mock_pins[1]);mock_write_fail=false;
+    const relay_api_v1 *a=d->capability;assert(a->channel_count(NULL)==6);assert(a->chirp(NULL));assert(a->set_mask(NULL,0x25));assert(mock_levels[P(1)] && mock_levels[P(41)] && mock_levels[P(46)]);assert(!a->set_channel(NULL,6,true));
+    mock_write_fail=true;assert(!d->quiesce());assert(mock_pins[P(1)]);mock_write_fail=false;
 #elif TEST_ID==2
     const buzzer_api_v1 *a=d->capability;assert(a->chirp(NULL,0));assert(mock_wave_count==16);assert(!a->pattern(NULL,0,65535,65535,255));
 #elif TEST_ID==3
-    const button_api_v1 *a=d->capability;mock_levels[41]=false;a->poll(NULL,1000);a->poll(NULL,32000);assert(a->is_down(NULL,0));mock_levels[41]=true;a->poll(NULL,64000);a->poll(NULL,96000);assert(a->take_click(NULL,0));assert(!a->take_click(NULL,0));
+    const button_api_v1 *a=d->capability;mock_levels[P(41)]=false;a->poll(NULL,1000);a->poll(NULL,32000);assert(a->is_down(NULL,0));mock_levels[P(41)]=true;a->poll(NULL,64000);a->poll(NULL,96000);assert(a->take_click(NULL,0));assert(!a->take_click(NULL,0));
 #elif TEST_ID==4
-    const led_api_v1 *a=d->capability;assert(a->set_duty(NULL,0,25));assert(mock_levels[40]);assert(!a->set_duty(NULL,0,101));
+    const led_api_v1 *a=d->capability;assert(a->set_duty(NULL,0,25));assert(mock_levels[P(40)]);assert(!a->set_duty(NULL,0,101));
 #elif TEST_ID==5
-    const garden_encoder_api_v1 *a=d->capability;mock_levels[45]=mock_levels[42]=false;a->poll(NULL,1000);mock_levels[45]=mock_levels[42]=true;a->poll(NULL,2000);assert(a->take_detents(NULL)==1);assert(a->take_detents(NULL)==0);assert(a->button_pressed(NULL));assert(a->take_click(NULL));assert(a->take_long_press(NULL));
+    const garden_encoder_api_v1 *a=d->capability;mock_levels[P(45)]=mock_levels[P(42)]=false;a->poll(NULL,1000);mock_levels[P(45)]=mock_levels[P(42)]=true;a->poll(NULL,2000);assert(a->take_detents(NULL)==1);assert(a->take_detents(NULL)==0);assert(a->button_pressed(NULL));assert(a->take_click(NULL));assert(a->take_long_press(NULL));
 #elif TEST_ID==6
     const pixel_api_v1 *a=d->capability;assert(a->count(NULL)==5);assert(a->set_rgb(NULL,4,255,20,30));assert(a->set_brightness(NULL,50));assert(a->show(NULL));assert(mock_wave_count==240);assert(!a->set_rgb(NULL,5,1,2,3));
 #elif TEST_ID==7 || TEST_ID==8
@@ -67,13 +67,41 @@ int main(void) {
     mock_release_fail=true;assert(!d->quiesce());mock_release_fail=false;
 #endif
     assert(d->quiesce());d->stop();d->stop();for(int i=0;i<49;i++)assert(!mock_pins[i]);
-#if TEST_ID!=11
-    mock_board.board=99;assert(!d->start(mock_deps,MOCK_N));assert(d->quiesce());d->stop();mock_board.board=TEST_BOARD;
+#if TEST_ID!=12
+    const char *compat=mock_hardware.compatible;mock_hardware.compatible="unknown,chip";
+    assert(!d->start(mock_deps,MOCK_N));assert(d->quiesce());d->stop();mock_hardware.compatible=compat;
+    const void *saved_config=mock_hardware.config;mock_hardware.config=NULL;
+    assert(!d->start(mock_deps,MOCK_N));assert(d->quiesce());mock_hardware.config=saved_config;
+    mock_hardware.config_version=2;assert(!d->start(mock_deps,MOCK_N));assert(d->quiesce());mock_hardware.config_version=1;
+    mock_hardware.revision="unknown-revision";assert(!d->start(mock_deps,MOCK_N));assert(d->quiesce());mock_hardware.revision="unspecified";
+#else
+    mock_board.board_id="wrong-board";assert(!d->start(mock_deps,MOCK_N));assert(d->quiesce());
 #endif
 #if TEST_ID==1 || TEST_ID==5 || TEST_ID==7 || TEST_ID==8 || TEST_ID==10
-    mock_fail_pin=TEST_ID==1?41:TEST_ID==5?42:TEST_ID==7?14:TEST_ID==8?6:5;
+    mock_fail_pin=TEST_ID==1?P(41):TEST_ID==5?P(42):TEST_ID==7?P(14):TEST_ID==8?P(6):P(5);
     assert(!d->start(mock_deps,MOCK_N));assert(d->quiesce());d->stop();
     for(int i=0;i<49;i++)assert(!mock_pins[i]);mock_fail_pin=-1;
+#endif
+#if TEST_ID==1 || TEST_ID==2 || TEST_ID==4
+    fixture.active_high=0;assert(d->start(mock_deps,MOCK_N));
+    assert(mock_levels[fixture.pins[0]]); /* inactive latch before output */
+#if TEST_ID==1
+    assert(a->set_channel(NULL,0,true));assert(!mock_levels[fixture.pins[0]]);
+#elif TEST_ID==2
+    assert(a->pattern(NULL,0,10,20,2));assert(mock_wave_count==5 && mock_wave_first==0 && mock_wave_second==10000);
+#elif TEST_ID==4
+    assert(a->set_duty(NULL,0,25));assert(mock_pwm_duty==75);
+    assert(a->blink(NULL,0,10,20,2));assert(mock_wave_count==5 && mock_wave_first==0 && mock_wave_second==10000);
+#endif
+    assert(d->quiesce());assert(mock_levels[fixture.pins[0]]);fixture.active_high=1;
+#endif
+#if TEST_ID==1
+    fixture.pins[1]=fixture.pins[0];assert(!d->start(mock_deps,MOCK_N));fixture.pins[1]=P(2);
+    fixture.pins[0]=-1;assert(!d->start(mock_deps,MOCK_N));fixture.pins[0]=P(1);
+#elif TEST_ID==7 || TEST_ID==8 || TEST_ID==9
+    fixture.cs=fixture.bus.sclk;assert(!d->start(mock_deps,MOCK_N));
+#elif TEST_ID==10
+    fixture.irq=fixture.bus.sda;assert(!d->start(mock_deps,MOCK_N));
 #endif
     puts(DRIVER_SOURCE " contract fixture passed");return 0;
 }

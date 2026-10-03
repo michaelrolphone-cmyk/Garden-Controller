@@ -13,9 +13,13 @@ for row in catalog:
     blob=(folder/row['archive']).read_bytes()
     assert len(blob)==row['size_bytes'] and hashlib.sha256(blob).hexdigest()==row['sha256']
     with zipfile.ZipFile(folder/row['archive']) as z:
-        assert len(z.namelist())==len(set(z.namelist()))==3
+        assert len(z.namelist())==len(set(z.namelist()))==(4 if "hardware_manifest" in source else 3)
         manifest=json.loads(z.read('.package.json'))
         assert manifest['id']==source['id'] and manifest['version']==source['version']
+        for key in ('hardware_compatibility','hardware_manifest'):
+            assert manifest.get(key)==source.get(key)
+        if 'hardware_manifest' in source:
+            assert json.loads(z.read(source['hardware_manifest']))['schema']=='riscrte.board-hardware'
         assert manifest['provides']==source['provides'] and manifest['driver_abi']==2
         assert manifest['requires']==[{'capability':r['capability'],'min_api':r['api']} for r in source['requires']]
         assert z.read('driver.elf')[:4]==b'\x7fELF'

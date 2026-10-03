@@ -934,14 +934,23 @@ static const risc_storage_volume_api_v1 volume_api = {
 };
 
 static bool driver_start(const risc_provider_dependency_v1 *d,size_t n) {
-    if (storage_running || !spi_dependencies(d,n) || garden_board(d,n)!=GARDEN_BOARD_PAPER) return false;
-    if (!spi->claim(spi->context,5,4,19,20,&spi_claim) || !spi_claim) return false;
+    if(storage_running) return false;
+    const risc_hw_sd_spi_v1 *next=hardware_config(d,n,"sd-association,sd-spi","storage.sd-spi",sizeof(*next));
+    if(!next || !hw_bus(&next->bus,RISC_HW_BUS_SPI) || !hw_pin(next->bus.miso) || !hw_pin(next->cs) || next->detect_active_high>1 || next->write_protect_active_high>1) return false;
+    int16_t used[]={next->bus.sclk,next->bus.mosi,next->bus.miso,next->cs,next->detect,next->write_protect};if(!hw_unique(used,6)) return false;
+    if(!spi_dependencies(d,n)) return false;
+    config=*next;have_config=true;spi_max_hz=config.bus.frequency_hz;
+    if(config.detect>=0 && !gpio_input(config.detect)) return false;
+    if(config.write_protect>=0 && !gpio_input(config.write_protect)) return false;
+    if (!spi->claim(spi->context,config.bus.sclk,config.bus.mosi,config.bus.miso,config.cs,&spi_claim) || !spi_claim) return false;
     storage_running=true; clear_error(); return true;
 }
 static bool driver_quiesce(void) {
     if (file_state.active || dir_state.active) return false;
     if (!spi_release()) return false;
-    storage_running=volume_ready=false; return true;
+    if(have_config) { if(config.detect>=0) gpio_release(config.detect);if(config.write_protect>=0) gpio_release(config.write_protect); }
+    if(!gpio_clean()) return false;
+    have_config=false;storage_running=volume_ready=false; return true;
 }
 static void driver_stop(void) { (void)driver_quiesce(); }
 static const risc_driver_v2 driver={2,sizeof(driver),"storage","storage.volume",1,&volume_api,driver_start,driver_stop,driver_quiesce};

@@ -1,15 +1,11 @@
 {
   "type": "driver",
   "id": "garden-encoder",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "driver_abi": 2,
   "architecture": "xtensa-esp32s3",
   "file_name": "driver.elf",
   "requires": [
-    {
-      "capability": "board.garden",
-      "api": 1
-    },
     {
       "capability": "platform.gpio",
       "api": 1
@@ -21,6 +17,10 @@
     {
       "capability": "input.button",
       "api": 1
+    },
+    {
+      "capability": "hardware.device",
+      "api": 1
     }
   ],
   "provides": [
@@ -29,11 +29,16 @@
       "api": 1
     }
   ],
-  "board": "elecrow-crowpanel-128",
-  "pins": {
-    "a": 45,
-    "b": 42
-  },
   "status": "contract-tested-runtime-backfill-required",
-  "notes": "See riscrte/CAPABILITY_BACKFILL.md for contracts, board authorization and integration prerequisites."
+  "notes": "See riscrte/CAPABILITY_BACKFILL.md for contracts, board authorization and integration prerequisites.",
+  "hardware_compatibility": [
+    {
+      "compatible": "generic,quadrature-encoder",
+      "revisions": [
+        "unspecified"
+      ],
+      "config_type": "input.quadrature",
+      "config_version": 1
+    }
+  ]
 }
