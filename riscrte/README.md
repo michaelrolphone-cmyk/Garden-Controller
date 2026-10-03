@@ -17,13 +17,16 @@ Install the ESP32-S3 Xtensa toolchain or set `XTENSA_GCC` to its gcc binary.
 Driver-only builds need no ESP-IDF SDK because drivers import capability tables,
 not GPIO/controller firmware functions. To additionally build the unchanged demo
 apps, pass `--firmware-include PATH/TO/T5S3-Reader/lib/NativeApps/include` and omit
-`--drivers-only`. The demos must not be used as on-device tests: one starts a
-watering zone automatically.
+`--drivers-only`. The encoder demo is unchanged and must not be used for an
+on-device test. The relay boot app does not energize a channel; see
+[the relay install note](../docs/RELAY_INSTALL.md).
 
 One `.rte.zip` is built per manifest ID, with ABI metadata and generic catalogs.
-No release, flash, serial session or launcher is part of this work.
+No release, flash, or serial session is part of this work. The relay boot store
+is host-built and not flashed. See [the relay install note](../docs/RELAY_INSTALL.md).
 
 Board catalogs describe physical devices and wiring; reusable chip ELFs receive
 `hardware.device@1` typed configurations. See the [shared mapping proposal](hardware/CONTRACT.md).
-Hardware matching, scoped dependency injection and independent ELF instances
-remain explicit Reader runtime prerequisites.
+The relay boot store is host-built for generic RiscRTE
+`e27d3d089086d79f06edeff4c2bd35f6e6243444` and is not flashed. See
+[the relay install note](../docs/RELAY_INSTALL.md). Encoder and e-ink apps are unchanged.
