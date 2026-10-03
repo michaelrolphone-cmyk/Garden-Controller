@@ -1,0 +1,90 @@
+{
+  "schema": "riscrte.board-hardware",
+  "schema_version": 1,
+  "board_id": "castle-hills-relay6",
+  "revision": "unspecified",
+  "buses": [],
+  "devices": [
+    {
+      "instance_id": 1,
+      "chip": {
+        "vendor": "generic",
+        "model": "gpio-relay-bank",
+        "revision": "unspecified"
+      },
+      "compatible": "generic,gpio-relay-bank",
+      "config_type": "gpio.bank",
+      "config_version": 1,
+      "config": {
+        "pins": [
+          1,
+          2,
+          41,
+          42,
+          45,
+          46
+        ],
+        "active_high": true,
+        "pull_up": false,
+        "debounce_us": 0,
+        "long_press_us": 0,
+        "click_min_us": 0
+      },
+      "bindings": {
+        "sound.buzzer": 2
+      }
+    },
+    {
+      "instance_id": 2,
+      "chip": {
+        "vendor": "generic",
+        "model": "pulse-buzzer",
+        "revision": "unspecified"
+      },
+      "compatible": "generic,pulse-buzzer",
+      "config_type": "gpio.bank",
+      "config_version": 1,
+      "config": {
+        "pins": [
+          21
+        ],
+        "active_high": true,
+        "pull_up": false,
+        "debounce_us": 0,
+        "long_press_us": 0,
+        "click_min_us": 0
+      }
+    },
+    {
+      "instance_id": 3,
+      "chip": {
+        "vendor": "protocol",
+        "model": "ws2812-800khz",
+        "revision": "unspecified"
+      },
+      "compatible": "protocol,ws2812-800khz",
+      "config_type": "pixel.ws2812",
+      "config_version": 1,
+      "config": {
+        "pin": 38,
+        "count": 1,
+        "order": 0
+      }
+    },
+    {
+      "instance_id": 4,
+      "chip": {
+        "vendor": "espressif",
+        "model": "esp32s3-wifi",
+        "revision": "unspecified"
+      },
+      "compatible": "espressif,esp32s3-wifi",
+      "config_type": "radio.integrated",
+      "config_version": 1,
+      "config": {
+        "unit": 0,
+        "features": 3
+      }
+    }
+  ]
+}

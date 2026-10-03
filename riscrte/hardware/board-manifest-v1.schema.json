@@ -1,0 +1,1043 @@
+{
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "riscrte.board-hardware"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "board_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96
+    },
+    "buses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "instance_id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "kind": {
+            "enum": [
+              "spi",
+              "i2c"
+            ]
+          },
+          "controller": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "frequency_hz": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000000
+          },
+          "mode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "pins": {
+            "type": "object",
+            "properties": {
+              "sclk": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 48
+              },
+              "mosi": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 48
+              },
+              "miso": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 48
+              },
+              "sda": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 48
+              },
+              "scl": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 48
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "controller_namespace": {
+            "enum": [
+              "esp32.peripheral",
+              "riscrte.logical"
+            ]
+          },
+          "physical_controller": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          }
+        },
+        "required": [
+          "instance_id",
+          "kind",
+          "controller",
+          "frequency_hz",
+          "mode",
+          "pins"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "controller_namespace": {
+                    "const": "esp32.peripheral"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "controller_namespace": {
+                    "const": "riscrte.logical"
+                  }
+                },
+                "required": [
+                  "controller_namespace",
+                  "physical_controller"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "maxItems": 8
+    },
+    "devices": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "instance_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "chip": {
+                "type": "object",
+                "properties": {
+                  "vendor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  }
+                },
+                "required": [
+                  "vendor",
+                  "model",
+                  "revision"
+                ],
+                "additionalProperties": false
+              },
+              "compatible": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "config_type": {
+                "const": "gpio.bank"
+              },
+              "config_version": {
+                "const": 1
+              },
+              "config": {
+                "type": "object",
+                "properties": {
+                  "pins": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 48
+                    },
+                    "maxItems": 8,
+                    "minItems": 1,
+                    "uniqueItems": true
+                  },
+                  "active_high": {
+                    "type": "boolean"
+                  },
+                  "pull_up": {
+                    "type": "boolean"
+                  },
+                  "debounce_us": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000000
+                  },
+                  "long_press_us": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60000000
+                  },
+                  "click_min_us": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60000000
+                  }
+                },
+                "required": [
+                  "pins",
+                  "active_high",
+                  "pull_up",
+                  "debounce_us",
+                  "long_press_us",
+                  "click_min_us"
+                ],
+                "additionalProperties": false
+              },
+              "bindings": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              }
+            },
+            "required": [
+              "instance_id",
+              "chip",
+              "compatible",
+              "config_type",
+              "config_version",
+              "config"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "instance_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "chip": {
+                "type": "object",
+                "properties": {
+                  "vendor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  }
+                },
+                "required": [
+                  "vendor",
+                  "model",
+                  "revision"
+                ],
+                "additionalProperties": false
+              },
+              "compatible": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "config_type": {
+                "const": "input.quadrature"
+              },
+              "config_version": {
+                "const": 1
+              },
+              "config": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 48
+                  },
+                  "b": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 48
+                  },
+                  "pull_up": {
+                    "type": "boolean"
+                  },
+                  "edges_per_detent": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 16
+                  },
+                  "direction": {
+                    "enum": [
+                      -1,
+                      1
+                    ]
+                  },
+                  "debounce_us": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000000
+                  },
+                  "button_instance_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  }
+                },
+                "required": [
+                  "a",
+                  "b",
+                  "pull_up",
+                  "edges_per_detent",
+                  "direction",
+                  "debounce_us",
+                  "button_instance_id"
+                ],
+                "additionalProperties": false
+              },
+              "bindings": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              }
+            },
+            "required": [
+              "instance_id",
+              "chip",
+              "compatible",
+              "config_type",
+              "config_version",
+              "config"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "instance_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "chip": {
+                "type": "object",
+                "properties": {
+                  "vendor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  }
+                },
+                "required": [
+                  "vendor",
+                  "model",
+                  "revision"
+                ],
+                "additionalProperties": false
+              },
+              "compatible": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "config_type": {
+                "const": "pixel.ws2812"
+              },
+              "config_version": {
+                "const": 1
+              },
+              "config": {
+                "type": "object",
+                "properties": {
+                  "pin": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 48
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 16
+                  },
+                  "order": {
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  }
+                },
+                "required": [
+                  "pin",
+                  "count",
+                  "order"
+                ],
+                "additionalProperties": false
+              },
+              "bindings": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              }
+            },
+            "required": [
+              "instance_id",
+              "chip",
+              "compatible",
+              "config_type",
+              "config_version",
+              "config"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "instance_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "chip": {
+                "type": "object",
+                "properties": {
+                  "vendor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  }
+                },
+                "required": [
+                  "vendor",
+                  "model",
+                  "revision"
+                ],
+                "additionalProperties": false
+              },
+              "compatible": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "config_type": {
+                "const": "display.spi"
+              },
+              "config_version": {
+                "const": 1
+              },
+              "config": {
+                "type": "object",
+                "properties": {
+                  "bus_instance_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096
+                  },
+                  "offset_x": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4095
+                  },
+                  "offset_y": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4095
+                  },
+                  "rotation": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  },
+                  "cs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 48
+                  },
+                  "dc": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 48
+                  },
+                  "reset": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 48
+                  },
+                  "backlight": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 48
+                  },
+                  "busy": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 48
+                  },
+                  "reset_active_high": {
+                    "type": "boolean"
+                  },
+                  "busy_active_high": {
+                    "type": "boolean"
+                  },
+                  "backlight_active_high": {
+                    "type": "boolean"
+                  },
+                  "power_pins": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 48
+                    },
+                    "maxItems": 4,
+                    "uniqueItems": true
+                  },
+                  "power_active_high": {
+                    "type": "array",
+                    "items": {
+                      "type": "boolean"
+                    },
+                    "maxItems": 4
+                  },
+                  "reset_assert_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 500
+                  },
+                  "reset_recovery_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "bus_instance_id",
+                  "width",
+                  "height",
+                  "offset_x",
+                  "offset_y",
+                  "rotation",
+                  "cs",
+                  "dc",
+                  "reset",
+                  "backlight",
+                  "busy",
+                  "reset_active_high",
+                  "busy_active_high",
+                  "backlight_active_high",
+                  "power_pins",
+                  "power_active_high",
+                  "reset_assert_ms",
+                  "reset_recovery_ms"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "reset": {
+                            "const": -1
+                          },
+                          "reset_assert_ms": {
+                            "const": 0
+                          },
+                          "reset_recovery_ms": {
+                            "const": 0
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "reset": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "reset_assert_ms": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "reset_recovery_ms": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              "bindings": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              }
+            },
+            "required": [
+              "instance_id",
+              "chip",
+              "compatible",
+              "config_type",
+              "config_version",
+              "config"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "instance_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "chip": {
+                "type": "object",
+                "properties": {
+                  "vendor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  }
+                },
+                "required": [
+                  "vendor",
+                  "model",
+                  "revision"
+                ],
+                "additionalProperties": false
+              },
+              "compatible": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "config_type": {
+                "const": "touch.i2c"
+              },
+              "config_version": {
+                "const": 1
+              },
+              "config": {
+                "type": "object",
+                "properties": {
+                  "bus_instance_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096
+                  },
+                  "address": {
+                    "type": "integer",
+                    "minimum": 8,
+                    "maximum": 119
+                  },
+                  "reset": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 48
+                  },
+                  "irq": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 48
+                  },
+                  "reset_active_high": {
+                    "type": "boolean"
+                  },
+                  "irq_active_high": {
+                    "type": "boolean"
+                  },
+                  "irq_pull_up": {
+                    "type": "boolean"
+                  },
+                  "reset_assert_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 500
+                  },
+                  "reset_recovery_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "bus_instance_id",
+                  "width",
+                  "height",
+                  "address",
+                  "reset",
+                  "irq",
+                  "reset_active_high",
+                  "irq_active_high",
+                  "irq_pull_up",
+                  "reset_assert_ms",
+                  "reset_recovery_ms"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "reset": {
+                            "const": -1
+                          },
+                          "reset_assert_ms": {
+                            "const": 0
+                          },
+                          "reset_recovery_ms": {
+                            "const": 0
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "reset": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "reset_assert_ms": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "reset_recovery_ms": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              "bindings": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              }
+            },
+            "required": [
+              "instance_id",
+              "chip",
+              "compatible",
+              "config_type",
+              "config_version",
+              "config"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "instance_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "chip": {
+                "type": "object",
+                "properties": {
+                  "vendor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  }
+                },
+                "required": [
+                  "vendor",
+                  "model",
+                  "revision"
+                ],
+                "additionalProperties": false
+              },
+              "compatible": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "config_type": {
+                "const": "storage.sd-spi"
+              },
+              "config_version": {
+                "const": 1
+              },
+              "config": {
+                "type": "object",
+                "properties": {
+                  "bus_instance_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "cs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 48
+                  },
+                  "detect": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 48
+                  },
+                  "write_protect": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 48
+                  },
+                  "detect_active_high": {
+                    "type": "boolean"
+                  },
+                  "write_protect_active_high": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "bus_instance_id",
+                  "cs",
+                  "detect",
+                  "write_protect",
+                  "detect_active_high",
+                  "write_protect_active_high"
+                ],
+                "additionalProperties": false
+              },
+              "bindings": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              }
+            },
+            "required": [
+              "instance_id",
+              "chip",
+              "compatible",
+              "config_type",
+              "config_version",
+              "config"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "instance_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "chip": {
+                "type": "object",
+                "properties": {
+                  "vendor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  }
+                },
+                "required": [
+                  "vendor",
+                  "model",
+                  "revision"
+                ],
+                "additionalProperties": false
+              },
+              "compatible": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 96
+              },
+              "config_type": {
+                "const": "radio.integrated"
+              },
+              "config_version": {
+                "const": 1
+              },
+              "config": {
+                "type": "object",
+                "properties": {
+                  "unit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  },
+                  "features": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3
+                  }
+                },
+                "required": [
+                  "unit",
+                  "features"
+                ],
+                "additionalProperties": false
+              },
+              "bindings": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              }
+            },
+            "required": [
+              "instance_id",
+              "chip",
+              "compatible",
+              "config_type",
+              "config_version",
+              "config"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "maxItems": 64,
+      "minItems": 1
+    }
+  },
+  "required": [
+    "schema",
+    "schema_version",
+    "board_id",
+    "revision",
+    "buses",
+    "devices"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:riscrte:board-hardware:1"
+}

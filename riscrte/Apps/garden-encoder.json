@@ -1,0 +1,15 @@
+{
+  "type": "application",
+  "id": "garden-encoder",
+  "version": "0.1.0",
+  "min_firmware_version": "1.3.49",
+  "display_name": "Garden Encoder",
+  "file_name": "garden-encoder.elf",
+  "icon": "solid:f1de",
+  "category": ["Garden"],
+  "requires": [
+    {"capability": "input.quadrature", "api": 1},
+    {"capability": "input.button", "api": 1}
+  ],
+  "status": "not-hardware-qualified"
+}

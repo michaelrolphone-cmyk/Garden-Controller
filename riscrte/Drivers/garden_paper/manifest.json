@@ -1,0 +1,22 @@
+{
+  "type": "driver",
+  "id": "garden-paper",
+  "version": "0.1.2",
+  "driver_abi": 2,
+  "architecture": "xtensa-esp32s3",
+  "file_name": "driver.elf",
+  "requires": [
+    {
+      "capability": "platform.board",
+      "api": 2
+    }
+  ],
+  "provides": [
+    {
+      "capability": "hardware.catalog",
+      "api": 1
+    }
+  ],
+  "status": "contract-tested-runtime-backfill-required",
+  "hardware_manifest": "hardware.json"
+}

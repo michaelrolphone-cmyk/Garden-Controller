@@ -1,0 +1,40 @@
+{
+  "type": "driver",
+  "id": "buzzer",
+  "version": "0.1.2",
+  "driver_abi": 2,
+  "architecture": "xtensa-esp32s3",
+  "file_name": "driver.elf",
+  "requires": [
+    {
+      "capability": "platform.gpio",
+      "api": 1
+    },
+    {
+      "capability": "platform.clock",
+      "api": 1
+    },
+    {
+      "capability": "hardware.device",
+      "api": 1
+    }
+  ],
+  "provides": [
+    {
+      "capability": "sound.buzzer",
+      "api": 1
+    }
+  ],
+  "status": "contract-tested-runtime-backfill-required",
+  "notes": "See riscrte/CAPABILITY_BACKFILL.md for contracts, board authorization and integration prerequisites.",
+  "hardware_compatibility": [
+    {
+      "compatible": "generic,pulse-buzzer",
+      "revisions": [
+        "unspecified"
+      ],
+      "config_type": "gpio.bank",
+      "config_version": 1
+    }
+  ]
+}

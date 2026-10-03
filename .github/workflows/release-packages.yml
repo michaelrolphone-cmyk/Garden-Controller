@@ -1,0 +1,62 @@
+name: Garden package release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "app-garden-relay-v*"
+      - "app-garden-encoder-v*"
+      - "driver-*-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the ESP32-S3 app toolchain
+        run: |
+          python -m pip install platformio==6.1.19
+          pio pkg install --global --tool "espressif/toolchain-xtensa-esp32s3@8.4.0+2021r2-patch5"
+      - name: Fetch firmware app headers
+        run: git clone --depth 1 https://github.com/michaelrolphone-cmyk/T5S3-Reader.git third_party/T5S3-Reader
+      - name: Physical hardware manifest fixtures
+        run: python scripts/test_hardware_manifests.py
+      - name: Host capability contract fixtures
+        run: python scripts/test_contracts.py
+      - name: Build app and driver ELFs
+        run: python scripts/build_packages.py
+      - name: Verify package identities and contents
+        run: python scripts/check_packages.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: garden-rte-packages
+          path: |
+            dist/release-packages
+            dist/release-app-packages
+            dist/release-index.json
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: garden-rte-packages
+          path: dist
+      - name: Publish the tag asset and refresh release-index
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python scripts/publish_release.py
