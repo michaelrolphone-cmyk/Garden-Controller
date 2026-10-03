@@ -1,22 +1,53 @@
-#include "PanelApi.h"
-#include "../../sdk/RiscProviderV2.h"
-typedef struct { bool (*transfer)(uint8_t cs, const uint8_t *bytes, uint16_t len, bool data); void (*write)(uint8_t pin, bool level); } panel_port_t;
-static bool running, have_profile, have_port;
-static panel_profile_t profile;
-static panel_port_t port;
-static uint16_t pixel;
-static uint32_t dirty;
-bool panel_bind_port(const panel_port_t *next) { if (running || !next || !next->transfer || !next->write) return false; port = *next; have_port = true; return true; }
-bool panel_bind_profile(const panel_profile_t *next) { if (running || !next || !next->width || !next->height) return false; profile = *next; have_profile = true; return true; }
-static uint16_t width(void *c) { (void)c; return running ? profile.width : 0; }
-static uint16_t height(void *c) { (void)c; return running ? profile.height : 0; }
-static bool set_pixel(void *c, uint16_t x, uint16_t y, uint16_t rgb565) { (void)c; if (!running || x >= profile.width || y >= profile.height) return false; pixel = rgb565; dirty++; return true; }
-static bool fill(void *c, uint16_t rgb565) { (void)c; if (!running) return false; pixel = rgb565; dirty = (uint32_t)profile.width * profile.height; return true; }
-static bool flush(void *c) { (void)c; if (!running || !dirty) return false; uint8_t bytes[2] = { (uint8_t)(pixel >> 8), (uint8_t)pixel }; bool ok = port.transfer(profile.cs, bytes, 2, true); if (ok) dirty = 0; return ok; }
-static bool set_backlight(void *c, uint8_t percent) { (void)c; if (!running || percent > 100) return false; port.write(profile.backlight, percent > 0); return true; }
-static const panel_api_v1 api = { PANEL_API_V1, sizeof(panel_api_v1), NULL, width, height, set_pixel, fill, flush, set_backlight };
-static bool start(const risc_provider_dependency_v1 *d, size_t n) { (void)d; if (running || n || !have_profile || !have_port) return false; running = true; dirty = 0; return true; }
-static bool quiesce(void) { if (running) port.write(profile.backlight, false); return true; }
-static void stop(void) { (void)quiesce(); running = false; }
-static const risc_driver_v2 driver = { RISC_PROVIDER_DRIVER_ABI_V2, sizeof(risc_driver_v2), "panel", "display.output", PANEL_API_V1, &api, start, stop, quiesce };
-__attribute__((visibility("default"))) const risc_driver_v2 *t5_driver_get(uint32_t abi) { return abi == RISC_PROVIDER_DRIVER_ABI_V2 ? &driver : NULL; }
+#include "../common/spi.h"
+#include "init_registers.h"
+#define WIDTH 240u
+#define HEIGHT 240u
+#define STRIDE 480u
+#define FORMAT RISC_DISPLAY_FORMAT_RGB565
+#define DISPLAY_FLAGS (RISC_DISPLAY_INFO_ASYNC_PRESENT|RISC_DISPLAY_INFO_BRIGHTNESS)
+#define DISPLAY_ID "panel"
+static bool hw_start(const risc_provider_dependency_v1 *d,size_t n) {
+    if (!spi_dependencies(d,n) || garden_board(d,n)!=GARDEN_BOARD_DIAL) return false;
+    if (!gpio_output(1) || !gpio_output(2) || !gpio_output(3) || !gpio_output(14) || !gpio_output(46)) return false;
+    gpio_write(1,true); gpio_write(2,true);
+    if (!spi->claim(spi->context,10,11,-1,9,&spi_claim) || !spi_claim) return false;
+    gpio_write(14,false); timer->sleep_ms(timer->context,200);
+    gpio_write(14,true); timer->sleep_ms(timer->context,200);
+    for (size_t i=0;i<sizeof(init_registers)/sizeof(init_registers[0]);i++) {
+        if (!display_command(3,init_registers[i].command,init_registers[i].bytes,init_registers[i].count)) return false;
+        timer->sleep_ms(timer->context,1);
+    }
+    if (!display_command(3,0x11,NULL,0)) return false;
+    timer->sleep_ms(timer->context,120);
+    if (!display_command(3,0x29,NULL,0)) return false;
+    timer->sleep_ms(timer->context,20);
+    return !io_fault;
+}
+static void hw_submit(void) {}
+static bool hw_row(uint32_t y,const uint8_t *pixels) {
+    uint8_t x[4]={0,0,0,239},row[4]={0,(uint8_t)y,0,(uint8_t)y},wire[480];
+    /* Canonical RGB565 is native-endian; GC9A01 wire order is MSB first. */
+    for (size_t i=0;i<480;i+=2) { uint16_t v; memcpy(&v,pixels+i,2); wire[i]=(uint8_t)(v>>8); wire[i+1]=(uint8_t)v; }
+    if (!spi_begin(10000000)) return false;
+    uint8_t commands[]={0x2a,0x2b,0x2c};
+    const uint8_t *data[]={x,row,wire}; const size_t sizes[]={4,4,sizeof(wire)};
+    bool ok=true;
+    for (size_t i=0;i<3 && ok;i++) {
+        gpio_write(3,false); ok=!io_fault && spi->exchange(spi->context,spi_claim,&commands[i],NULL,1);
+        if (ok) { gpio_write(3,true); ok=!io_fault && spi->exchange(spi->context,spi_claim,data[i],NULL,sizes[i]); }
+    }
+    return spi_end() && ok;
+}
+static int hw_finish(void) { return 1; }
+static bool hw_brightness(uint16_t level,uint16_t maximum) { return gpio->pwm(gpio->context,pins[46],1000,level,maximum); }
+static bool hw_stop(void) {
+    io_fault=false;
+    if (pins[46]) gpio_write(46,false);
+    if (pins[14]) gpio_write(14,false);
+    if (pins[1]) gpio_write(1,false);
+    if (pins[2]) gpio_write(2,false);
+    if (io_fault || !spi_release()) return false;
+    for (uint8_t p=0;p<49;p++) gpio_release(p);
+    return gpio_clean();
+}
+#include "../common/display.h"

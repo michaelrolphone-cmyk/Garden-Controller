@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ARCH = "xtensa-esp32s3"
 APPS = ("garden-relay", "garden-encoder")
-DRIVERS = ("relay", "buzzer", "button", "garden-encoder", "led", "pixel", "panel", "touch", "epaper", "storage", "wifi")
+DRIVERS = tuple(sorted(p.parent.name for p in (ROOT / "riscrte/Drivers").glob("*/manifest.json")))
 
 
 def sha256(data: bytes) -> str:
@@ -44,7 +44,7 @@ def compile_elf(gcc: str, sources: list[Path], output: Path, app: bool, includes
     cmd = [
         gcc, "-std=c11", "-Os", "-fPIC", "-mtext-section-literals", "-mlongcalls",
         "-fvisibility=hidden", "-nostdlib", "-nostartfiles", "-shared",
-        "-DGARDEN_RTE_TARGET_ESP32S3",
+        "-Wall", "-Wextra",
         f"-I{ROOT / 'riscrte/sdk'}",
         f"-I{ROOT / 'riscrte/include'}",
         *[f"-I{path}" for path in includes],
@@ -58,8 +58,15 @@ def compile_elf(gcc: str, sources: list[Path], output: Path, app: bool, includes
         check=True, capture_output=True, text=True,
     ).stdout
     required = "app_main" if app else "t5_driver_get"
-    if required not in symbols:
+    if not any(required == line.split()[-1] and " UND " not in line for line in symbols.splitlines() if line.split()):
         raise SystemExit(f"{output} does not export {required}")
+
+    if not app:
+        undefined = {line.split()[-1] for line in symbols.splitlines()
+                     if " UND " in line and len(line.split()) >= 8}
+        unexpected = undefined - {"memcpy", "memset", "memcmp", "strcmp", "strlen", "strncpy"}
+        if unexpected:
+            raise SystemExit(f"{output}: unexpected driver imports: {sorted(unexpected)}")
 
 
 def stored_zip(members: list[tuple[str, bytes]]) -> bytes:
@@ -126,22 +133,26 @@ def write_package(kind: str, source: dict, files: dict[str, bytes], out_dir: Pat
     }
 
 
-def build(gcc: str, firmware_include: Path) -> None:
+def build(gcc: str, firmware_include: Path, drivers_only: bool = False) -> None:
     rows = []
     driver_dir = ROOT / "dist/release-packages"
     app_dir = ROOT / "dist/release-app-packages"
     includes = [firmware_include, ROOT / "riscrte/Drivers"]
+    seen_ids = set()
     for name in DRIVERS:
         source_dir = ROOT / "riscrte/Drivers" / name
         manifest_path = source_dir / "manifest.json"
         if not manifest_path.exists():
-            continue
+            raise SystemExit(f"Missing manifest: {manifest_path}")
         source = load_json(manifest_path)
+        if source.get("file_name") != "driver.elf" or source["id"] in seen_ids:
+            raise SystemExit(f"Invalid artifact or duplicate package ID: {manifest_path}")
+        seen_ids.add(source["id"])
         elf = driver_dir / name / "driver.elf"
         compile_elf(gcc, [source_dir / "driver.c"], elf, False, includes)
         rows.append(write_package("driver", source, {"driver.elf": elf.read_bytes()}, driver_dir))
-    policy = ROOT / "riscrte/garden_policy.c"
-    for name in APPS:
+    policy = ROOT / "riscrte/include/garden_policy.c"
+    for name in (() if drivers_only else APPS):
         source = load_json(ROOT / "riscrte/Apps" / f"{name}.json")
         elf = app_dir / name / source["file_name"]
         compile_elf(gcc, [ROOT / "riscrte/Apps" / f"{name}.c", policy], elf, True, includes)
@@ -163,12 +174,13 @@ def build(gcc: str, firmware_include: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gcc", default="")
+    parser.add_argument("--drivers-only", action="store_true")
     parser.add_argument("--firmware-include", default=os.environ.get("FIRMWARE_INCLUDE", ""))
     args = parser.parse_args()
     include = Path(args.firmware_include) if args.firmware_include else ROOT / "third_party/T5S3-Reader/lib/NativeApps/include"
-    if not (include / "T5AppApi.h").exists():
+    if not args.drivers_only and not (include / "T5AppApi.h").exists():
         raise SystemExit(f"missing T5AppApi.h in {include}. Checkout T5S3-Reader headers there or pass --firmware-include.")
-    build(args.gcc or find_gcc(), include)
+    build(args.gcc or find_gcc(), include, args.drivers_only)
 
 
 if __name__ == "__main__":

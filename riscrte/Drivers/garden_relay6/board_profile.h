@@ -1,7 +1,7 @@
 #pragma once
 /* Castle Hills 6-channel board profile for the generic relay driver.
- * Pins from mcu/relay/GardenSimpleRelay6Core.inc. Indicator GPIO 21 is owned
- * by the LED profile, not this contact bank. */
+ * Pins from mcu/relay/GardenSimpleRelay6Core.inc. GPIO 21 is the buzzer; GPIO 38 is an addressable pixel,
+ * neither is a relay or plain LED. */
 #include "../relay/RelayApi.h"
 static inline relay_profile_t relay_profile_castle_hills(void) {
     relay_profile_t profile = {

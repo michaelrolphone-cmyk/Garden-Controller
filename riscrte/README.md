@@ -1,19 +1,23 @@
-# Garden Controller packages
+# Garden RiscRTE packages
 
-Two installable apps, one per board:
-
-- `garden-relay` requires `switch.relay@1` and `sound.buzzer@1`.
-- `garden-encoder` requires `input.quadrature@1` and `input.button@1`.
-
-Build:
+Portable ESP32-S3 ELF drivers cover the relay board, CrowPanel dial and paper
+board. See [capability contracts, hardware coverage and runtime prerequisites](CAPABILITY_BACKFILL.md).
+These packages require proposed low-level capabilities that Reader does not yet
+provide. They fail admission when dependencies are unavailable. No hardware
+qualification or full Garden app migration is claimed.
 
 ```
-python -m pip install platformio==6.1.19
-pio pkg install --global --tool espressif/toolchain-xtensa-esp32s3@8.4.0+2021r2-patch5
-git clone --depth 1 https://github.com/michaelrolphone-cmyk/T5S3-Reader.git third_party/T5S3-Reader
-python scripts/build_packages.py
+python3 scripts/test_contracts.py
+python3 scripts/build_packages.py --drivers-only
+python3 scripts/check_packages.py
 ```
 
-Release tags match T5S3-Reader: `app-garden-relay-v0.1.0`, `app-garden-encoder-v0.1.0`, `driver-relay-v0.1.0`. Assets are `application-{id}-{version}-xtensa-esp32s3.rte.zip` and `driver-{id}-{version}-xtensa-esp32s3.rte.zip`. The workflow updates `release-index.json` on the `release-index` branch. Point the app store and driver manager at `michaelrolphone-cmyk/Garden-Controller`.
+Install the ESP32-S3 Xtensa toolchain or set `XTENSA_GCC` to its gcc binary.
+Driver-only builds need no ESP-IDF SDK because drivers import capability tables,
+not GPIO/controller firmware functions. To additionally build the unchanged demo
+apps, pass `--firmware-include PATH/TO/T5S3-Reader/lib/NativeApps/include` and omit
+`--drivers-only`. The demos must not be used as on-device tests: one starts a
+watering zone automatically.
 
-Not hardware-qualified. The workflow produces the ELFs; this branch does not contain built packages.
+One `.rte.zip` is built per manifest ID, with ABI metadata and generic catalogs.
+No release, flash, serial session or launcher is part of this work.

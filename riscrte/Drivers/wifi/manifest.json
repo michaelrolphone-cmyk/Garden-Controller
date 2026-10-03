@@ -1,12 +1,22 @@
 {
   "type": "driver",
   "id": "wifi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "driver_abi": 2,
   "architecture": "xtensa-esp32s3",
   "file_name": "driver.elf",
-  "requires": [],
-  "provides": [{"capability": "net.wifi", "api": 1}],
-  "status": "not-hardware-qualified",
-  "notes": "Added capability. No station-link capability exists in RiscRTE-Drivers."
+  "requires": [
+    {
+      "capability": "platform.radio",
+      "api": 1
+    }
+  ],
+  "provides": [
+    {
+      "capability": "net.wifi",
+      "api": 1
+    }
+  ],
+  "status": "contract-tested-runtime-backfill-required",
+  "notes": "See riscrte/CAPABILITY_BACKFILL.md for contracts, board authorization and integration prerequisites."
 }

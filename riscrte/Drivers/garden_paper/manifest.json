@@ -1,0 +1,21 @@
+{
+  "type": "driver",
+  "id": "garden-paper",
+  "version": "0.1.0",
+  "driver_abi": 2,
+  "architecture": "xtensa-esp32s3",
+  "file_name": "driver.elf",
+  "requires": [
+    {
+      "capability": "platform.board",
+      "api": 1
+    }
+  ],
+  "provides": [
+    {
+      "capability": "board.garden",
+      "api": 1
+    }
+  ],
+  "status": "contract-tested-runtime-backfill-required"
+}

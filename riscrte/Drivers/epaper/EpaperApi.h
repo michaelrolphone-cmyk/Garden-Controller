@@ -4,13 +4,5 @@
 #include <stdint.h>
 #define EPAPER_API_V1 1u
 typedef struct { uint16_t width, height; uint8_t mosi, sclk, cs, dc, rst, busy; } epaper_profile_t;
-typedef struct {
-    uint32_t api_version;
-    uint32_t struct_size;
-    void *context;
-    uint16_t (*width)(void *context);
-    uint16_t (*height)(void *context);
-    bool (*set_pixel)(void *context, uint16_t x, uint16_t y, bool black);
-    bool (*refresh)(void *context);
-    bool (*busy)(void *context);
-} epaper_api_v1;
+#include "RiscDisplayOutputV1.h"
+typedef risc_display_output_api_v1 epaper_api_v1;

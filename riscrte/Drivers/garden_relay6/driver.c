@@ -1,3 +1,3 @@
-/* Retired as a capability provider. The generic relay driver owns switch.relay.
- * This board is a pin profile: board_profile.h. */
-#include "board_profile.h"
+#define BOARD_ID 1u
+#define DRIVER_ID "garden-relay6"
+#include "../common/board.h"
