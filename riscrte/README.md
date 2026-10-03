@@ -17,7 +17,7 @@ Install the ESP32-S3 Xtensa toolchain or set `XTENSA_GCC` to its gcc binary.
 Driver-only builds need no ESP-IDF SDK because drivers import capability tables,
 not GPIO/controller firmware functions. To additionally build the unchanged demo
 apps, pass `--firmware-include PATH/TO/T5S3-Reader/lib/NativeApps/include` and omit
-`--drivers-only`. The encoder demo is unchanged and must not be used for an
+`--drivers-only`. The encoder demo is unchanged and must not be used as an
 on-device test. The relay boot app does not energize a channel; see
 [the relay install note](../docs/RELAY_INSTALL.md).
 

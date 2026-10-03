@@ -42,7 +42,9 @@ def main():
         "-shared", "-Wl,--hash-style=sysv", "-Wl,--version-script=" + str(exports_map),
         "-Wall", "-Wextra", "-Werror",
         "-I" + str(APP),
+        "-I" + str(ROOT / "riscrte/include"),
         str(APP / "garden-relay.c"),
+        str(ROOT / "riscrte/include/garden_policy.c"),
         "-lgcc", "-o", str(elf),
     ], check=True)
     readelf = cc.removesuffix("gcc") + "readelf"
@@ -69,8 +71,7 @@ def main():
         "size_bytes": elf.stat().st_size,
         "sha256": hashlib.sha256(elf.read_bytes()).hexdigest(),
         "imports": sorted(imports),
-        "linked_objects": ["riscrte/Apps/garden-relay.c"],
-        "omitted": ["riscrte/include/garden_policy.c"],
+        "linked_objects": ["riscrte/Apps/garden-relay.c", "riscrte/include/garden_policy.c"],
     }, indent=2) + "\n")
     print(f"default.elf {manifest['version']}: target ABI, entry and import checks passed")
 

@@ -28,17 +28,16 @@ python3 scripts/build_relay_deployment.py
 python3 scripts/verify_relay_deployment.py dist/relay-deployments/garden-relay-0.1.0-castle-hills-relay6.zip
 ```
 
-`build_relay_app.py` compiles only `riscrte/Apps/garden-relay.c`. It does not
-link `garden_policy`. The app calls `risc_runtime_get_api(1)`, acquires
-`switch.relay` api 1 and `sound.buzzer` api 1 with `instance_id` 0, health-checks,
-and then yields. It stays resident because returning from `app_main` idles the
-runtime. Grants are released only when a grant or the health check fails. It
-does not call `garden_policy_start_zone` and does not energize a relay, the
-master valve, or the buzzer.
+`build_relay_app.py` compiles `riscrte/Apps/garden-relay.c` and
+`riscrte/include/garden_policy.c`. The app is the existing relay program.
+It acquires `switch.relay` and `sound.buzzer`, starts zone 1 for the default
+run, chirps the buzzer, and ticks the same policy once a second. The runtime
+call is `risc_runtime_get_api` instead of the old T5 app and provider calls.
+There is no button poll on this runtime, so the loop does not watch for Back.
 
 The authoritative ZIP is
-`dist/relay-deployments/garden-relay-0.1.0-castle-hills-relay6.zip`. Its `store/`
-tree is the boot store:
+`dist/relay-deployments/garden-relay-0.1.0-castle-hills-relay6.zip`. Its
+`store/` tree is the boot store:
 
 - `boot.json`: `default.elf`, drivers for relay instance 1 and buzzer instance 2,
   and grants for `switch.relay` api 1 instance 1 and `sound.buzzer` api 1 instance 2.
@@ -52,7 +51,8 @@ tree is the boot store:
 
 The garden-relay6 catalog ELF, the pixel driver, and the Wi-Fi driver are not
 in `boot.json`. This firmware slice does not provide the waveform output or
-`platform.radio` those drivers need, and it does not boot through the catalog ELF.
+`platform.radio` those drivers need, and it does not boot through the catalog
+ELF.
 
 `packages/` keeps the original relay and buzzer `.rte.zip` files.
 `deployment-record.json` records the size and SHA-256 of every payload, the
