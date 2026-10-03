@@ -27,7 +27,7 @@ int main(void) {
     mock_gpio.struct_size=old_gpio_size;mock_board.struct_size=old_board_size;mock_radio.struct_size=old_radio_size;
     assert(d->start(mock_deps,MOCK_N));assert(!d->start(mock_deps,MOCK_N));
 #if TEST_ID==1
-    const relay_api_v1 *a=d->capability;assert(a->channel_count(NULL)==6);assert(a->set_mask(NULL,0x25));assert(mock_levels[1] && mock_levels[41] && mock_levels[46]);assert(!a->set_channel(NULL,6,true));
+    const relay_api_v1 *a=d->capability;assert(a->channel_count(NULL)==6);assert(a->chirp(NULL));assert(a->set_mask(NULL,0x25));assert(mock_levels[1] && mock_levels[41] && mock_levels[46]);assert(!a->set_channel(NULL,6,true));
     mock_write_fail=true;assert(!d->quiesce());assert(mock_pins[1]);mock_write_fail=false;
 #elif TEST_ID==2
     const buzzer_api_v1 *a=d->capability;assert(a->chirp(NULL,0));assert(mock_wave_count==16);assert(!a->pattern(NULL,0,65535,65535,255));

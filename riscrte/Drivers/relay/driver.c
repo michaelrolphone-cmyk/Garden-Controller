@@ -1,5 +1,7 @@
 /* switch.relay@1. Board authorization and exclusive GPIO claims are mandatory. */
 #include "RelayApi.h"
+#include "../buzzer/BuzzerApi.h"
+static const buzzer_api_v1 *sounder;
 #include "../../sdk/RiscProviderV2.h"
 #include "../common/gpio.h"
 typedef struct { bool (*claim_output)(uint8_t pin); void (*write)(uint8_t pin, bool level); void (*release)(uint8_t pin); void (*delay_us)(uint32_t us); } relay_gpio_port_t;
@@ -13,12 +15,14 @@ static uint8_t channel_count(void *c) { (void)c; return running ? profile.channe
 static bool set_channel(void *c, uint8_t channel, bool closed) { (void)c; if (!running || channel >= profile.channel_count) return false; if (closed) mask |= (uint8_t)(1u << channel); else mask &= (uint8_t)~(1u << channel); write_channel(channel, closed); return !io_fault; }
 static bool set_mask(void *c, uint8_t next) { (void)c; if (!running) return false; uint8_t allowed = profile.channel_count == 8 ? 0xffu : (uint8_t)((1u << profile.channel_count) - 1u); apply_mask(next & allowed); return !io_fault; }
 static uint8_t get_mask(void *c) { (void)c; return running ? mask : 0; }
-/* Legacy optional sound entry. No buzzer is owned by this contact provider. */
-static bool chirp(void *c) { (void)c; return false; }
+/* Compatibility method delegates to the independent sound capability. */
+static bool chirp(void *c) { (void)c; return running && sounder->chirp(sounder->context,0); }
 static const relay_api_v1 api = { RELAY_API_V1, sizeof(relay_api_v1), NULL, channel_count, set_channel, set_mask, get_mask, chirp };
 static bool start(const risc_provider_dependency_v1 *deps, size_t count) {
     if (running || !gpio_dependencies(deps,count)) return false;
     if (garden_board(deps,count) != GARDEN_BOARD_RELAY) return false;
+    sounder=garden_dependency(deps,count,"sound.buzzer",sizeof(*sounder));
+    if (!sounder || !sounder->chirp || !sounder->channel_count || !sounder->channel_count(sounder->context)) return false;
     port = (relay_gpio_port_t){gpio_output, gpio_write, gpio_release, gpio_delay}; have_port = true;
     { relay_profile_t field = { .channel_count = 6, .pins = {1, 2, 41, 42, 45, 46}, .active_high = true, .indicator_pin = -1 }; if (!relay_bind_profile(&field)) return false; }
 

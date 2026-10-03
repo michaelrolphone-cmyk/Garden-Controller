@@ -8,6 +8,7 @@
 #include "RiscStorageVolumeV1.h"
 #include "RiscTouchV1.h"
 #include "button/ButtonApi.h"
+#include "buzzer/BuzzerApi.h"
 static uint64_t mock_now,mock_serial=100;
 static uint64_t mock_pins[49];
 static bool mock_levels[49],mock_release_fail,mock_write_fail;
@@ -56,9 +57,10 @@ static risc_platform_clock_api_v1 mock_clock={1,sizeof(mock_clock),NULL,mock_tim
 static garden_spi_v1 mock_spi={1,sizeof(mock_spi),NULL,mock_spi_claim,mock_spi_begin,mock_exchange,mock_spi_end,mock_idle,mock_spi_release};
 static risc_i2c_bus_api_v1 mock_i2c={1,sizeof(mock_i2c),NULL,mock_i2c_claim,mock_i2c_transfer,mock_i2c_release};
 static garden_radio_v1 mock_radio={1,sizeof(mock_radio),NULL,mock_radio_claim,mock_join,mock_radio_status,mock_radio_leave,mock_radio_release,mock_ap_start,mock_radio_leave,mock_addresses};
+static buzzer_api_v1 mock_buzzer={.api_version=1,.struct_size=sizeof(mock_buzzer),.channel_count=mock_button_count,.chirp=mock_button};
 static button_api_v1 mock_buttons={1,sizeof(mock_buttons),NULL,mock_button_count,mock_button_poll,mock_button,mock_button,mock_button};
 static risc_provider_dependency_v1 mock_deps[]={
  {"board.garden",1,&mock_board},{"platform.board",1,&mock_board},{"platform.gpio",1,&mock_gpio},{"platform.clock",1,&mock_clock},
- {"spi.bus",1,&mock_spi},{"i2c.bus",1,&mock_i2c},{"platform.radio",1,&mock_radio},{"input.button",1,&mock_buttons}
+ {"spi.bus",1,&mock_spi},{"i2c.bus",1,&mock_i2c},{"platform.radio",1,&mock_radio},{"input.button",1,&mock_buttons},{"sound.buzzer",1,&mock_buzzer}
 };
 #define MOCK_N (sizeof(mock_deps)/sizeof(mock_deps[0]))

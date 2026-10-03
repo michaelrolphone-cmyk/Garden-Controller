@@ -17,6 +17,10 @@
     {
       "capability": "platform.clock",
       "api": 1
+    },
+    {
+      "capability": "sound.buzzer",
+      "api": 1
     }
   ],
   "provides": [

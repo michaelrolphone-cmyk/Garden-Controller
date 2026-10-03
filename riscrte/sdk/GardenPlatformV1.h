@@ -14,6 +14,7 @@ typedef struct { uint32_t api_version, struct_size, board; } garden_board_v1;
 typedef struct {
     uint32_t api_version, struct_size; void *context;
     bool (*claim)(void *, uint8_t pin, bool output, bool initial, bool pullup, uint64_t *token);
+    /* Cancels PWM on this token before forcing a static level. */
     bool (*write)(void *, uint64_t token, bool level);
     bool (*read)(void *, uint64_t token, bool *level);
     bool (*pwm)(void *, uint64_t token, uint32_t hz, uint16_t duty, uint16_t maximum);

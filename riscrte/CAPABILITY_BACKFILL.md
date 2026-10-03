@@ -86,6 +86,8 @@ accepted, matched by string/version, with duplicate matching IDs rejected.
 | `i2c.bus@1` | canonical `risc_i2c_bus_api_v1` | Existing ABI; backfill board configuration and ownership for dial SDA6/SCL7. Claim address0x15, atomic write-register/read with repeated START, total20ms timeout; no Wire import in touch ELF |
 | `platform.clock@1` | canonical `risc_platform_clock_api_v1` | Existing ABI; monotonic milliseconds, sleep_ms genuinely yields. Required for bounded waits and pulse/reset timing |
 
+GPIO write must synchronously disable any PWM on that token before applying a
+static level; waveform takes over that same token and finishes LOW.
 Raw GPIO methods except waveform must complete within1ms; the radio methods
 except drain must complete within20ms. Long radio work is asynchronous inside its
 provider. SPI begin's timeout includes lock admission and the entire held
@@ -106,8 +108,8 @@ quiescence. Legacy private bind functions in the simple GPIO sources remain for
 source compatibility; production start replaces them with authorized dependency
 tables and the fixed board profile. The loader never needs to call them.
 
-The generic relay's legacy optional `chirp` returns false: relay owns no sounder;
-use `sound.buzzer`. Encoder's legacy button methods now forward to its declared
+The relay's legacy `chirp` delegates to its declared `sound.buzzer@1` dependency;
+it never claims the buzzer pin itself. Encoder's legacy button methods forward to its declared
 `input.button@1` dependency, instead of always returning false. Buttons debounce
 at30ms, suppress click after1.5s long press, and consume pending events. Caller
 polling must be frequent enough to observe real edges; no GPIO ISR integration is
@@ -225,3 +227,13 @@ not CI or runtime-loading evidence.
 5. Port full Garden application services separately. Driver compatibility does
    not complete schedules, web UI, networking/persistence, default.elf selection
    or a PaperSpace launcher.
+
+## Concurrent storage extension coordination
+
+The Reader/X4 storage task supplied its planned prefix-compatible
+`risc_storage_volume_api_v1_ext`: base table followed by file_open/seek/info/sync,
+dir_rewind/close_checked, handle_error, mkdir and rename. Garden does not duplicate
+that extension: it advertises exactly sizeof(risc_storage_volume_api_v1), so
+consumers must not call extension members on Garden. The incoming proposal keeps
+base exclusive-create/abort semantics unchanged. Its final upstream SHA was not
+yet provided; adopting its extra operations is not claimed by this change.
