@@ -9,12 +9,13 @@ def require(value,message):
     if not value:raise ValueError(message)
 def shape(value,schema):
     """Validate the vocabulary used by our checked-in schema (no external refs)."""
+    for constraint in schema.get('allOf',[]):shape(value,constraint)
     if 'oneOf' in schema:
         matches=0
         for option in schema['oneOf']:
             try:shape(value,option);matches+=1
             except ValueError:pass
-        require(matches==1,'config schema mismatch');return
+        require(matches==1,'config schema mismatch')
     if 'const' in schema:require(type(value) is type(schema['const']) and value==schema['const'],'constant')
     if 'enum' in schema:require(value in schema['enum'],'enum')
     kind=schema.get('type')
@@ -48,12 +49,16 @@ def validate(data,manifests):
     for bus in data['buses']:
         i=bus['instance_id'];require(type(i) is int and i>0 and i not in buses,'duplicate bus')
         buses[i]=bus;require(bus['kind'] in ('spi','i2c') and bus['mode']==0 and 0<=bus['controller']<=3,'bus config')
+        namespace=bus.get('controller_namespace')
+        require(namespace in ('esp32.peripheral','riscrte.logical'),'explicit controller namespace required for mapping')
+        physical=bus.get('physical_controller',bus['controller'])
+        require(namespace!='esp32.peripheral' or physical==bus['controller'],'physical controller identity mismatch')
         required=('sclk','mosi','miso') if bus['kind']=='spi' else ('sda','scl')
         require(set(bus['pins'])==set(required),'bus pins')
         require(0<bus['frequency_hz']<=(10000000 if bus['kind']=='spi' else 400000),'bus frequency')
         for name,pin in bus['pins'].items():
             require(pin>=0 or name=='miso','missing required bus pin');claim(pin,f'bus {i}')
-        for other in list(buses.values())[:-1]:require((other['kind'],other['controller'])!=(bus['kind'],bus['controller']),'one descriptor per controller')
+        for other in list(buses.values())[:-1]:require((other['kind'],other.get('physical_controller',other['controller']))!=(bus['kind'],physical),'one descriptor per controller')
     for dev in data['devices']:
         i=dev['instance_id'];require(type(i) is int and i>0 and i not in devices,'duplicate device instance')
         devices[i]=dev
@@ -81,7 +86,8 @@ def validate(data,manifests):
         elif typ=='radio.integrated':require(0<=c['unit']<=3 and 1<=c['features']<=3,'radio config')
         else:raise ValueError('unsupported config type')
         if typ=='gpio.bank':require(all(p>=0 for p in pins),'missing required device pin')
-        elif typ=='display.spi':require(all(c[k]>=0 for k in ('cs','dc','reset')) and all(p>=0 for p in c['power_pins']),'missing display pin')
+        elif typ=='display.spi':require(all(c[k]>=0 for k in ('cs','dc')) and all(p>=0 for p in c['power_pins']),'missing display pin')
+        elif typ=='touch.i2c':require(c['irq']>=0,'missing touch IRQ')
         elif typ=='storage.sd-spi':require(c['cs']>=0,'missing storage CS')
         else:require(all(p>=0 for p in pins),'missing required device pin')
         for pin in pins:claim(pin,f'device {i}')

@@ -84,3 +84,42 @@ I2C devices may share a bus with distinct addresses; SPI devices share controlle
 signals with distinct CS. Configuration and scoped context must agree, otherwise
 raw claim fails. A future Driver Manager may filter by compatibility metadata,
 but filtering never replaces runtime validation or authorization.
+
+
+## Additive v1 clarification after Garden 1f7fb82
+
+Provenance: Garden `1f7fb82efec08cf8751057d84e707f20be2fb7a5` is the original
+shared-envelope snapshot used by T-Watch. This follow-up reconciles its local
+absent-reset clarification with the canonical Garden schema. C field order,
+types, sizes, ABI/config versions and existing controller numbers are unchanged.
+
+For display.spi and touch.i2c, reset=-1 explicitly means the physical device has
+no reset GPIO. Both reset_assert_ms and reset_recovery_ms MUST then be0. A present
+reset pin (0..48) requires BOTH delays in1..500ms. All three fields remain required;
+absence is never inferred from a missing field. Other pins/timings keep their
+existing constraints. This is schema expressiveness, not a promise of chip
+support: Garden GC9A01/GDEY075T7/CST816D drivers still reject absent reset before
+I/O; a driver that supports reset-less hardware must skip reset operations.
+
+Each bus's board-port metadata declares controller_namespace using these exact
+strings:
+
+- `esp32.peripheral`: controller is the legacy physical ESP32 peripheral number.
+  Existing Garden SPI2 and I2C0 values stay unchanged. Optional physical_controller
+  must equal controller if supplied; this is not the ESP-IDF spi_host_device_t
+  enum and must be translated explicitly by the ESP32 port.
+- `riscrte.logical`: controller is a port-local logical index. physical_controller
+  is required and explicitly maps it to an ESP32 physical peripheral number.
+  Thus logical SPI0 may map to physical2, and logical SPI1 to physical3, only when
+  those exact mappings are declared. No implied +2 arithmetic is permitted.
+
+The additive JSON fields do not alter risc_hw_bus_v1: controller retains the
+original number; the loader uses namespace/mapping to select the scoped bus-owner
+context and validate claims. Arbitration keys use physical controller and bus
+kind, so logical aliases cannot create independent owners of one peripheral.
+Garden's catalogs now declare the namespace explicitly. Older v1 catalogs without
+it remain structurally readable but are not activation-ready: an explicit
+owner-authorized port mapping is required; never infer a namespace from board_id,
+chip/package name or a coincidental numeric value. Garden's mapping validator
+rejects an omitted namespace. Future non-ESP32 physical namespaces require their
+own registered semantics; these strings do not authorize unrelated CPU ports.

@@ -206,7 +206,7 @@ I/O and close results. No fixture proves all corrupt-media or power-cut cases.
 Changed existing package versions: relay/buzzer/button/led/pixel/wifi
 0.1.0→0.1.2; garden-encoder/panel/epaper/storage/touch0.1.1→0.1.3;
 garden-relay6 0.1.3→0.1.5. New board packages garden-crowpanel and garden-paper are
-0.1.1. No remote `driver-*` tags were present when checked; no release was made.
+0.1.2. No remote `driver-*` tags were present when checked; no release was made.
 App versions and app behavior are unchanged.
 
 Build discovery uses source manifest directories, preserving `garden_encoder`
@@ -278,3 +278,8 @@ base exclusive-create/abort semantics unchanged. The published header was inspec
 Its helper admits the extension only at API1 and struct_size>=sizeof(ext).
 Garden keeps the original byte-identical base SDK and does not claim those extra
 operations. No Reader source was changed.
+
+The additive shared v1 reset/controller clarification is specified in
+[the mapping contract](hardware/CONTRACT.md#additive-v1-clarification-after-garden-1f7fb82).
+Garden chip reset requirements remain unchanged. CrowPanel/paper catalog package
+versions advance to0.1.2 for explicit esp32.peripheral bus namespace metadata.

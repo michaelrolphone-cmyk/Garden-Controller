@@ -14,7 +14,8 @@
         "sclk": 5,
         "mosi": 4,
         "miso": 19
-      }
+      },
+      "controller_namespace": "esp32.peripheral"
     }
   ],
   "devices": [

@@ -28,3 +28,30 @@ try:validate(case,manifests)
 except ValueError:pass
 else:raise AssertionError('duplicate chip GPIO ownership admitted')
 print('10 invalid catalog cases and independent same-chip resource mapping passed')
+# Shared schema permits physically absent reset without inventing reset pulses.
+for typ in ('display.spi','touch.i2c'):
+    index=next(i for i,d in enumerate(board['devices']) if d['config_type']==typ)
+    case=deepcopy(board);config=case['devices'][index]['config']
+    config.update(reset=-1,reset_assert_ms=0,reset_recovery_ms=0)
+    validate(case,manifests)
+    for field,value in [('reset_assert_ms',1),('reset_recovery_ms',1),('reset',-2)]:
+        invalid=deepcopy(case);invalid['devices'][index]['config'][field]=value
+        try:validate(invalid,manifests)
+        except ValueError:pass
+        else:raise AssertionError('invalid absent reset admitted')
+    for field,value in [('reset_assert_ms',0),('reset_recovery_ms',0),('reset_assert_ms',501)]:
+        rejected(lambda b,f=field,v=value,i=index:b['devices'][i]['config'].__setitem__(f,v))
+    rejected(lambda b,i=index:b['devices'][i]['config'].pop('reset_assert_ms'))
+# Logical indices preserve their value and explicitly map to a physical owner.
+case=deepcopy(board);case['buses'][0].update(controller_namespace='riscrte.logical',controller=0,physical_controller=2)
+validate(case,manifests)
+rejected(lambda b:b['buses'][0].pop('controller_namespace'))
+rejected(lambda b:b['buses'][0].update(controller_namespace='unknown'))
+rejected(lambda b:b['buses'][0].update(controller_namespace='riscrte.logical'))
+rejected(lambda b:b['buses'][0].update(physical_controller=3))
+# Two different logical controller IDs cannot alias one physical SPI peripheral.
+case=deepcopy(case);alias=deepcopy(case['buses'][0]);alias.update(instance_id=100,controller=1);alias['pins']={'sclk':8,'mosi':12,'miso':15};case['buses'].append(alias)
+try:validate(case,manifests)
+except ValueError:pass
+else:raise AssertionError('physical controller alias admitted')
+print('absent/present reset boundaries and explicit controller namespace mapping passed')

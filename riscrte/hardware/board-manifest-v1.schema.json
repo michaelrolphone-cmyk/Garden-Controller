@@ -79,6 +79,17 @@
             },
             "required": [],
             "additionalProperties": false
+          },
+          "controller_namespace": {
+            "enum": [
+              "esp32.peripheral",
+              "riscrte.logical"
+            ]
+          },
+          "physical_controller": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
           }
         },
         "required": [
@@ -89,7 +100,33 @@
           "mode",
           "pins"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "controller_namespace": {
+                    "const": "esp32.peripheral"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "controller_namespace": {
+                    "const": "riscrte.logical"
+                  }
+                },
+                "required": [
+                  "controller_namespace",
+                  "physical_controller"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "maxItems": 8
     },
@@ -501,7 +538,7 @@
                   },
                   "reset": {
                     "type": "integer",
-                    "minimum": 0,
+                    "minimum": -1,
                     "maximum": 48
                   },
                   "backlight": {
@@ -542,12 +579,12 @@
                   },
                   "reset_assert_ms": {
                     "type": "integer",
-                    "minimum": 1,
+                    "minimum": 0,
                     "maximum": 500
                   },
                   "reset_recovery_ms": {
                     "type": "integer",
-                    "minimum": 1,
+                    "minimum": 0,
                     "maximum": 500
                   }
                 },
@@ -571,7 +608,44 @@
                   "reset_assert_ms",
                   "reset_recovery_ms"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "reset": {
+                            "const": -1
+                          },
+                          "reset_assert_ms": {
+                            "const": 0
+                          },
+                          "reset_recovery_ms": {
+                            "const": 0
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "reset": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "reset_assert_ms": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "reset_recovery_ms": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               "bindings": {
                 "type": "object",
@@ -662,7 +736,7 @@
                   },
                   "reset": {
                     "type": "integer",
-                    "minimum": 0,
+                    "minimum": -1,
                     "maximum": 48
                   },
                   "irq": {
@@ -681,12 +755,12 @@
                   },
                   "reset_assert_ms": {
                     "type": "integer",
-                    "minimum": 1,
+                    "minimum": 0,
                     "maximum": 500
                   },
                   "reset_recovery_ms": {
                     "type": "integer",
-                    "minimum": 1,
+                    "minimum": 0,
                     "maximum": 500
                   }
                 },
@@ -703,7 +777,44 @@
                   "reset_assert_ms",
                   "reset_recovery_ms"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "reset": {
+                            "const": -1
+                          },
+                          "reset_assert_ms": {
+                            "const": 0
+                          },
+                          "reset_recovery_ms": {
+                            "const": 0
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "reset": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "reset_assert_ms": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "reset_recovery_ms": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               "bindings": {
                 "type": "object",

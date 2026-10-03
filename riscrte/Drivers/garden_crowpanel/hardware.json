@@ -14,7 +14,8 @@
         "sclk": 10,
         "mosi": 11,
         "miso": -1
-      }
+      },
+      "controller_namespace": "esp32.peripheral"
     },
     {
       "instance_id": 2,
@@ -25,7 +26,8 @@
       "pins": {
         "sda": 6,
         "scl": 7
-      }
+      },
+      "controller_namespace": "esp32.peripheral"
     }
   ],
   "devices": [

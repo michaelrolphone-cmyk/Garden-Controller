@@ -95,6 +95,13 @@ int main(void) {
 #endif
     assert(d->quiesce());assert(mock_levels[fixture.pins[0]]);fixture.active_high=1;
 #endif
+#if TEST_ID==7 || TEST_ID==8 || TEST_ID==10
+    /* Shared schema permits absent reset; these chips still require a pin. */
+    int16_t saved_reset=fixture.reset;uint32_t saved_assert=fixture.reset_assert_ms,saved_recovery=fixture.reset_recovery_ms;
+    fixture.reset=-1;fixture.reset_assert_ms=fixture.reset_recovery_ms=0;
+    assert(!d->start(mock_deps,MOCK_N));assert(d->quiesce());
+    fixture.reset=saved_reset;fixture.reset_assert_ms=saved_assert;fixture.reset_recovery_ms=saved_recovery;
+#endif
 #if TEST_ID==1
     fixture.pins[1]=fixture.pins[0];assert(!d->start(mock_deps,MOCK_N));fixture.pins[1]=P(2);
     fixture.pins[0]=-1;assert(!d->start(mock_deps,MOCK_N));fixture.pins[0]=P(1);

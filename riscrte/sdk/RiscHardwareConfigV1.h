@@ -51,6 +51,8 @@ typedef struct {
     uint32_t struct_size;
     uint32_t kind;
     uint64_t instance_id;
+    /* Preserve declared controller number; board-port JSON controller_namespace
+     * and optional physical_controller select the scoped runtime bus owner. */
     uint32_t controller;
     uint32_t frequency_hz;
     uint8_t mode;
@@ -83,7 +85,9 @@ typedef struct {
     uint8_t count, order;
 } risc_hw_pixel_v1;
 /* config_type = display.spi; controller-specific dimensions must be admitted
- * by that chip driver. -1 means absent optional backlight/busy/power pin. */
+ * by that chip driver. reset=-1 means physically absent: both reset delays
+ * must be zero; present reset requires each delay in 1..500ms. Chip drivers
+ * may reject absence. -1 also means absent optional backlight/busy/power pin. */
 typedef struct {
     uint32_t struct_size;
     risc_hw_bus_v1 bus;
@@ -96,7 +100,7 @@ typedef struct {
     uint8_t power_active_high[RISC_HW_MAX_POWER_PINS];
     uint32_t reset_assert_ms, reset_recovery_ms;
 } risc_hw_spi_display_v1;
-/* config_type = touch.i2c */
+/* config_type = touch.i2c; reset absence/timing semantics match display.spi. */
 typedef struct {
     uint32_t struct_size;
     risc_hw_bus_v1 bus;
